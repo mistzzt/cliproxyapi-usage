@@ -1,0 +1,66 @@
+@use '../styles/tokens' as *;
+
+.page {
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  padding: $space-5;
+  box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    padding: $space-4;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $space-4;
+  margin-bottom: $space-5;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+  color: var(--color-text);
+  font-family: $font-stack;
+}
+
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: $space-5;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $space-5;
+
+  @media (min-width: 768px) {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+.content {
+  min-width: 0;
+}
+
+.errorBanner {
+  background: var(--color-error-surface);
+  border: 1px solid var(--color-error);
+  border-radius: $radius-md;
+  padding: $space-4 $space-5;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  margin-bottom: $space-4;
+
+  ul {
+    margin: $space-2 0 0;
+    padding-left: $space-5;
+  }
+}

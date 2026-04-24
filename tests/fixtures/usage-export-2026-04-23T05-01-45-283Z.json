@@ -1,0 +1,2004 @@
+{
+  "version": 1,
+  "exported_at": "2026-04-23T05:01:45.283056642Z",
+  "usage": {
+    "total_requests": 138,
+    "success_count": 128,
+    "failure_count": 10,
+    "total_tokens": 260225,
+    "apis": {
+      "sk-REDACTED000000000000000000000000": {
+        "total_requests": 138,
+        "total_tokens": 260225,
+        "models": {
+          "gemini-2.5-flash": {
+            "total_requests": 75,
+            "total_tokens": 101009,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:28:20.825867424-05:00",
+                "latency_ms": 2124,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 803,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 114,
+                  "cached_tokens": 0,
+                  "total_tokens": 926
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:23.171437398-05:00",
+                "latency_ms": 12376,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:38.449838644-05:00",
+                "latency_ms": 7652,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 951,
+                  "output_tokens": 148,
+                  "reasoning_tokens": 1231,
+                  "cached_tokens": 0,
+                  "total_tokens": 2330
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:29:22.601117412-05:00",
+                "latency_ms": 43830,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1037,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 191,
+                  "cached_tokens": 0,
+                  "total_tokens": 1237
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:30:06.638453493-05:00",
+                "latency_ms": 12185,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:30:19.800879993-05:00",
+                "latency_ms": 1508,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:30:22.350756118-05:00",
+                "latency_ms": 1518,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:30:25.904072019-05:00",
+                "latency_ms": 5193,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 989,
+                  "output_tokens": 99,
+                  "reasoning_tokens": 496,
+                  "cached_tokens": 0,
+                  "total_tokens": 1584
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:31:07.019578671-05:00",
+                "latency_ms": 2408,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1948,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 153,
+                  "cached_tokens": 0,
+                  "total_tokens": 2115
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:31:09.595336395-05:00",
+                "latency_ms": 1274,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:31:52.644560769-05:00",
+                "latency_ms": 2623,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2212,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 212,
+                  "cached_tokens": 0,
+                  "total_tokens": 2438
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:31:55.40731546-05:00",
+                "latency_ms": 2490,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:31:12.866956089-05:00",
+                "latency_ms": 50189,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 535,
+                  "output_tokens": 126,
+                  "reasoning_tokens": 768,
+                  "cached_tokens": 0,
+                  "total_tokens": 1429
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:03.12586603-05:00",
+                "latency_ms": 888,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:31:59.520984575-05:00",
+                "latency_ms": 8273,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 770,
+                  "output_tokens": 132,
+                  "reasoning_tokens": 1169,
+                  "cached_tokens": 0,
+                  "total_tokens": 2071
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:05.050398337-05:00",
+                "latency_ms": 4008,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 590,
+                  "output_tokens": 11,
+                  "reasoning_tokens": 579,
+                  "cached_tokens": 0,
+                  "total_tokens": 1180
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:09.128654326-05:00",
+                "latency_ms": 8851,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 479,
+                  "output_tokens": 52,
+                  "reasoning_tokens": 1664,
+                  "cached_tokens": 0,
+                  "total_tokens": 2195
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:20.143594747-05:00",
+                "latency_ms": 9853,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2222,
+                  "output_tokens": 53,
+                  "reasoning_tokens": 1323,
+                  "cached_tokens": 0,
+                  "total_tokens": 3598
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:30.188447617-05:00",
+                "latency_ms": 2347,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:32:34.257985546-05:00",
+                "latency_ms": 7466,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 807,
+                  "output_tokens": 144,
+                  "reasoning_tokens": 987,
+                  "cached_tokens": 0,
+                  "total_tokens": 1938
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:33:20.897463598-05:00",
+                "latency_ms": 7278,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1968,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 1133,
+                  "cached_tokens": 0,
+                  "total_tokens": 3110
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:33:28.344757616-05:00",
+                "latency_ms": 862,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:33:30.312879963-05:00",
+                "latency_ms": 4175,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 460,
+                  "output_tokens": 100,
+                  "reasoning_tokens": 552,
+                  "cached_tokens": 0,
+                  "total_tokens": 1112
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:33:34.557912478-05:00",
+                "latency_ms": 4440,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 515,
+                  "output_tokens": 12,
+                  "reasoning_tokens": 728,
+                  "cached_tokens": 0,
+                  "total_tokens": 1255
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:33:39.058570786-05:00",
+                "latency_ms": 778,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:33:40.870298447-05:00",
+                "latency_ms": 4921,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 404,
+                  "output_tokens": 51,
+                  "reasoning_tokens": 644,
+                  "cached_tokens": 0,
+                  "total_tokens": 1099
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:34:19.376374668-05:00",
+                "latency_ms": 42666,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2139,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 255,
+                  "cached_tokens": 2026,
+                  "total_tokens": 2408
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:35:02.197321973-05:00",
+                "latency_ms": 2154,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:35:06.370890459-05:00",
+                "latency_ms": 8082,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 798,
+                  "output_tokens": 110,
+                  "reasoning_tokens": 1142,
+                  "cached_tokens": 0,
+                  "total_tokens": 2050
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:35:47.09899992-05:00",
+                "latency_ms": 844,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:35:48.980679453-05:00",
+                "latency_ms": 2428,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2480,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 270,
+                  "cached_tokens": 0,
+                  "total_tokens": 2759
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:35:51.567859402-05:00",
+                "latency_ms": 2572,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:35:56.978256794-05:00",
+                "latency_ms": 6777,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1296,
+                  "output_tokens": 107,
+                  "reasoning_tokens": 969,
+                  "cached_tokens": 0,
+                  "total_tokens": 2372
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:36:23.290763972-05:00",
+                "latency_ms": 4870,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1316,
+                  "output_tokens": 38,
+                  "reasoning_tokens": 577,
+                  "cached_tokens": 0,
+                  "total_tokens": 1931
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:36:28.326062206-05:00",
+                "latency_ms": 2060,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:36:33.352455086-05:00",
+                "latency_ms": 1379,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:36:35.76548505-05:00",
+                "latency_ms": 9948,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1528,
+                  "output_tokens": 109,
+                  "reasoning_tokens": 1389,
+                  "cached_tokens": 0,
+                  "total_tokens": 3026
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:37:30.277308341-05:00",
+                "latency_ms": 5213,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1588,
+                  "output_tokens": 52,
+                  "reasoning_tokens": 574,
+                  "cached_tokens": 0,
+                  "total_tokens": 2214
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:37:35.692674331-05:00",
+                "latency_ms": 2655,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:37:41.540541699-05:00",
+                "latency_ms": 8824,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1739,
+                  "output_tokens": 122,
+                  "reasoning_tokens": 1098,
+                  "cached_tokens": 0,
+                  "total_tokens": 2959
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:38:06.690575408-05:00",
+                "latency_ms": 3493,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1809,
+                  "output_tokens": 63,
+                  "reasoning_tokens": 384,
+                  "cached_tokens": 0,
+                  "total_tokens": 2256
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:38:10.392167223-05:00",
+                "latency_ms": 2759,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:38:15.702766664-05:00",
+                "latency_ms": 12266,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1686,
+                  "output_tokens": 116,
+                  "reasoning_tokens": 1651,
+                  "cached_tokens": 0,
+                  "total_tokens": 3453
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:39:16.728352889-05:00",
+                "latency_ms": 7834,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1956,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 1200,
+                  "cached_tokens": 0,
+                  "total_tokens": 3165
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:39:24.723951804-05:00",
+                "latency_ms": 949,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:39:26.206072611-05:00",
+                "latency_ms": 7613,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 370,
+                  "output_tokens": 87,
+                  "reasoning_tokens": 1341,
+                  "cached_tokens": 0,
+                  "total_tokens": 1798
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:39:33.884227706-05:00",
+                "latency_ms": 2638,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 425,
+                  "output_tokens": 13,
+                  "reasoning_tokens": 255,
+                  "cached_tokens": 0,
+                  "total_tokens": 693
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:39:36.593073946-05:00",
+                "latency_ms": 5363,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 314,
+                  "output_tokens": 22,
+                  "reasoning_tokens": 779,
+                  "cached_tokens": 0,
+                  "total_tokens": 1115
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:40:37.100904384-05:00",
+                "latency_ms": 939,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:40:39.075400664-05:00",
+                "latency_ms": 6411,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2060,
+                  "output_tokens": 51,
+                  "reasoning_tokens": 828,
+                  "cached_tokens": 0,
+                  "total_tokens": 2939
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:40:45.675312132-05:00",
+                "latency_ms": 2208,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:40:48.415653947-05:00",
+                "latency_ms": 11122,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 503,
+                  "output_tokens": 125,
+                  "reasoning_tokens": 1844,
+                  "cached_tokens": 0,
+                  "total_tokens": 2472
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:41:19.67704369-05:00",
+                "latency_ms": 4942,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2174,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 443,
+                  "cached_tokens": 0,
+                  "total_tokens": 2626
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:41:24.755070659-05:00",
+                "latency_ms": 1867,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:41:27.218182041-05:00",
+                "latency_ms": 43606,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 608,
+                  "output_tokens": 120,
+                  "reasoning_tokens": 712,
+                  "cached_tokens": 0,
+                  "total_tokens": 1440
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:42:41.05366039-05:00",
+                "latency_ms": 2534,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2060,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 240,
+                  "cached_tokens": 0,
+                  "total_tokens": 2309
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:42:43.74853203-05:00",
+                "latency_ms": 1906,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:42:47.328609232-05:00",
+                "latency_ms": 795,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:42:49.161862798-05:00",
+                "latency_ms": 39959,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 631,
+                  "output_tokens": 148,
+                  "reasoning_tokens": 1324,
+                  "cached_tokens": 0,
+                  "total_tokens": 2103
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:43:22.972186018-05:00",
+                "latency_ms": 32068,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2333,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 204,
+                  "cached_tokens": 2028,
+                  "total_tokens": 2551
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:43:55.202009971-05:00",
+                "latency_ms": 1911,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:43:58.536566303-05:00",
+                "latency_ms": 9268,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 846,
+                  "output_tokens": 113,
+                  "reasoning_tokens": 1319,
+                  "cached_tokens": 0,
+                  "total_tokens": 2278
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:25.749881165-05:00",
+                "latency_ms": 1933,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2343,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 107,
+                  "cached_tokens": 0,
+                  "total_tokens": 2464
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:27.837470555-05:00",
+                "latency_ms": 1952,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:30.814058521-05:00",
+                "latency_ms": 10140,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 830,
+                  "output_tokens": 102,
+                  "reasoning_tokens": 1420,
+                  "cached_tokens": 0,
+                  "total_tokens": 2352
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:49.732402848-05:00",
+                "latency_ms": 1952,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2359,
+                  "output_tokens": 14,
+                  "reasoning_tokens": 148,
+                  "cached_tokens": 0,
+                  "total_tokens": 2521
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:51.849920027-05:00",
+                "latency_ms": 1980,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:44:56.07786188-05:00",
+                "latency_ms": 9070,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1058,
+                  "output_tokens": 122,
+                  "reasoning_tokens": 1456,
+                  "cached_tokens": 0,
+                  "total_tokens": 2636
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:47:16.724647915-05:00",
+                "latency_ms": 1483,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1115,
+                  "output_tokens": 9,
+                  "reasoning_tokens": 77,
+                  "cached_tokens": 0,
+                  "total_tokens": 1201
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:47:18.350943653-05:00",
+                "latency_ms": 2545,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:47:23.56542452-05:00",
+                "latency_ms": 8525,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1334,
+                  "output_tokens": 140,
+                  "reasoning_tokens": 1176,
+                  "cached_tokens": 0,
+                  "total_tokens": 2650
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:50:32.96124509-05:00",
+                "latency_ms": 10291,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:50:48.94015567-05:00",
+                "latency_ms": 11682,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1885,
+                  "output_tokens": 179,
+                  "reasoning_tokens": 1087,
+                  "cached_tokens": 0,
+                  "total_tokens": 3151
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:52:32.229994034-05:00",
+                "latency_ms": 14382,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:52:55.204438226-05:00",
+                "latency_ms": 29803,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 2117,
+                  "output_tokens": 158,
+                  "reasoning_tokens": 1225,
+                  "cached_tokens": 0,
+                  "total_tokens": 3500
+                },
+                "failed": false
+              }
+            ]
+          },
+          "gemini-3-flash-preview": {
+            "total_requests": 2,
+            "total_tokens": 2776,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:54:55.553486294-05:00",
+                "latency_ms": 14174,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:55:15.805802264-05:00",
+                "latency_ms": 6190,
+                "source": "gemini-user-1@example.com-account-1.json",
+                "auth_index": "0000000000000001",
+                "tokens": {
+                  "input_tokens": 1906,
+                  "output_tokens": 132,
+                  "reasoning_tokens": 738,
+                  "cached_tokens": 0,
+                  "total_tokens": 2776
+                },
+                "failed": false
+              }
+            ]
+          },
+          "gemini-3.1-flash-lite": {
+            "total_requests": 1,
+            "total_tokens": 0,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:54:26.366729673-05:00",
+                "latency_ms": 11677,
+                "source": "gemini-user-2@example.com",
+                "auth_index": "0000000000000002",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              }
+            ]
+          },
+          "gpt-5.2": {
+            "total_requests": 22,
+            "total_tokens": 51126,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:20:07.101367963-05:00",
+                "latency_ms": 4295,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1888,
+                  "output_tokens": 208,
+                  "reasoning_tokens": 128,
+                  "cached_tokens": 0,
+                  "total_tokens": 2096
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:11.540514054-05:00",
+                "latency_ms": 8055,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 0
+                },
+                "failed": true
+              },
+              {
+                "timestamp": "2026-04-22T20:20:21.169370661-05:00",
+                "latency_ms": 4857,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1888,
+                  "output_tokens": 133,
+                  "reasoning_tokens": 57,
+                  "cached_tokens": 1664,
+                  "total_tokens": 2021
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:26.179235871-05:00",
+                "latency_ms": 7486,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2627,
+                  "output_tokens": 373,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 1664,
+                  "total_tokens": 3000
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:33.707066517-05:00",
+                "latency_ms": 5896,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 648,
+                  "output_tokens": 292,
+                  "reasoning_tokens": 106,
+                  "cached_tokens": 0,
+                  "total_tokens": 940
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:39.635933837-05:00",
+                "latency_ms": 1603,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 707,
+                  "output_tokens": 49,
+                  "reasoning_tokens": 30,
+                  "cached_tokens": 0,
+                  "total_tokens": 756
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:41.263678967-05:00",
+                "latency_ms": 9192,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 599,
+                  "output_tokens": 202,
+                  "reasoning_tokens": 188,
+                  "cached_tokens": 0,
+                  "total_tokens": 801
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:57.198813619-05:00",
+                "latency_ms": 2332,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2282,
+                  "output_tokens": 84,
+                  "reasoning_tokens": 71,
+                  "cached_tokens": 1664,
+                  "total_tokens": 2366
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:20:59.620339242-05:00",
+                "latency_ms": 9270,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3292,
+                  "output_tokens": 361,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 0,
+                  "total_tokens": 3653
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:21:08.950921728-05:00",
+                "latency_ms": 4803,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1030,
+                  "output_tokens": 232,
+                  "reasoning_tokens": 45,
+                  "cached_tokens": 0,
+                  "total_tokens": 1262
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:21:24.933240836-05:00",
+                "latency_ms": 3899,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2658,
+                  "output_tokens": 182,
+                  "reasoning_tokens": 112,
+                  "cached_tokens": 2048,
+                  "total_tokens": 2840
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:21:28.985698702-05:00",
+                "latency_ms": 7317,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3893,
+                  "output_tokens": 337,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 1536,
+                  "total_tokens": 4230
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:21:36.376150948-05:00",
+                "latency_ms": 5689,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1382,
+                  "output_tokens": 286,
+                  "reasoning_tokens": 76,
+                  "cached_tokens": 0,
+                  "total_tokens": 1668
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:22:14.543929775-05:00",
+                "latency_ms": 5598,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2654,
+                  "output_tokens": 197,
+                  "reasoning_tokens": 113,
+                  "cached_tokens": 2432,
+                  "total_tokens": 2851
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:22:20.312377771-05:00",
+                "latency_ms": 8045,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3759,
+                  "output_tokens": 369,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 2560,
+                  "total_tokens": 4128
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:22:28.410821052-05:00",
+                "latency_ms": 4577,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1155,
+                  "output_tokens": 222,
+                  "reasoning_tokens": 43,
+                  "cached_tokens": 0,
+                  "total_tokens": 1377
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:23:16.835686762-05:00",
+                "latency_ms": 2953,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2654,
+                  "output_tokens": 124,
+                  "reasoning_tokens": 111,
+                  "cached_tokens": 2432,
+                  "total_tokens": 2778
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:23:19.880999086-05:00",
+                "latency_ms": 7176,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3889,
+                  "output_tokens": 347,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 2560,
+                  "total_tokens": 4236
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:23:27.121836341-05:00",
+                "latency_ms": 6742,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1117,
+                  "output_tokens": 335,
+                  "reasoning_tokens": 134,
+                  "cached_tokens": 0,
+                  "total_tokens": 1452
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:24:23.734262544-05:00",
+                "latency_ms": 6532,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2664,
+                  "output_tokens": 326,
+                  "reasoning_tokens": 232,
+                  "cached_tokens": 2432,
+                  "total_tokens": 2990
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:24:30.437894684-05:00",
+                "latency_ms": 7428,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3927,
+                  "output_tokens": 358,
+                  "reasoning_tokens": 0,
+                  "cached_tokens": 2560,
+                  "total_tokens": 4285
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:24:37.93547081-05:00",
+                "latency_ms": 5330,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1138,
+                  "output_tokens": 258,
+                  "reasoning_tokens": 80,
+                  "cached_tokens": 0,
+                  "total_tokens": 1396
+                },
+                "failed": false
+              }
+            ]
+          },
+          "gpt-5.3-codex": {
+            "total_requests": 3,
+            "total_tokens": 8277,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:24:49.155682367-05:00",
+                "latency_ms": 4257,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2664,
+                  "output_tokens": 167,
+                  "reasoning_tokens": 154,
+                  "cached_tokens": 0,
+                  "total_tokens": 2831
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:24:53.526759061-05:00",
+                "latency_ms": 10580,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3911,
+                  "output_tokens": 372,
+                  "reasoning_tokens": 272,
+                  "cached_tokens": 0,
+                  "total_tokens": 4283
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:25:04.176087007-05:00",
+                "latency_ms": 9021,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 877,
+                  "output_tokens": 286,
+                  "reasoning_tokens": 142,
+                  "cached_tokens": 0,
+                  "total_tokens": 1163
+                },
+                "failed": false
+              }
+            ]
+          },
+          "gpt-5.4": {
+            "total_requests": 32,
+            "total_tokens": 89006,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:16:08.582370572-05:00",
+                "latency_ms": 4561,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1887,
+                  "output_tokens": 126,
+                  "reasoning_tokens": 116,
+                  "cached_tokens": 0,
+                  "total_tokens": 2013
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:13.248321725-05:00",
+                "latency_ms": 6901,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2637,
+                  "output_tokens": 350,
+                  "reasoning_tokens": 203,
+                  "cached_tokens": 0,
+                  "total_tokens": 2987
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:20.202000415-05:00",
+                "latency_ms": 3229,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 419,
+                  "output_tokens": 150,
+                  "reasoning_tokens": 9,
+                  "cached_tokens": 0,
+                  "total_tokens": 569
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:23.466040693-05:00",
+                "latency_ms": 3259,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 478,
+                  "output_tokens": 58,
+                  "reasoning_tokens": 37,
+                  "cached_tokens": 0,
+                  "total_tokens": 536
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:26.753784556-05:00",
+                "latency_ms": 1481,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 370,
+                  "output_tokens": 41,
+                  "reasoning_tokens": 27,
+                  "cached_tokens": 0,
+                  "total_tokens": 411
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:54.648850248-05:00",
+                "latency_ms": 3030,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2056,
+                  "output_tokens": 133,
+                  "reasoning_tokens": 66,
+                  "cached_tokens": 1664,
+                  "total_tokens": 2189
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:16:57.865356777-05:00",
+                "latency_ms": 15977,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3361,
+                  "output_tokens": 397,
+                  "reasoning_tokens": 147,
+                  "cached_tokens": 1408,
+                  "total_tokens": 3758
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:17:13.922434225-05:00",
+                "latency_ms": 2735,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 692,
+                  "output_tokens": 125,
+                  "reasoning_tokens": 13,
+                  "cached_tokens": 0,
+                  "total_tokens": 817
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:17:25.677170667-05:00",
+                "latency_ms": 2202,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2324,
+                  "output_tokens": 66,
+                  "reasoning_tokens": 56,
+                  "cached_tokens": 1920,
+                  "total_tokens": 2390
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:17:27.975655502-05:00",
+                "latency_ms": 6361,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3639,
+                  "output_tokens": 289,
+                  "reasoning_tokens": 99,
+                  "cached_tokens": 0,
+                  "total_tokens": 3928
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:17:34.387072657-05:00",
+                "latency_ms": 2838,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 899,
+                  "output_tokens": 127,
+                  "reasoning_tokens": 9,
+                  "cached_tokens": 0,
+                  "total_tokens": 1026
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:10.290214209-05:00",
+                "latency_ms": 2778,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1423,
+                  "output_tokens": 124,
+                  "reasoning_tokens": 55,
+                  "cached_tokens": 0,
+                  "total_tokens": 1547
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:13.236223389-05:00",
+                "latency_ms": 12726,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 5096,
+                  "output_tokens": 593,
+                  "reasoning_tokens": 102,
+                  "cached_tokens": 0,
+                  "total_tokens": 5689
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:26.048306005-05:00",
+                "latency_ms": 3908,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1636,
+                  "output_tokens": 185,
+                  "reasoning_tokens": 75,
+                  "cached_tokens": 0,
+                  "total_tokens": 1821
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:31.585214691-05:00",
+                "latency_ms": 1589,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1704,
+                  "output_tokens": 39,
+                  "reasoning_tokens": 29,
+                  "cached_tokens": 0,
+                  "total_tokens": 1743
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:33.314036887-05:00",
+                "latency_ms": 5899,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 5572,
+                  "output_tokens": 262,
+                  "reasoning_tokens": 133,
+                  "cached_tokens": 2816,
+                  "total_tokens": 5834
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:18:39.274831022-05:00",
+                "latency_ms": 4138,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1474,
+                  "output_tokens": 119,
+                  "reasoning_tokens": 11,
+                  "cached_tokens": 0,
+                  "total_tokens": 1593
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:19:14.743737532-05:00",
+                "latency_ms": 3132,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1417,
+                  "output_tokens": 109,
+                  "reasoning_tokens": 99,
+                  "cached_tokens": 1280,
+                  "total_tokens": 1526
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:19:17.986957091-05:00",
+                "latency_ms": 9931,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 5063,
+                  "output_tokens": 492,
+                  "reasoning_tokens": 126,
+                  "cached_tokens": 0,
+                  "total_tokens": 5555
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:19:27.999338508-05:00",
+                "latency_ms": 2831,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1506,
+                  "output_tokens": 122,
+                  "reasoning_tokens": 11,
+                  "cached_tokens": 0,
+                  "total_tokens": 1628
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:26:58.204950824-05:00",
+                "latency_ms": 2554,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1160,
+                  "output_tokens": 98,
+                  "reasoning_tokens": 88,
+                  "cached_tokens": 0,
+                  "total_tokens": 1258
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:00.937238771-05:00",
+                "latency_ms": 10233,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 9002,
+                  "output_tokens": 273,
+                  "reasoning_tokens": 70,
+                  "cached_tokens": 0,
+                  "total_tokens": 9275
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:11.230805745-05:00",
+                "latency_ms": 4520,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 1119,
+                  "output_tokens": 164,
+                  "reasoning_tokens": 47,
+                  "cached_tokens": 0,
+                  "total_tokens": 1283
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:20.647196397-05:00",
+                "latency_ms": 2866,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 854,
+                  "output_tokens": 128,
+                  "reasoning_tokens": 74,
+                  "cached_tokens": 0,
+                  "total_tokens": 982
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:23.718450244-05:00",
+                "latency_ms": 10991,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 8492,
+                  "output_tokens": 343,
+                  "reasoning_tokens": 120,
+                  "cached_tokens": 6912,
+                  "total_tokens": 8835
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:34.782270514-05:00",
+                "latency_ms": 3764,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 803,
+                  "output_tokens": 180,
+                  "reasoning_tokens": 63,
+                  "cached_tokens": 0,
+                  "total_tokens": 983
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:49.917018215-05:00",
+                "latency_ms": 2857,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 854,
+                  "output_tokens": 119,
+                  "reasoning_tokens": 109,
+                  "cached_tokens": 0,
+                  "total_tokens": 973
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:27:52.947464182-05:00",
+                "latency_ms": 10193,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 8492,
+                  "output_tokens": 316,
+                  "reasoning_tokens": 90,
+                  "cached_tokens": 7040,
+                  "total_tokens": 8808
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:02.797726075-05:00",
+                "latency_ms": 3157,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2664,
+                  "output_tokens": 112,
+                  "reasoning_tokens": 102,
+                  "cached_tokens": 0,
+                  "total_tokens": 2776
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:03.207433927-05:00",
+                "latency_ms": 2897,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 806,
+                  "output_tokens": 124,
+                  "reasoning_tokens": 11,
+                  "cached_tokens": 0,
+                  "total_tokens": 930
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:06.060319622-05:00",
+                "latency_ms": 7460,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3911,
+                  "output_tokens": 293,
+                  "reasoning_tokens": 76,
+                  "cached_tokens": 0,
+                  "total_tokens": 4204
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:28:13.618386114-05:00",
+                "latency_ms": 3347,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 995,
+                  "output_tokens": 144,
+                  "reasoning_tokens": 12,
+                  "cached_tokens": 0,
+                  "total_tokens": 1139
+                },
+                "failed": false
+              }
+            ]
+          },
+          "gpt-5.4-mini": {
+            "total_requests": 3,
+            "total_tokens": 8031,
+            "details": [
+              {
+                "timestamp": "2026-04-22T20:25:40.313946876-05:00",
+                "latency_ms": 1310,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 2664,
+                  "output_tokens": 62,
+                  "reasoning_tokens": 52,
+                  "cached_tokens": 0,
+                  "total_tokens": 2726
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:25:41.728147449-05:00",
+                "latency_ms": 5524,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 3911,
+                  "output_tokens": 311,
+                  "reasoning_tokens": 207,
+                  "cached_tokens": 0,
+                  "total_tokens": 4222
+                },
+                "failed": false
+              },
+              {
+                "timestamp": "2026-04-22T20:25:47.388407598-05:00",
+                "latency_ms": 2438,
+                "source": "codex-user-1@example.com",
+                "auth_index": "0000000000000003",
+                "tokens": {
+                  "input_tokens": 881,
+                  "output_tokens": 202,
+                  "reasoning_tokens": 65,
+                  "cached_tokens": 0,
+                  "total_tokens": 1083
+                },
+                "failed": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    "requests_by_day": {
+      "2026-04-22": 138
+    },
+    "requests_by_hour": {
+      "20": 138
+    },
+    "tokens_by_day": {
+      "2026-04-22": 260225
+    },
+    "tokens_by_hour": {
+      "20": 260225
+    }
+  }
+}

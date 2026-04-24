@@ -1,0 +1,16 @@
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+
+.emptyText {
+  color: var(--color-text-muted, #888);
+  font-size: 0.875rem;
+}
+
+.chartArea {
+  position: relative;
+  height: 240px;
+}

@@ -1,0 +1,267 @@
+@use '../../styles/tokens' as *;
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  border-radius: $radius-md;
+  padding: $space-4;
+  box-sizing: border-box;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+
+  @media (min-width: 768px) {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+  }
+
+  // On mobile, hide the inline aside — content is in the drawer instead
+  @media (max-width: 768px) {
+    display: none;
+  }
+}
+
+.sidebarCollapsed {
+  width: 48px;
+  padding: $space-2;
+  align-items: center;
+  overflow: visible;
+}
+
+.headingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $space-4;
+}
+
+.heading {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.toggleButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--color-accent-hover);
+    color: var(--color-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
+
+.railIcon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-top: $space-2;
+  color: var(--color-text-muted);
+}
+
+.badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+  margin-bottom: $space-4;
+}
+
+.sectionLabel {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.modelSearch {
+  width: 100%;
+  box-sizing: border-box;
+  padding: $space-2 $space-3;
+  font-size: 13px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: $radius-sm;
+  outline: none;
+
+  &::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  &:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  }
+}
+
+.modelList {
+  display: flex;
+  flex-direction: column;
+  gap: $space-1;
+  overflow-y: auto;
+}
+
+.modelDivider {
+  height: 1px;
+  background: var(--color-border);
+  margin: $space-2 0;
+}
+
+.modelItem {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  padding: $space-2 $space-3;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  user-select: none;
+
+  &:hover:not(.modelItemDisabled) {
+    background: var(--color-accent-hover);
+  }
+}
+
+.modelItemDisabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.modelCheckbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-accent);
+  cursor: inherit;
+  flex-shrink: 0;
+}
+
+.modelName {
+  font-size: 13px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refreshSection {
+  margin-top: auto;
+  padding-top: $space-4;
+
+  > button {
+    width: 100%;
+  }
+}
+
+// ── Mobile drawer ────────────────────────────────────────────────────────────
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  z-index: 200;
+
+  // Bail out on desktop — stale mobileOpen state should never show a backdrop
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  max-width: 85vw;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  box-shadow: 4px 0 24px color-mix(in srgb, var(--color-overlay) 40%, transparent);
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  padding: $space-4;
+  box-sizing: border-box;
+  overflow-y: auto;
+
+  // On desktop, stale mobileOpen=true should be invisible
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $space-4;
+  flex-shrink: 0;
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--color-accent-hover);
+    color: var(--color-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}

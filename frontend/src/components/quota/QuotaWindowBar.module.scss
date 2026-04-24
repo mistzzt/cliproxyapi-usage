@@ -1,0 +1,47 @@
+@use '../../styles/tokens' as *;
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: $space-1;
+}
+
+.labelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: $space-2;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  height: 6px;
+  background: var(--color-border);
+  border-radius: $radius-sm;
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: $radius-sm;
+  transition: width 0.3s ease;
+  min-width: 0;
+}
+
+.resetLine {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}

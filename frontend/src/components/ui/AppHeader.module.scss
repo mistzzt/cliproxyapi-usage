@@ -1,0 +1,36 @@
+@use '../../styles/tokens' as *;
+
+.nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $space-5;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: $space-3;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+}
+
+.link {
+  font-family: $font-stack;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  padding: $space-1 $space-3;
+  border-radius: $radius-sm;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.active {
+  color: var(--color-accent);
+  font-weight: 600;
+}

@@ -1,0 +1,45 @@
+@use '../../styles/tokens' as *;
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $space-6;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: $space-3;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: $space-1;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: $radius-md;
+  padding: $space-3 $space-4;
+}
+
+.tileLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tileValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.valueError {
+  color: var(--color-error);
+}

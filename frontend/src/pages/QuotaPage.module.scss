@@ -1,0 +1,79 @@
+@use '../styles/tokens' as *;
+
+.page {
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  padding: $space-5;
+  box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    padding: $space-4;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $space-4;
+  margin-bottom: $space-5;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text);
+  font-family: $font-stack;
+}
+
+.banner {
+  padding: $space-3 $space-5;
+  border-radius: $radius-md;
+  font-size: 14px;
+  margin-bottom: $space-5;
+}
+
+.bannerError {
+  background: var(--color-error-surface);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+}
+
+.bannerInfo {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-text-muted);
+}
+
+.providers {
+  display: flex;
+  flex-direction: column;
+  gap: $space-6;
+}
+
+.providerSection {
+  display: flex;
+  flex-direction: column;
+  gap: $space-4;
+}
+
+.providerTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: $space-4;
+
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
+  }
+}

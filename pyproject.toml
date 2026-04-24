@@ -1,0 +1,46 @@
+[project]
+name = "cliproxy-usage"
+version = "0.1.0"
+description = "CLI proxy usage reporter"
+authors = [
+    { name = "Ziteng Wang", email = "z@wzt.me" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.14.0",
+    "uvicorn[standard]>=0.46.0",
+]
+
+[project.scripts]
+cliproxy-usage-collect = "cliproxy_usage.cli:_entry"
+cliproxy-usage-server = "cliproxy_usage_server.main:run"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["cliproxy_usage", "cliproxy_usage_server"]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.3",
+    "pytest>=9.0.3",
+    "ruff>=0.15.11",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+

@@ -1,0 +1,47 @@
+// Design tokens for the usage dashboard.
+// Colors are CSS custom properties so they can be themed at runtime.
+// Non-color tokens stay as SCSS variables — no runtime-switch benefit.
+
+:root {
+  --color-bg: #f6f7fb;
+  --color-surface: #ffffff;
+  --color-border: #e3e6ee;
+  --color-text: #1a1d27;
+  --color-text-muted: #5c6374;
+  --color-accent: #3b82f6;
+  --color-error: #dc2626;
+  --color-overlay: rgba(15, 17, 23, 0.45);
+
+  // Derived tokens used in 3+ places. Values are hand-picked per theme
+  // to preserve the semi-transparent feel against each background.
+  --color-accent-hover: rgba(59, 130, 246, 0.08);
+  --color-error-surface: rgba(220, 38, 38, 0.12);
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #0f1117;
+  --color-surface: #171923;
+  --color-border: #2a2f3a;
+  --color-text: #e6e8ef;
+  --color-text-muted: #8b92a3;
+  --color-accent: #6aa7ff;
+  --color-error: #ff6b6b;
+  --color-overlay: rgba(0, 0, 0, 0.45);
+
+  --color-accent-hover: rgba(106, 167, 255, 0.08);
+  --color-error-surface: rgba(255, 107, 107, 0.12);
+}
+
+$space-1: 4px;
+$space-2: 8px;
+$space-3: 12px;
+$space-4: 16px;
+$space-5: 24px;
+$space-6: 32px;
+
+$radius-sm: 4px;
+$radius-md: 8px;
+$radius-lg: 12px;
+
+$font-stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+$font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
