@@ -17,6 +17,7 @@ _ALL_ENVS = (
     "USAGE_PRICING_CACHE",
     "USAGE_PRICING_TTL_SECONDS",
     "USAGE_PRICING_URL",
+    "USAGE_BASE_PATH",
     "CLIPROXY_BASE_URL",
     "CLIPROXY_MANAGEMENT_KEY",
     "QUOTA_CACHE_TTL_SECONDS",
@@ -57,6 +58,51 @@ def test_load_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.port == 8318
     assert cfg.pricing_cache is None
     assert cfg.pricing_ttl_seconds == 86400
+    assert cfg.base_path == "/"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", "/"),
+        ("/", "/"),
+        ("/api-usage", "/api-usage"),
+        ("/api-usage/", "/api-usage"),
+    ],
+)
+def test_base_path_normalizes(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+    expected: str,
+) -> None:
+    _clear_all(monkeypatch)
+    monkeypatch.setenv("USAGE_BASE_PATH", raw)
+
+    cfg = load_config()
+
+    assert cfg.base_path == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "api-usage",
+        "//api-usage",
+        "/api-usage?x=1",
+        "/api-usage#quota",
+    ],
+)
+def test_base_path_invalid_values_raise_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+) -> None:
+    _clear_all(monkeypatch)
+    monkeypatch.setenv("USAGE_BASE_PATH", raw)
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+
+    assert "USAGE_BASE_PATH" in str(excinfo.value)
 
 
 def test_load_config_bad_port(monkeypatch: pytest.MonkeyPatch) -> None:

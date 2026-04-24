@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, ValidationError
+from pydantic import AliasChoices, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -45,6 +45,10 @@ class ServerConfig(BaseSettings):
         default=LITELLM_PRICING_URL,
         validation_alias=AliasChoices("pricing_url", "USAGE_PRICING_URL"),
     )
+    base_path: str = Field(
+        default="/",
+        validation_alias=AliasChoices("base_path", "USAGE_BASE_PATH"),
+    )
     cliproxy_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("cliproxy_base_url", "CLIPROXY_BASE_URL"),
@@ -61,6 +65,20 @@ class ServerConfig(BaseSettings):
             "quota_cache_ttl_seconds", "QUOTA_CACHE_TTL_SECONDS"
         ),
     )
+
+    @field_validator("base_path")
+    @classmethod
+    def _normalize_base_path(cls, value: str) -> str:
+        value = value.strip()
+        if value == "" or value == "/":
+            return "/"
+        if not value.startswith("/"):
+            raise ValueError("base path must start with /")
+        if value.startswith("//"):
+            raise ValueError("base path must not start with //")
+        if "?" in value or "#" in value:
+            raise ValueError("base path must not include query or fragment")
+        return value.rstrip("/")
 
 
 def load_config() -> ServerConfig:

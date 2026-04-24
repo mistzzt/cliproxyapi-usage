@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 
 import uvicorn
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from cliproxy_usage_server.config import ServerConfig, load_config
@@ -68,7 +69,7 @@ def _default_quota_service_factory(config: ServerConfig) -> QuotaService:
 # Module-level shared routers
 # ---------------------------------------------------------------------------
 
-_api = APIRouter(prefix="/api")
+_api = APIRouter()
 
 
 @_api.get("/health-check")
@@ -80,7 +81,7 @@ _QUOTA_DISABLED_DETAIL = (
     "quota disabled: CLIPROXY_BASE_URL and CLIPROXY_MANAGEMENT_KEY required"
 )
 
-_quota_disabled = APIRouter(prefix="/api")
+_quota_disabled = APIRouter()
 
 
 @_quota_disabled.get("/quota/{path:path}")
@@ -89,6 +90,12 @@ def _quota_fallback(path: str) -> JSONResponse:
         status_code=503,
         content={"detail": _QUOTA_DISABLED_DETAIL},
     )
+
+
+def _prefixed(base_path: str, path: str) -> str:
+    if base_path == "/":
+        return path
+    return f"{base_path}{path}"
 
 
 # ---------------------------------------------------------------------------
@@ -155,31 +162,60 @@ def create_app(
             if service is not None:
                 await service.aclose()
 
+    api_prefix = _prefixed(config.base_path, "/api")
+
     app = FastAPI(lifespan=lifespan)
-    app.include_router(_api)
-    app.include_router(build_usage_router(config.db_path), prefix="/api")
-    app.include_router(build_pricing_router(), prefix="/api")
+    app.include_router(_api, prefix=api_prefix)
+    app.include_router(build_usage_router(config.db_path), prefix=api_prefix)
+    app.include_router(build_pricing_router(), prefix=api_prefix)
+
+    @app.get(_prefixed(config.base_path, "/usage-config.js"), include_in_schema=False)
+    async def _runtime_config() -> Response:
+        payload = json.dumps(
+            {
+                "basePath": config.base_path,
+                "apiBase": api_prefix,
+            },
+            separators=(",", ":"),
+        )
+        return Response(
+            f"window.__CLIPROXY_USAGE_CONFIG__={payload};\n",
+            media_type="application/javascript",
+        )
 
     if service is not None:
         app.state.quota_service = service
-        app.include_router(build_quota_router(service), prefix="/api")
+        app.include_router(build_quota_router(service), prefix=api_prefix)
     else:
-        app.include_router(_quota_disabled)
+        app.include_router(_quota_disabled, prefix=api_prefix)
 
     if _SPA_DIR.is_dir():
         # Serve hashed assets directly, then fall back to index.html for any
         # non-API path so client-side routes (e.g. /quota) resolve.
         app.mount(
-            "/assets",
+            _prefixed(config.base_path, "/assets"),
             StaticFiles(directory=_SPA_DIR / "assets"),
             name="spa-assets",
         )
         _index_html = _SPA_DIR / "index.html"
 
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def _spa_fallback(full_path: str) -> FileResponse:
-            del full_path  # unused; any non-API GET renders the SPA shell
-            return FileResponse(_index_html)
+        if config.base_path == "/":
+
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def _spa_fallback(full_path: str) -> FileResponse:
+                del full_path  # unused; any non-API GET renders the SPA shell
+                return FileResponse(_index_html)
+
+        else:
+
+            @app.get(config.base_path, include_in_schema=False)
+            async def _spa_redirect() -> RedirectResponse:
+                return RedirectResponse(f"{config.base_path}/")
+
+            @app.get(f"{config.base_path}/{{full_path:path}}", include_in_schema=False)
+            async def _prefixed_spa_fallback(full_path: str) -> FileResponse:
+                del full_path  # unused; any base-path GET renders the SPA shell
+                return FileResponse(_index_html)
 
     return app
 

@@ -85,17 +85,18 @@ collector.
 
 ### Server environment variables
 
-| Variable                   | Default                                                                                         | Required |
-| -------------------------- | ----------------------------------------------------------------------------------------------- | -------- |
-| `USAGE_DB_PATH`            | `./usage.db`                                                                                    | no       |
-| `USAGE_SERVER_HOST`        | `127.0.0.1`                                                                                     | no       |
-| `USAGE_SERVER_PORT`        | `8318`                                                                                          | no       |
-| `USAGE_PRICING_CACHE`      | `<db_parent>/pricing.json`                                                                      | no       |
-| `USAGE_PRICING_TTL_SECONDS`| `86400`                                                                                         | no       |
-| `USAGE_PRICING_URL`        | litellm `model_prices_and_context_window.json` raw URL                                          | no       |
-| `CLIPROXY_BASE_URL`        | —                                                                                               | for `/quota` |
-| `CLIPROXY_MANAGEMENT_KEY`  | —                                                                                               | for `/quota` |
-| `QUOTA_CACHE_TTL_SECONDS`  | `300`                                                                                           | no       |
+| Variable                    | Default                                                | Required     |
+| --------------------------- | ------------------------------------------------------ | ------------ |
+| `USAGE_DB_PATH`             | `./usage.db`                                           | no           |
+| `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no           |
+| `USAGE_SERVER_PORT`         | `8318`                                                 | no           |
+| `USAGE_BASE_PATH`           | `/`                                                    | no           |
+| `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no           |
+| `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no           |
+| `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no           |
+| `CLIPROXY_BASE_URL`         | —                                                      | for `/quota` |
+| `CLIPROXY_MANAGEMENT_KEY`   | —                                                      | for `/quota` |
+| `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no           |
 
 `CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` use the same values as the
 collector. When both are set, the server serves live OAuth quota for Claude
@@ -113,8 +114,13 @@ cd frontend && bun install && bun run build && cd ..
 uv run cliproxy-usage-server
 ```
 
-The SPA is built into `frontend/dist/` and served at `/`;
+The SPA is built into `frontend/dist/` and served at `/` by default;
 FastAPI handles `/api/*`. Visit `http://127.0.0.1:8318/` and browse.
+
+To deploy the same build under a URL prefix, set `USAGE_BASE_PATH` before
+starting the server. For example, `USAGE_BASE_PATH=/api-usage` serves the SPA
+at `/api-usage/`, client routes such as `/api-usage/quota`, static assets at
+`/api-usage/assets/*`, and JSON endpoints at `/api-usage/api/*`.
 
 ### Dev workflow
 
@@ -128,18 +134,20 @@ uv run cliproxy-usage-server
 cd frontend && bun run dev
 ```
 
-Open `http://localhost:5173` — Vite proxies `/api/*` to `127.0.0.1:8318` so
-the SPA stays in sync with the live backend. Hot-module reload works for both
-TS and SCSS.
+Open `http://localhost:5173` — root mode is the local default, and Vite proxies
+`/api/*` to `127.0.0.1:8318` so the SPA stays in sync with the live backend.
+Hot-module reload works for both TS and SCSS.
 
 ### Authentication
 
-The server itself does not authenticate `/api/*` requests. Deploy it behind a
+The server itself does not authenticate its API requests. Deploy it behind a
 reverse proxy (e.g. nginx + oauth2-proxy, or Cloudflare Access) that enforces
-authentication before traffic reaches uvicorn. The included bind default of
-`127.0.0.1` ensures the server is only reachable through such a proxy on a
-single host; override `USAGE_SERVER_HOST` only after you have put that proxy
-in place.
+authentication before traffic reaches uvicorn. If this dashboard shares a host
+with CLIProxyAPI, set `USAGE_BASE_PATH=/api-usage` and route only
+`/api-usage/` to the dashboard/auth proxy; `/api/` then remains available for
+CLIProxyAPI. The included bind default of `127.0.0.1` ensures the server is
+only reachable through such a proxy on a single host; override
+`USAGE_SERVER_HOST` only after you have put that proxy in place.
 
 > **TODO:** CI not configured. When a workflow is added (e.g.
 > `.github/workflows/ci.yml`), include both a Python job (`uv run ruff check`,

@@ -1,4 +1,5 @@
 import type { QuotaAccountsResponse, QuotaProvider, QuotaResponse } from '@/types/api';
+import { apiPath } from './runtimeConfig';
 
 export class QuotaFetchError extends Error {
   readonly status: number;
@@ -19,9 +20,9 @@ async function quotaRequest<T>(path: string): Promise<T> {
 }
 
 export function fetchQuotaAccounts(): Promise<QuotaAccountsResponse> {
-  return quotaRequest<QuotaAccountsResponse>('/api/quota/accounts');
+  return quotaRequest<QuotaAccountsResponse>(apiPath('/quota/accounts'));
 }
 
 export function fetchQuota(provider: QuotaProvider, authName: string): Promise<QuotaResponse> {
-  return quotaRequest<QuotaResponse>(`/api/quota/${provider}/${encodeURIComponent(authName)}`);
+  return quotaRequest<QuotaResponse>(apiPath(`/quota/${provider}/${encodeURIComponent(authName)}`));
 }

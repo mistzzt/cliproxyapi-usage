@@ -13,6 +13,7 @@ import type {
   TimeseriesResponse,
   TokenBreakdownResponse,
 } from '@/types/api';
+import { apiPath } from './runtimeConfig';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -60,7 +61,7 @@ function filterQuery(f: FilterParams): Record<string, string | undefined> {
 
 export function getOverview(params: { range: Range } & FilterParams): Promise<OverviewResponse> {
   return request<OverviewResponse>(
-    `/api/overview${buildQuery({ range: params.range, ...filterQuery(params) })}`,
+    apiPath(`/overview${buildQuery({ range: params.range, ...filterQuery(params) })}`),
   );
 }
 
@@ -72,13 +73,13 @@ export function getTimeseries(params: {
 } & FilterParams): Promise<TimeseriesResponse> {
   const { range, bucket, metric, top_n } = params;
   return request<TimeseriesResponse>(
-    `/api/timeseries${buildQuery({
+    apiPath(`/timeseries${buildQuery({
       range,
       bucket,
       metric,
       top_n: top_n !== undefined ? String(top_n) : undefined,
       ...filterQuery(params),
-    })}`,
+    })}`),
   );
 }
 
@@ -87,23 +88,23 @@ export function getTokenBreakdown(params: {
   bucket: Bucket;
 } & FilterParams): Promise<TokenBreakdownResponse> {
   return request<TokenBreakdownResponse>(
-    `/api/token-breakdown${buildQuery({
+    apiPath(`/token-breakdown${buildQuery({
       range: params.range,
       bucket: params.bucket,
       ...filterQuery(params),
-    })}`,
+    })}`),
   );
 }
 
 export function getApiStats(params: { range: Range } & FilterParams): Promise<ApiStat[]> {
   return request<ApiStat[]>(
-    `/api/api-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`,
+    apiPath(`/api-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
   );
 }
 
 export function getModelStats(params: { range: Range } & FilterParams): Promise<ModelStat[]> {
   return request<ModelStat[]>(
-    `/api/model-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`,
+    apiPath(`/model-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
   );
 }
 
@@ -111,24 +112,24 @@ export function getCredentialStats(
   params: { range: Range } & FilterParams,
 ): Promise<CredentialStat[]> {
   return request<CredentialStat[]>(
-    `/api/credential-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`,
+    apiPath(`/credential-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
   );
 }
 
 export function getHealth(params: { range: Range } & FilterParams): Promise<HealthResponse> {
   return request<HealthResponse>(
-    `/api/health${buildQuery({ range: params.range, ...filterQuery(params) })}`,
+    apiPath(`/health${buildQuery({ range: params.range, ...filterQuery(params) })}`),
   );
 }
 
 export function getModels(): Promise<ModelsResponse> {
-  return request<ModelsResponse>('/api/models');
+  return request<ModelsResponse>(apiPath('/models'));
 }
 
 export function getApiKeys(): Promise<ApiKeysResponse> {
-  return request<ApiKeysResponse>('/api/api-keys');
+  return request<ApiKeysResponse>(apiPath('/api-keys'));
 }
 
 export function getPricing(): Promise<PricingResponse> {
-  return request<PricingResponse>('/api/pricing');
+  return request<PricingResponse>(apiPath('/pricing'));
 }
