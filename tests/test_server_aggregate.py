@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from conftest import usage_export_queue_elements
 
 from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_collect.schemas import RequestRecord
@@ -31,7 +32,7 @@ from cliproxy_usage_server.db import open_ro
 def _fixture_records(usage_export_json: pathlib.Path) -> list[RequestRecord]:
     """Parse the fixture JSON into a list of RequestRecord."""
     export = json.loads(usage_export_json.read_text())
-    return list(iter_records(export))
+    return list(iter_records(usage_export_queue_elements(export)))
 
 
 # Full range covering all fixture timestamps (UTC bounds wider than the data).
