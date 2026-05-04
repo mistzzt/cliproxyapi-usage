@@ -2,7 +2,7 @@
 
 These are the user-facing shapes — the wire format the webapp exposes and
 the row shape the collector writes. Keep ingestion-only validation models
-(the ones that mirror the proxy's export JSON) private to ``parser``.
+(the ones that mirror the proxy's queue JSON) private to ``parser``.
 """
 
 from __future__ import annotations
