@@ -101,7 +101,7 @@
         '';
 
         pythonImportsCheck = [
-          "cliproxy_usage"
+          "cliproxy_usage_collect"
           "cliproxy_usage_server"
         ];
       };

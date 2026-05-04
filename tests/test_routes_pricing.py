@@ -9,8 +9,8 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import iter_records
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.pricing import ModelPricing

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from cliproxy_usage.schemas import RequestRecord
+from cliproxy_usage_collect.schemas import RequestRecord
 
 
 class SchemaError(Exception):

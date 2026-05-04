@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import iter_records
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import iter_records
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 

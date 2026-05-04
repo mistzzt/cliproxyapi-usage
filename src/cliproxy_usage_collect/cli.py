@@ -6,10 +6,10 @@ import sys
 
 import httpx
 
-from cliproxy_usage.client import AuthError, TransientError, fetch_export
-from cliproxy_usage.config import ConfigError, load_config
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import SchemaError, iter_records
+from cliproxy_usage_collect.client import AuthError, TransientError, fetch_export
+from cliproxy_usage_collect.config import ConfigError, load_config
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import SchemaError, iter_records
 
 
 def main(

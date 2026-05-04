@@ -8,7 +8,7 @@ import sqlite3
 import httpx
 import pytest
 
-from cliproxy_usage.cli import main
+from cliproxy_usage_collect.cli import main
 
 
 def _mock_transport(body: bytes, status: int = 200):

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import httpx
 
-from cliproxy_usage.config import Config
+from cliproxy_usage_collect.config import Config
 
 
 class AuthError(Exception):

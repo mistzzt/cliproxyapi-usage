@@ -1,4 +1,4 @@
-"""Tests for cliproxy_usage.client — uses httpx MockTransport for isolation."""
+"""Tests for cliproxy_usage_collect.client — uses httpx MockTransport for isolation."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from cliproxy_usage.client import AuthError, TransientError, fetch_export
-from cliproxy_usage.config import Config
+from cliproxy_usage_collect.client import AuthError, TransientError, fetch_export
+from cliproxy_usage_collect.config import Config
 
 _CFG = Config(
     base_url="http://test.local/v0/management",

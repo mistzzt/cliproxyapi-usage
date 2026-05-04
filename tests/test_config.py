@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from cliproxy_usage.config import Config, ConfigError, load_config
+from cliproxy_usage_collect.config import Config, ConfigError, load_config
 
 
 def test_missing_management_key_raises(monkeypatch):

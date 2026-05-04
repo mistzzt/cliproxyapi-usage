@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cliproxy-usage-collect = "cliproxy_usage.cli:_entry"
+cliproxy-usage-collect = "cliproxy_usage_collect.cli:_entry"
 cliproxy-usage-server = "cliproxy_usage_server.main:run"
 
 [build-system]
@@ -23,7 +23,7 @@ requires = ["uv_build>=0.10.0,<0.11.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["cliproxy_usage", "cliproxy_usage_server"]
+module-name = ["cliproxy_usage_collect", "cliproxy_usage_server"]
 
 [dependency-groups]
 dev = [

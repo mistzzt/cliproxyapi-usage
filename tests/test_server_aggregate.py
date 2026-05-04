@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from cliproxy_usage.parser import iter_records
-from cliproxy_usage.schemas import RequestRecord
+from cliproxy_usage_collect.parser import iter_records
+from cliproxy_usage_collect.schemas import RequestRecord
 from cliproxy_usage_server.aggregate import (
     query_api_stats,
     query_credential_stats,

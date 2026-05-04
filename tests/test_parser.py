@@ -1,10 +1,10 @@
-"""Tests for cliproxy_usage.parser."""
+"""Tests for cliproxy_usage_collect.parser."""
 
 import json
 
 import pytest
 
-from cliproxy_usage.parser import SchemaError, iter_records
+from cliproxy_usage_collect.parser import SchemaError, iter_records
 
 # ---------------------------------------------------------------------------
 # Helpers
