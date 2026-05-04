@@ -12,23 +12,23 @@ Dependency manager: `uv` (Python >=3.12; `.python-version` pins 3.14). Frontend 
 - Frontend dev: `cd frontend && bun install && bun run dev` (Vite on `:5173` proxies `/api` to `:8318`).
 - Frontend build: `cd frontend && bun run build` → outputs into `frontend/dist/`.
 - Run tests: `uv run pytest`
-- Single test: `uv run pytest tests/test_parser.py::test_name -q`
+- Single test: `uv run pytest tests/test_queue_parser.py::test_name -q`
 - Lint: `uv run ruff check` / `uv run ruff format`
 - Type-check: `uv run basedpyright` (config in `pyproject.toml`: `include = ["src", "tests"]`, mode `standard`)
 
 ## Architecture
 
-One-shot CLI collector: fetches `/usage/export` from a CLIProxyAPI management endpoint and upserts rows into a local SQLite DB. Safe to re-run — dedup is by `timestamp` primary key via `INSERT OR IGNORE`. Designed to be invoked from cron; transient failures exit non-zero so cron retries on the next tick.
+One-shot CLI collector: drains a bounded batch from CLIProxyAPI's Redis RESP usage queue and upserts rows into a local SQLite DB. Safe to re-run — dedup is by `timestamp` primary key via `INSERT OR IGNORE`. Designed to be invoked from cron; transient failures exit non-zero so cron retries on the next tick.
 
-Data flow (`src/cliproxy_usage/`):
+Data flow (`src/cliproxy_usage_collect/`):
 
-1. `config.py` — `load_config()` reads env (`CLIPROXY_BASE_URL`, `CLIPROXY_MANAGEMENT_KEY`, `USAGE_DB_PATH`) via pydantic-settings. Raises `ConfigError` with env-var names (not field names) in the message; `_FIELD_TO_ENV` does this translation.
-2. `client.py` — `fetch_export(cfg, client=...)` GETs the export. Accepts an injectable `httpx.Client` so tests can pass `httpx.MockTransport`; production path builds a client with a 10s timeout. Maps 401/403 → `AuthError`, 4xx/5xx/network/timeout/invalid-JSON → `TransientError`.
-3. `parser.py` — `iter_records(export)` validates the nested proxy JSON (`usage.apis[api_key].models[model].details[]`) with private pydantic models (`_Export`, `_Usage`, `_ApiEntry`, `_ModelEntry`, `_Detail`, `_Tokens`), then yields flat `RequestRecord`s with `api_key` / `model` hoisted out of the dict keys. Raises `SchemaError` (lives here, not in `schemas.py`) on validation failure.
+1. `config.py` — `load_config()` reads env (`CLIPROXY_BASE_URL`, `CLIPROXY_MANAGEMENT_KEY`, `USAGE_DB_PATH`, `USAGE_QUEUE_*`) via pydantic-settings. Raises `ConfigError` with env-var names (not field names) in the message.
+2. `queue_client.py` — `pop_usage_records(cfg)` uses redis-py against the partial RESP endpoint and returns raw JSON queue elements. Maps auth/permission failures → `AuthError`; connection/timeout/protocol/unexpected-response failures → `TransientError`.
+3. `parser.py` — `iter_records(queue_elements)` validates each Redis queue JSON element with private strict pydantic models, then yields `RequestRecord`s. Raises `SchemaError` (lives here, not in `schemas.py`) on validation failure.
 4. `db.py` — `open_db(path)` creates the `requests` table + indexes if missing. `insert_records` bulk-inserts with `INSERT OR IGNORE` and returns the count of genuinely new rows (via `conn.total_changes` delta).
 5. `cli.py` — `main()` wires the above. Exit codes: **0** ok, **1** transient, **2** config, **3** auth, **4** schema. Keep these stable — cron/alerts depend on them.
 
-`schemas.py` holds the _shared_ user-facing shape (`RequestRecord`, frozen). Ingestion-only pydantic models that mirror the proxy's export JSON stay private to `parser.py`. A future webapp is expected to consume `RequestRecord` directly, so don't move it back into `parser.py` or the DB module.
+`schemas.py` holds the _shared_ user-facing shape (`RequestRecord`, frozen). Ingestion-only pydantic models that mirror the proxy's queue JSON stay private to `parser.py`. A future webapp is expected to consume `RequestRecord` directly, so don't move it back into `parser.py` or the DB module.
 
 ### Webapp (`src/cliproxy_usage_server/` + `frontend/`)
 
@@ -49,9 +49,9 @@ Authentication is delegated to an upstream reverse proxy; the app itself exposes
 
 ## Tests
 
-- `tests/` — pytest suite. `conftest.py` exposes a `usage_export_json` fixture pointing at `test/usage-export-2026-04-22T19-22-30-546Z.json`.
+- `tests/` — pytest suite. `conftest.py` exposes a `usage_export_json` fixture for server/dashboard DB seeding until those tests are converted to queue records.
 - Note the split: **`test/`** (singular) holds JSON fixtures; **`tests/`** (plural) holds the test modules. Don't conflate them.
-- `test_client.py` uses `httpx.MockTransport` via the `client=` injection point — prefer that over monkeypatching `httpx`.
+- `test_queue_client.py` uses fake Redis clients/factories; prefer that over a real Redis/CLIProxyAPI process.
 
 ## Conventions
 
