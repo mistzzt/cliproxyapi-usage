@@ -88,6 +88,7 @@
           httpx
           pydantic
           pydantic-settings
+          redis
           uvicorn
         ];
 
@@ -101,7 +102,7 @@
         '';
 
         pythonImportsCheck = [
-          "cliproxy_usage"
+          "cliproxy_usage_collect"
           "cliproxy_usage_server"
         ];
       };

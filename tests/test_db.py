@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.schemas import RequestRecord
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.schemas import RequestRecord
 
 # ---------------------------------------------------------------------------
 # Helpers

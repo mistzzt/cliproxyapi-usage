@@ -64,8 +64,7 @@ class CliProxyClient:
         """GET <base_url>/auth-files → list of AuthFileEntry.
 
         ``CLIPROXY_BASE_URL`` already points at the management API root
-        (e.g. ``http://host:port/v0/management``), matching the collector's
-        convention.
+        for quota calls (e.g. ``http://host:port/v0/management``).
         """
         url = f"{self._base_url}/auth-files"
         response = await self._client.get(url, headers=self._headers)

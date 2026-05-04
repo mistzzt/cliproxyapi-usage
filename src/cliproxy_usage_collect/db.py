@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from cliproxy_usage.schemas import RequestRecord
+from cliproxy_usage_collect.schemas import RequestRecord
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS requests (

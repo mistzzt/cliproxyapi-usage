@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable, Sequence
 
-import httpx
+from cliproxy_usage_collect.config import Config, ConfigError, load_config
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import SchemaError, iter_records
+from cliproxy_usage_collect.queue_client import (
+    AuthError,
+    TransientError,
+    pop_usage_records,
+)
 
-from cliproxy_usage.client import AuthError, TransientError, fetch_export
-from cliproxy_usage.config import ConfigError, load_config
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import SchemaError, iter_records
+QueueClient = Callable[[Config], Sequence[str | bytes]]
 
 
 def main(
-    argv: list[str] | None = None, *, http_client: httpx.Client | None = None
+    argv: list[str] | None = None, *, queue_client: QueueClient = pop_usage_records
 ) -> int:
     """Collect usage data and insert into the local SQLite database.
 
@@ -21,9 +26,9 @@ def main(
     ----------
     argv:
         Accepted for future-proofing; not parsed.
-    http_client:
-        Optional httpx.Client to pass to fetch_export (useful for testing
-        with MockTransport).
+    queue_client:
+        Callable that drains one batch of raw queue elements. Tests can inject
+        a fake callable to avoid touching Redis.
 
     Returns
     -------
@@ -39,8 +44,8 @@ def main(
 
     try:
         conn = open_db(cfg.db_path)
-        export = fetch_export(cfg, client=http_client)
-        inserted = insert_records(conn, iter_records(export))
+        queued_records = list(queue_client(cfg))
+        inserted = insert_records(conn, iter_records(queued_records))
     except AuthError as exc:
         print(f"Authentication error: {exc}", file=sys.stderr)
         return 3
@@ -51,7 +56,10 @@ def main(
         print(f"Transient error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"inserted {inserted} new records", file=sys.stderr)
+    print(
+        f"inserted {inserted} new records from {len(queued_records)} queued records",
+        file=sys.stderr,
+    )
     return 0
 
 

@@ -1,18 +1,26 @@
 # cliproxy-usage
 
-A cron-runnable collector that pulls request records from a CLIProxyAPI management
-endpoint (`/usage/export`) and stores them in a local SQLite database. Each run
-fetches all available records and upserts them by timestamp, so running the
-collector repeatedly is safe. Transient errors (network, server) exit non-zero so
-a cron scheduler will retry on the next tick.
+A cron-runnable collector that drains request records from CLIProxyAPI's Redis
+RESP usage queue and stores them in a local SQLite database. Each run pops a
+bounded batch from the upstream queue and inserts new rows by timestamp, so
+running the collector repeatedly is safe. Transient errors exit non-zero so a
+cron scheduler will retry on the next tick.
+
+Before running the collector, enable usage publishing and the Redis usage queue
+in CLIProxyAPI. See the upstream setup guide:
+https://help.router-for.me/management/redis-usage-queue.html
 
 ## Environment variables
 
-| Variable                  | Default                               | Required |
-| ------------------------- | ------------------------------------- | -------- |
-| `CLIPROXY_BASE_URL`       | `http://localhost:8317/v0/management` | no       |
-| `CLIPROXY_MANAGEMENT_KEY` | —                                     | **yes**  |
-| `USAGE_DB_PATH`           | `./usage.db`                          | no       |
+| Variable                              | Default                 | Required |
+| ------------------------------------- | ----------------------- | -------- |
+| `CLIPROXY_BASE_URL`                   | `http://localhost:8317` | no       |
+| `CLIPROXY_MANAGEMENT_KEY`             | —                       | **yes**  |
+| `USAGE_DB_PATH`                       | `./usage.db`            | no       |
+| `USAGE_QUEUE_KEY`                     | `queue`                 | no       |
+| `USAGE_QUEUE_POP_COUNT`               | `500`                   | no       |
+| `USAGE_QUEUE_POP_SIDE`                | `left`                  | no       |
+| `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS`  | `10.0`                  | no       |
 
 ## Install and run
 
@@ -21,23 +29,38 @@ uv sync
 CLIPROXY_MANAGEMENT_KEY=your-key uv run cliproxy-usage-collect
 ```
 
-With every variable set explicitly (values shown are the defaults for the two
-optional ones):
+With every variable set explicitly (values shown are the defaults for optional
+settings):
 
 ```sh
 CLIPROXY_MANAGEMENT_KEY=your-key \
-CLIPROXY_BASE_URL=http://localhost:8317/v0/management \
+CLIPROXY_BASE_URL=http://localhost:8317 \
 USAGE_DB_PATH=./usage.db \
+USAGE_QUEUE_KEY=queue \
+USAGE_QUEUE_POP_COUNT=500 \
+USAGE_QUEUE_POP_SIDE=left \
+USAGE_REDIS_SOCKET_TIMEOUT_SECONDS=10.0 \
 uv run cliproxy-usage-collect
 ```
 
-- `CLIPROXY_MANAGEMENT_KEY` — required. Sent as `Authorization: Bearer <key>`.
-- `CLIPROXY_BASE_URL` — optional, defaults to `http://localhost:8317/v0/management`.
+- `CLIPROXY_MANAGEMENT_KEY` — required. Used as the Redis `AUTH` password for
+  the CLIProxyAPI RESP listener.
+- `CLIPROXY_BASE_URL` — optional, defaults to `http://localhost:8317`. This is
+  the CLIProxyAPI origin for the RESP listener, not a management API path.
   Override if your proxy is on a different host/port (e.g.
-  `https://proxy.internal.example.com/v0/management`).
+  `https://proxy.internal.example.com`).
 - `USAGE_DB_PATH` — optional, defaults to `./usage.db` (relative to the working
   directory). For a cron deployment, point it at a stable absolute path like
   `/var/lib/cliproxy/usage.db`.
+- `USAGE_QUEUE_KEY` — optional, defaults to `queue`. CLIProxyAPI currently
+  ignores the key argument, but `queue` matches the upstream readability
+  convention.
+- `USAGE_QUEUE_POP_COUNT` — optional, defaults to `500`. This is the maximum
+  number of queue elements drained per collector run; valid values are 1-10000.
+- `USAGE_QUEUE_POP_SIDE` — optional, defaults to `left`. Use `left` or `right`
+  to choose which end of the queue this collector drains from.
+- `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS` — optional, defaults to `10.0`. Applies
+  to both Redis connection and read timeouts.
 
 ## Cron example (every 5 minutes)
 
@@ -48,6 +71,11 @@ uv run cliproxy-usage-collect
 The tool writes logs to stderr. Redirecting both stdout and stderr (`2>&1`) to a
 log file captures everything. Alternatively, omit the redirect and let cron mail
 you the output.
+
+Choose a cron frequency shorter than the upstream queue retention window. The
+collector removes records as it drains them, but any records left in CLIProxyAPI's
+queue longer than its configured retention may be discarded upstream before this
+tool can store them.
 
 ## Example SQL queries
 
@@ -98,14 +126,15 @@ collector.
 | `CLIPROXY_MANAGEMENT_KEY`   | —                                                      | for `/quota` |
 | `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no           |
 
-`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` use the same values as the
-collector. When both are set, the server serves live OAuth quota for Claude
-and Codex auth-files at `/quota` (UI) and `/api/quota/*` (JSON). Successful
-quota responses are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for
-60 s) — clicking "Refresh" within the TTL returns the cached value rather
-than re-hitting the upstream OAuth endpoints. When either variable is unset,
-`/api/quota/*` returns `503` and the UI shows a disabled banner; the rest of
-the app is unaffected.
+`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota
+API. For quota, `CLIPROXY_BASE_URL` should be the CLIProxyAPI management API base
+URL, for example `http://localhost:8317/v0/management`. When both are set, the
+server serves live OAuth quota for Claude and Codex auth-files at `/quota` (UI)
+and `/api/quota/*` (JSON). Successful quota responses are cached for
+`QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); clicking "Refresh" within
+the TTL returns the cached value rather than re-hitting the upstream OAuth
+endpoints. When either variable is unset, `/api/quota/*` returns `503` and the
+UI shows a disabled banner; the dashboard remains available.
 
 ### Production run (single process)
 

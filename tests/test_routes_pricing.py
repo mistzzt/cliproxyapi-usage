@@ -7,10 +7,11 @@ import pathlib
 import sqlite3
 
 import pytest
+from conftest import usage_export_queue_elements
 from fastapi.testclient import TestClient
 
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import iter_records
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.pricing import ModelPricing
@@ -31,7 +32,7 @@ _FIXTURE = (
 def seeded_db_path(tmp_path: pathlib.Path) -> pathlib.Path:
     """Seeded SQLite DB populated from the fixture JSON."""
     export = json.loads(_FIXTURE.read_text())
-    records = list(iter_records(export))
+    records = list(iter_records(usage_export_queue_elements(export)))
     db_path = tmp_path / "usage.db"
     conn: sqlite3.Connection = open_db(db_path)
     insert_records(conn, records)
@@ -79,4 +80,3 @@ def test_pricing_response_shape(seeded_db_path: pathlib.Path) -> None:
     assert tiered.tiered is True
     assert tiered.input == 1e-6
     assert tiered.output == 2e-6
-

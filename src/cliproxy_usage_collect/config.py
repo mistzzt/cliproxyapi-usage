@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +19,7 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(frozen=True)
 
     base_url: str = Field(
-        default="http://localhost:8317/v0/management",
+        default="http://localhost:8317",
         validation_alias=AliasChoices("base_url", "CLIPROXY_BASE_URL"),
     )
     management_key: str = Field(
@@ -27,6 +28,28 @@ class Config(BaseSettings):
     db_path: Path = Field(
         default=Path("./usage.db"),
         validation_alias=AliasChoices("db_path", "USAGE_DB_PATH"),
+    )
+    queue_key: str = Field(
+        default="queue",
+        validation_alias=AliasChoices("queue_key", "USAGE_QUEUE_KEY"),
+    )
+    queue_pop_count: int = Field(
+        default=500,
+        ge=1,
+        le=10000,
+        validation_alias=AliasChoices("queue_pop_count", "USAGE_QUEUE_POP_COUNT"),
+    )
+    queue_pop_side: Literal["left", "right"] = Field(
+        default="left",
+        validation_alias=AliasChoices("queue_pop_side", "USAGE_QUEUE_POP_SIDE"),
+    )
+    redis_socket_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias=AliasChoices(
+            "redis_socket_timeout_seconds",
+            "USAGE_REDIS_SOCKET_TIMEOUT_SECONDS",
+        ),
     )
 
 
@@ -48,7 +71,12 @@ def load_config() -> Config:
             raise ConfigError(
                 f"Missing required environment variable: {', '.join(missing)}"
             ) from exc
-        raise ConfigError(str(exc)) from exc
+        invalid = list(
+            dict.fromkeys(_env_name(str(err["loc"][0])) for err in exc.errors())
+        )
+        raise ConfigError(
+            f"Invalid environment variable: {', '.join(invalid)}\n{exc}"
+        ) from exc
 
 
 def _env_name(field_name: str) -> str:

@@ -9,10 +9,11 @@ from collections import defaultdict
 from datetime import UTC, datetime
 
 import pytest
+from conftest import usage_export_queue_elements
 from fastapi.testclient import TestClient
 
-from cliproxy_usage.db import insert_records, open_db
-from cliproxy_usage.parser import iter_records
+from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.pricing import (
@@ -42,7 +43,7 @@ _FIXTURE = (
 
 def _load_records() -> list:
     export = json.loads(_FIXTURE.read_text())
-    return list(iter_records(export))
+    return list(iter_records(usage_export_queue_elements(export)))
 
 
 @pytest.fixture()
