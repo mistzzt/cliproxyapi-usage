@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.3",
     "pydantic-settings>=2.14.0",
+    "redis>=7.4.0,<8.0.0",
     "uvicorn[standard]>=0.46.0",
 ]
 
@@ -43,4 +44,3 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
 include = ["src", "tests"]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
-
