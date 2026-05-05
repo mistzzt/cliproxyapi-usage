@@ -41,7 +41,7 @@ def pop_usage_records(
                 params={"count": cfg.queue_pop_count},
                 headers=headers,
             )
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         raise TransientError(str(exc)) from exc
 
     if response.status_code in {401, 403}:

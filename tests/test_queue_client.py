@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 import pytest
@@ -17,23 +18,32 @@ from cliproxy_usage_collect.queue_client import (
 )
 
 
-def _cfg(**overrides: object) -> Config:
-    values: dict[str, object] = {
-        "base_url": "http://localhost:8317",
-        "management_key": "secret",
-        "db_path": Path("./usage.db"),
-        "queue_pop_count": 500,
-        "http_timeout_seconds": 10.0,
-    }
-    values.update(overrides)
-    return Config(**values)
+class _ClientFactory(Protocol):
+    def __call__(self, *, timeout: float) -> httpx.Client: ...
+
+
+def _cfg(
+    *,
+    base_url: str = "http://localhost:8317",
+    management_key: str = "secret",
+    db_path: Path = Path("./usage.db"),
+    queue_pop_count: int = 500,
+    http_timeout_seconds: float = 10.0,
+) -> Config:
+    return Config(
+        base_url=base_url,
+        management_key=management_key,
+        db_path=db_path,
+        queue_pop_count=queue_pop_count,
+        http_timeout_seconds=http_timeout_seconds,
+    )
 
 
 def _client_factory(
     handler: Callable[[httpx.Request], httpx.Response],
-) -> Callable[..., httpx.Client]:
-    def factory(**kwargs: object) -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+) -> _ClientFactory:
+    def factory(*, timeout: float) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), timeout=timeout)
 
     return factory
 
@@ -119,6 +129,17 @@ def test_transport_error_maps_to_transient_error():
 
     with pytest.raises(TransientError):
         pop_usage_records(_cfg(), http_client_factory=_client_factory(handler))
+
+
+def test_invalid_url_maps_to_transient_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    with pytest.raises(TransientError):
+        pop_usage_records(
+            _cfg(base_url="http://proxy.example:abc"),
+            http_client_factory=_client_factory(handler),
+        )
 
 
 def test_invalid_json_maps_to_transient_error():
