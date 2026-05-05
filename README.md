@@ -1,14 +1,14 @@
 # cliproxy-usage
 
-A cron-runnable collector that drains request records from CLIProxyAPI's Redis
-RESP usage queue and stores them in a local SQLite database. Each run pops a
-bounded batch from the upstream queue and inserts new rows by timestamp, so
-running the collector repeatedly is safe. Transient errors exit non-zero so a
-cron scheduler will retry on the next tick.
+A cron-runnable collector that drains request records from CLIProxyAPI's HTTP
+management usage queue and stores them in a local SQLite database. Each run
+pops a bounded batch from the upstream queue and inserts new rows by timestamp,
+so running the collector repeatedly is safe. Transient errors exit non-zero so
+a cron scheduler will retry on the next tick.
 
-Before running the collector, enable usage publishing and the Redis usage queue
-in CLIProxyAPI. See the upstream setup guide:
-https://help.router-for.me/management/redis-usage-queue.html
+Before running the collector, enable usage publishing and the HTTP management
+usage queue in CLIProxyAPI. See the upstream API docs:
+https://help.router-for.me/management/api.html#usage-telemetry-queue
 
 ## Environment variables
 
@@ -17,10 +17,8 @@ https://help.router-for.me/management/redis-usage-queue.html
 | `CLIPROXY_BASE_URL`                   | `http://localhost:8317` | no       |
 | `CLIPROXY_MANAGEMENT_KEY`             | —                       | **yes**  |
 | `USAGE_DB_PATH`                       | `./usage.db`            | no       |
-| `USAGE_QUEUE_KEY`                     | `queue`                 | no       |
 | `USAGE_QUEUE_POP_COUNT`               | `500`                   | no       |
-| `USAGE_QUEUE_POP_SIDE`                | `left`                  | no       |
-| `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS`  | `10.0`                  | no       |
+| `USAGE_HTTP_TIMEOUT_SECONDS`          | `10.0`                  | no       |
 
 ## Install and run
 
@@ -36,31 +34,24 @@ settings):
 CLIPROXY_MANAGEMENT_KEY=your-key \
 CLIPROXY_BASE_URL=http://localhost:8317 \
 USAGE_DB_PATH=./usage.db \
-USAGE_QUEUE_KEY=queue \
 USAGE_QUEUE_POP_COUNT=500 \
-USAGE_QUEUE_POP_SIDE=left \
-USAGE_REDIS_SOCKET_TIMEOUT_SECONDS=10.0 \
+USAGE_HTTP_TIMEOUT_SECONDS=10.0 \
 uv run cliproxy-usage-collect
 ```
 
-- `CLIPROXY_MANAGEMENT_KEY` — required. Used as the Redis `AUTH` password for
-  the CLIProxyAPI RESP listener.
+- `CLIPROXY_MANAGEMENT_KEY` — required. Used as the Bearer token for the
+  CLIProxyAPI management API.
 - `CLIPROXY_BASE_URL` — optional, defaults to `http://localhost:8317`. This is
-  the CLIProxyAPI origin for the RESP listener, not a management API path.
-  Override if your proxy is on a different host/port (e.g.
-  `https://proxy.internal.example.com`).
+  the CLIProxyAPI origin or `/v0/management` base. Override if your proxy is on
+  a different host/port (e.g. `https://proxy.internal.example.com` or
+  `https://proxy.internal.example.com/v0/management`).
 - `USAGE_DB_PATH` — optional, defaults to `./usage.db` (relative to the working
   directory). For a cron deployment, point it at a stable absolute path like
   `/var/lib/cliproxy/usage.db`.
-- `USAGE_QUEUE_KEY` — optional, defaults to `queue`. CLIProxyAPI currently
-  ignores the key argument, but `queue` matches the upstream readability
-  convention.
 - `USAGE_QUEUE_POP_COUNT` — optional, defaults to `500`. This is the maximum
   number of queue elements drained per collector run; valid values are 1-10000.
-- `USAGE_QUEUE_POP_SIDE` — optional, defaults to `left`. Use `left` or `right`
-  to choose which end of the queue this collector drains from.
-- `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS` — optional, defaults to `10.0`. Applies
-  to both Redis connection and read timeouts.
+- `USAGE_HTTP_TIMEOUT_SECONDS` — optional, defaults to `10.0`. Applies to the
+  management API request timeout.
 
 ## Cron example (every 5 minutes)
 
