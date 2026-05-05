@@ -1,4 +1,4 @@
-"""Parser for cliproxy Redis usage queue payloads."""
+"""Parser for cliproxy usage queue payloads."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class _QueuePayload(BaseModel):
 
 
 def iter_records(queue_elements: Iterable[str | bytes]) -> Iterator[RequestRecord]:
-    """Yield one RequestRecord per Redis queue payload element.
+    """Yield one RequestRecord per queue payload element.
 
     Raises SchemaError if required fields are absent or have wrong types.
     """
