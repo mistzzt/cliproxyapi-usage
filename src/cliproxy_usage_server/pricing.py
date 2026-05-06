@@ -26,7 +26,44 @@ __all__ = [
     "compute_cost",
     "fetch_pricing",
     "resolve",
+    "split_tokens_for_cost",
 ]
+
+_OPENAI_SOURCE_PREFIXES: tuple[str, ...] = (
+    "codex:",
+    "openai:",
+    "openai-compat:",
+)
+
+
+def split_tokens_for_cost(
+    source: str,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+) -> "TokenCounts":
+    """Return TokenCounts ready for compute_cost.
+
+    For OpenAI-convention sources (Codex/OpenAI/OpenAI-compat, case-insensitive
+    prefix match on `source`) cached_tokens is treated as a subset of
+    input_tokens — mirrors ccusage's apps/codex/src/command-utils.ts split.
+
+    For all other sources the values pass through: cached_tokens flow into
+    cache_read_input_tokens and input_tokens stays as the already-uncached
+    count (Anthropic / Gemini convention).
+    """
+    if source.lower().startswith(_OPENAI_SOURCE_PREFIXES):
+        cache_read = min(cached_tokens, input_tokens)
+        return {
+            "input_tokens": max(input_tokens - cache_read, 0),
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read,
+        }
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_input_tokens": cached_tokens,
+    }
 
 _log = logging.getLogger(__name__)
 
