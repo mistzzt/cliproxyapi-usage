@@ -261,7 +261,7 @@ def _compute_expected_bucket_costs(
     # Compute cost per (bucket, model), then sum per bucket
     bucket_costs: dict[str, float] = defaultdict(float)
     for (lbl, model), tok in sums.items():
-        entry = resolve(model, pricing)
+        entry, _ = resolve(model, pricing)
         if entry is None:
             continue
         tc: TokenCounts = {

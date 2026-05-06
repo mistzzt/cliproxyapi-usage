@@ -20,14 +20,20 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 __all__ = [
     "PREFIX_CANDIDATES",
+    "CostStatus",
     "ModelPricing",
+    "PricingResolution",
     "ProviderEntry",
     "TokenCounts",
     "compute_cost",
     "fetch_pricing",
     "resolve",
+    "rollup_cost_status",
     "split_tokens_for_cost",
 ]
+
+PricingResolution = Literal["live", "missing"]
+CostStatus = Literal["live", "partial_missing", "missing"]
 
 _OPENAI_SOURCE_PREFIXES: tuple[str, ...] = (
     "codex:",
@@ -109,8 +115,8 @@ class TokenCounts(TypedDict, total=False):
 
 def resolve(
     model_name: str, pricing: Mapping[str, ModelPricing]
-) -> ModelPricing | None:
-    """Return the ModelPricing for *model_name* from *pricing*, or None.
+) -> tuple[ModelPricing | None, PricingResolution]:
+    """Return (ModelPricing, "live") for a hit, (None, "missing") for a miss.
 
     Match order:
     1. Exact key lookup.
@@ -118,24 +124,38 @@ def resolve(
     3. First case-insensitive substring match (key contains name, or name
        contains key).
     """
-    # 1. Exact match
     if model_name in pricing:
-        return pricing[model_name]
+        return pricing[model_name], "live"
 
-    # 2. Prefix candidates
     for prefix in PREFIX_CANDIDATES:
         candidate = f"{prefix}{model_name}"
         if candidate in pricing:
-            return pricing[candidate]
+            return pricing[candidate], "live"
 
-    # 3. Substring fallback (case-insensitive)
     lower = model_name.lower()
     for key, value in pricing.items():
         key_lower = key.lower()
         if key_lower in lower or lower in key_lower:
-            return value
+            return value, "live"
 
-    return None
+    return None, "missing"
+
+
+def rollup_cost_status(statuses: list[PricingResolution]) -> CostStatus:
+    """Roll up a list of per-component statuses into one row-level CostStatus.
+
+    - empty list           -> "missing" (no components contribute)
+    - all "live"           -> "live"
+    - all "missing"        -> "missing"
+    - mix of live + missing -> "partial_missing"
+    """
+    if not statuses:
+        return "missing"
+    has_live = any(s == "live" for s in statuses)
+    has_miss = any(s == "missing" for s in statuses)
+    if has_live and has_miss:
+        return "partial_missing"
+    return "live" if has_live else "missing"
 
 
 def _tiered_cost(

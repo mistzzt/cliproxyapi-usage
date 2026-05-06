@@ -146,7 +146,7 @@ def _compute_totals_cost(
     model_stats = query_model_stats(conn, start, end, models=models, api_keys=api_keys)
     total_cost = 0.0
     for row in model_stats:
-        entry = resolve(row.model, pricing)
+        entry, _status = resolve(row.model, pricing)
         if entry is None:
             continue
         tc: TokenCounts = {
@@ -223,7 +223,7 @@ def _query_bucket_model_costs(
 
     result: dict[tuple[str, str], float] = {}
     for bkt, model, inp, out, cac in rows:
-        entry = resolve(model, pricing)
+        entry, _status = resolve(model, pricing)
         if entry is None:
             result[(bkt, model)] = 0.0
         else:
@@ -333,7 +333,7 @@ def _cost_by_api_key(
     )
     costs: dict[str, float | None] = {}
     for api_key, model, inp, out, cached in rows:
-        entry = resolve(model, pricing)
+        entry, _status = resolve(model, pricing)
         if api_key not in costs:
             costs[api_key] = 0.0
         if entry is None or costs[api_key] is None:
@@ -378,7 +378,7 @@ def _cost_by_credential(
     )
     costs: dict[str, float | None] = {}
     for source, model, inp, out, cached in rows:
-        entry = resolve(model, pricing)
+        entry, _status = resolve(model, pricing)
         if source not in costs:
             costs[source] = 0.0
         if entry is None or costs[source] is None:
@@ -756,7 +756,7 @@ def build_router(db_path: Path) -> APIRouter:
         )
         result: list[ModelStat] = []
         for row in rows:
-            entry = resolve(row.model, pricing) if pricing else None
+            entry, _status = resolve(row.model, pricing) if pricing else (None, "missing")
             if entry is None:
                 cost: float | None = None
             else:
