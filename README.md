@@ -127,6 +127,32 @@ the TTL returns the cached value rather than re-hitting the upstream OAuth
 endpoints. When either variable is unset, `/api/quota/*` returns `503` and the
 UI shows a disabled banner; the dashboard remains available.
 
+### Cost accuracy
+
+The webapp computes per-row cost using liteLLM's pricing data
+(`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`,
+disk-cached locally) and a few provider-aware adjustments. Three things to know:
+
+- **Codex/OpenAI rows** apply ccusage's split: upstream returns
+  `cached_tokens` as a *subset* of `input_tokens`, so the dashboard subtracts
+  the cached portion from input before billing input rate, and bills the cached
+  portion at the cache-read rate. This matches the math in
+  `apps/codex/src/command-utils.ts` of `ghcr.io/ryoppippi/ccusage`.
+- **Anthropic rows undercount cache writes.** Upstream CLIProxyAPI collapses
+  Anthropic's `cache_creation_input_tokens` and `cache_read_input_tokens` into
+  a single `cached_tokens` value before pushing to its usage queue. The
+  webapp bills that combined value at the cache-read rate (~10% of input)
+  rather than the cache-creation rate (~125% of input) for the
+  creation portion. Claude totals are therefore a **lower bound** when prompt
+  caching is in use; the magnitude of the undercount depends on your
+  cache-write/read ratio. There is no purely-backend fix because the data
+  needed to split the two buckets is not in the queue payload.
+- **Missing pricing.** When liteLLM has no entry for a model the dashboard
+  renders that row's cost as `—` in red ("missing") and triggers a
+  background re-fetch (rate-limited to one per minute). Roll-up rows that
+  combine some live and some missing models render their partial total in
+  red ("partial_missing").
+
 ### Production run (single process)
 
 ```sh
