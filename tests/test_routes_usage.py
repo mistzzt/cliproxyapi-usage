@@ -683,7 +683,9 @@ def test_credential_stats_models_filter_restricts_rows(client_no_pricing) -> Non
 
     from cliproxy_usage_server.redact import redact_source
 
-    expected_credentials = {redact_source(r.source) for r in records if r.model == model}
+    expected_credentials = {
+        redact_source(r.source) for r in records if r.model == model
+    }
     returned_credentials = {row["source"] for row in rows}
     assert returned_credentials == expected_credentials
 
@@ -782,11 +784,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
     app = create_app(cfg, pricing_provider=lambda: pricing_map)
 
     expected_input = 1000 - 200
-    expected = (
-        expected_input * 1.25e-6
-        + 500 * 1e-5
-        + 200 * 1.25e-7
-    )
+    expected = expected_input * 1.25e-6 + 500 * 1e-5 + 200 * 1.25e-7
 
     with TestClient(app) as client:
         resp = client.get("/api/api-stats?range=all")
@@ -797,7 +795,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
 
 
 def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
-    """Non-OpenAI sources still bill cached_tokens at cache-read rate without subtracting from input."""
+    """Non-OpenAI: cached billed at cache-read rate; input unchanged."""
     db_path = tmp_path / "usage.db"
     conn = open_db(db_path)
     conn.execute(
@@ -811,7 +809,12 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
             "claude:tester@example.com",
             "0",
             100,
-            1000, 500, 0, 200, 1500, 0,
+            1000,
+            500,
+            0,
+            200,
+            1500,
+            0,
         ),
     )
     conn.commit()
@@ -850,15 +853,15 @@ def test_timeseries_cost_emits_series_status_live(client_with_full_pricing) -> N
 
 def test_timeseries_cost_emits_series_status_missing(client_no_pricing) -> None:
     """With empty pricing every series is 'missing'."""
-    resp = client_no_pricing.get(
-        "/api/timeseries?range=all&bucket=day&metric=cost"
-    )
+    resp = client_no_pricing.get("/api/timeseries?range=all&bucket=day&metric=cost")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["series_status"]["__all__"] == "missing"
 
 
-def test_timeseries_non_cost_metric_has_empty_series_status(client_with_full_pricing) -> None:
+def test_timeseries_non_cost_metric_has_empty_series_status(
+    client_with_full_pricing,
+) -> None:
     resp = client_with_full_pricing.get(
         "/api/timeseries?range=all&bucket=day&metric=tokens"
     )
@@ -883,7 +886,17 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
             "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 f"2026-05-01T00:00:0{i}.000000Z",
-                "sk-test", model, source, "0", 100, 100, 50, 0, 0, 150, 0,
+                "sk-test",
+                model,
+                source,
+                "0",
+                100,
+                100,
+                50,
+                0,
+                0,
+                150,
+                0,
             ),
         )
     conn.commit()

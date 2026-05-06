@@ -45,7 +45,6 @@ from cliproxy_usage_server.pricing import (
     CostStatus,
     ModelPricing,
     PricingResolution,
-    TokenCounts,
     compute_cost,
     resolve,
     rollup_cost_status,
@@ -269,7 +268,9 @@ def _query_bucket_model_costs(
             cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0)
             continue
         tc = split_tokens_for_cost(source, inp, out, cac)
-        cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0) + compute_cost(tc, entry)
+        cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0) + compute_cost(
+            tc, entry
+        )
     return cell_cost, model_statuses
 
 
@@ -359,7 +360,9 @@ def _cost_by_api_key(
         per_key_statuses.setdefault(api_key, []).append(status)
         if entry is not None:
             tc = split_tokens_for_cost(source, inp, out, cached)
-            per_key_cost[api_key] = per_key_cost.get(api_key, 0.0) + compute_cost(tc, entry)
+            per_key_cost[api_key] = per_key_cost.get(api_key, 0.0) + compute_cost(
+                tc, entry
+            )
         else:
             per_key_cost.setdefault(api_key, 0.0)
 
@@ -367,7 +370,9 @@ def _cost_by_api_key(
     flat: list[PricingResolution] = []
     for api_key, statuses in per_key_statuses.items():
         roll = rollup_cost_status(statuses)
-        cost: float | None = None if roll == "missing" else per_key_cost.get(api_key, 0.0)
+        cost: float | None = (
+            None if roll == "missing" else per_key_cost.get(api_key, 0.0)
+        )
         result[api_key] = (cost, roll)
         flat.extend(statuses)
     return result, flat
@@ -395,7 +400,9 @@ def _cost_by_credential(
         per_src_statuses.setdefault(grouping_source, []).append(status)
         if entry is not None:
             tc = split_tokens_for_cost(row_source, inp, out, cached)
-            per_src_cost[grouping_source] = per_src_cost.get(grouping_source, 0.0) + compute_cost(tc, entry)
+            per_src_cost[grouping_source] = per_src_cost.get(
+                grouping_source, 0.0
+            ) + compute_cost(tc, entry)
         else:
             per_src_cost.setdefault(grouping_source, 0.0)
 
@@ -819,7 +826,9 @@ def build_router(db_path: Path) -> APIRouter:
                 per_model_status.setdefault(model, []).append(status)
                 if entry is not None:
                     tc = split_tokens_for_cost(source, inp, out, cached)
-                    per_model_cost[model] = per_model_cost.get(model, 0.0) + compute_cost(tc, entry)
+                    per_model_cost[model] = per_model_cost.get(
+                        model, 0.0
+                    ) + compute_cost(tc, entry)
         flat_model_statuses: list[PricingResolution] = [
             s for sts in per_model_status.values() for s in sts
         ]

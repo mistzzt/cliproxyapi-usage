@@ -63,7 +63,7 @@ def maybe_refresh_pricing(
 
     try:
         fetched = fetcher()
-    except Exception as exc:  # noqa: BLE001 — defensive; never propagates
+    except Exception as exc:
         _log.warning("Background pricing refresh failed: %s", exc)
         return True
 

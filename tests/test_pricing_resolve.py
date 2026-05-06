@@ -9,7 +9,6 @@ from cliproxy_usage_server.pricing import (
     rollup_cost_status,
 )
 
-
 _E = ModelPricing(input_cost_per_token=1e-6, output_cost_per_token=1e-6)
 
 

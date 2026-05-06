@@ -47,7 +47,7 @@ def split_tokens_for_cost(
     input_tokens: int,
     output_tokens: int,
     cached_tokens: int,
-) -> "TokenCounts":
+) -> TokenCounts:
     """Return TokenCounts ready for compute_cost.
 
     For OpenAI-convention sources (Codex/OpenAI/OpenAI-compat, case-insensitive
@@ -70,6 +70,7 @@ def split_tokens_for_cost(
         "output_tokens": output_tokens,
         "cache_read_input_tokens": cached_tokens,
     }
+
 
 _log = logging.getLogger(__name__)
 

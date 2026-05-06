@@ -141,8 +141,17 @@ def test_route_dispatches_refresh_on_missing(tmp_path: Path) -> None:
         "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "2026-05-01T00:00:00.000000Z",
-            "sk-test", "unknown-model", "openai:sk-x", "0",
-            100, 100, 50, 0, 0, 150, 0,
+            "sk-test",
+            "unknown-model",
+            "openai:sk-x",
+            "0",
+            100,
+            100,
+            50,
+            0,
+            0,
+            150,
+            0,
         ),
     )
     conn.commit()

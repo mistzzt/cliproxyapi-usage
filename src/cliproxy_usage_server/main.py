@@ -7,14 +7,13 @@ import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-
-from dataclasses import dataclass
 
 from cliproxy_usage_server.config import ServerConfig, load_config
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing

@@ -1,6 +1,6 @@
 import pytest
 
-from cliproxy_usage_server.redact import redact_key
+from cliproxy_usage_server.redact import redact_key, redact_source
 from cliproxy_usage_server.schemas import ApiStat
 
 
@@ -48,11 +48,6 @@ def test_api_stat_redacts_api_key_on_construction() -> None:
         cost_status="missing",
     )
     assert stat.api_key == "sk-*******-abc123xyz"
-
-
-
-
-from cliproxy_usage_server.redact import redact_source
 
 
 @pytest.mark.parametrize(
