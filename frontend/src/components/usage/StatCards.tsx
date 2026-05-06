@@ -6,8 +6,10 @@ import {
   CategoryScale,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
+import type { ReactNode } from 'react';
 import type { OverviewResponse, SparklinePoint } from '@/types/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { CostCell } from './CostCell';
 import styles from './StatCards.module.scss';
 
 ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale);
@@ -42,7 +44,7 @@ interface CardDef {
   key: keyof OverviewResponse['sparklines'];
   label: string;
   color: string;
-  formatValue: (o: OverviewResponse) => string;
+  renderValue: (o: OverviewResponse) => ReactNode;
 }
 
 const CARDS: CardDef[] = [
@@ -50,32 +52,33 @@ const CARDS: CardDef[] = [
     key: 'requests',
     label: 'Requests',
     color: '#6aa7ff',
-    formatValue: (o) => o.totals.requests.toLocaleString(),
+    renderValue: (o) => o.totals.requests.toLocaleString(),
   },
   {
     key: 'tokens',
     label: 'Tokens',
     color: '#a78bfa',
-    formatValue: (o) => o.totals.tokens.toLocaleString(),
+    renderValue: (o) => o.totals.tokens.toLocaleString(),
   },
   {
     key: 'rpm',
     label: 'RPM',
     color: '#34d399',
-    formatValue: (o) => o.totals.rpm.toFixed(2),
+    renderValue: (o) => o.totals.rpm.toFixed(2),
   },
   {
     key: 'tpm',
     label: 'TPM',
     color: '#fb923c',
-    formatValue: (o) => o.totals.tpm.toFixed(1),
+    renderValue: (o) => o.totals.tpm.toFixed(1),
   },
   {
     key: 'cost',
     label: 'Cost',
     color: '#fbbf24',
-    formatValue: (o) =>
-      o.totals.cost !== null ? `$${o.totals.cost.toFixed(2)}` : '—',
+    renderValue: (o) => (
+      <CostCell cost={o.totals.cost} status={o.totals.cost_status} decimals={2} />
+    ),
   },
 ];
 
@@ -89,7 +92,7 @@ export default function StatCards({ overview, loading }: StatCardsProps) {
     <div className={styles.grid}>
       {CARDS.map((card) => {
         const points = overview?.sparklines[card.key] ?? [];
-        const value = overview ? card.formatValue(overview) : '—';
+        const value = overview ? card.renderValue(overview) : '—';
         return (
           <div key={card.key} className={styles.card}>
             <div className={styles.label}>{card.label}</div>

@@ -4,12 +4,13 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import type { ApiStat } from '@/types/api';
 import { sortRows } from './sort';
 import type { SortState } from './sort';
+import { CostCell } from './CostCell';
 import styles from './ApiDetailsCard.module.scss';
 
 export interface ApiDetailsCardProps {
   rows: ApiStat[];
   loading: boolean;
-  hasPricing: boolean;
+  hasPricing?: boolean;
 }
 
 type ApiSortKey = 'api_key' | 'requests' | 'input_tokens' | 'output_tokens' | 'total_tokens' | 'cost' | 'failed' | 'avg_latency_ms';
@@ -19,7 +20,7 @@ function arrow(state: SortState<ApiSortKey>, key: ApiSortKey): string {
   return state.order === 'asc' ? ' ▲' : ' ▼';
 }
 
-export default function ApiDetailsCard({ rows, loading, hasPricing }: ApiDetailsCardProps) {
+export default function ApiDetailsCard({ rows, loading }: ApiDetailsCardProps) {
   const [sort, setSort] = useState<SortState<ApiSortKey>>({ key: 'requests', order: 'desc' });
 
   const handleSort = (key: ApiSortKey) => {
@@ -32,11 +33,6 @@ export default function ApiDetailsCard({ rows, loading, hasPricing }: ApiDetails
   };
 
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
-
-  const renderCost = (cost: number | null) => {
-    if (!hasPricing || cost === null) return '—';
-    return `$${cost.toFixed(4)}`;
-  };
 
   return (
     <Card title="API Details">
@@ -104,7 +100,7 @@ export default function ApiDetailsCard({ rows, loading, hasPricing }: ApiDetails
                     <td>{row.input_tokens.toLocaleString()}</td>
                     <td>{row.output_tokens.toLocaleString()}</td>
                     <td>{row.total_tokens.toLocaleString()}</td>
-                    <td>{renderCost(row.cost)}</td>
+                    <td><CostCell cost={row.cost} status={row.cost_status} /></td>
                     <td>{row.failed.toLocaleString()}</td>
                     <td>{row.avg_latency_ms.toFixed(0)}</td>
                   </tr>
