@@ -45,6 +45,7 @@ def test_api_stat_redacts_api_key_on_construction() -> None:
         failed=0,
         avg_latency_ms=0.0,
         cost=None,
+        cost_status="missing",
     )
     assert stat.api_key == "sk-*******-abc123xyz"
 
