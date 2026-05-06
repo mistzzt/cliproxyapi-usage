@@ -88,7 +88,6 @@
           httpx
           pydantic
           pydantic-settings
-          redis
           uvicorn
         ];
 

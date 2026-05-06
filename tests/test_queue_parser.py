@@ -1,4 +1,4 @@
-"""Tests for Redis queue payload parsing."""
+"""Tests for usage queue payload parsing."""
 
 from __future__ import annotations
 

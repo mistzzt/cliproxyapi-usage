@@ -18,13 +18,13 @@ Dependency manager: `uv` (Python >=3.12; `.python-version` pins 3.14). Frontend 
 
 ## Architecture
 
-One-shot CLI collector: drains a bounded batch from CLIProxyAPI's Redis RESP usage queue and upserts rows into a local SQLite DB. Safe to re-run — dedup is by `timestamp` primary key via `INSERT OR IGNORE`. Designed to be invoked from cron at an interval shorter than the upstream queue retention window; transient failures exit non-zero so cron retries on the next tick.
+One-shot CLI collector: drains a bounded batch from CLIProxyAPI's HTTP management usage queue and upserts rows into a local SQLite DB. Safe to re-run — dedup is by `timestamp` primary key via `INSERT OR IGNORE`. Designed to be invoked from cron at an interval shorter than the upstream queue retention window; transient failures exit non-zero so cron retries on the next tick.
 
 Data flow (`src/cliproxy_usage_collect/`):
 
-1. `config.py` — `load_config()` reads env (`CLIPROXY_BASE_URL`, `CLIPROXY_MANAGEMENT_KEY`, `USAGE_DB_PATH`, `USAGE_QUEUE_*`, `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS`) via pydantic-settings. `CLIPROXY_BASE_URL` is the RESP origin, default `http://localhost:8317`, not a management API path. Raises `ConfigError` with env-var names (not field names) in the message.
-2. `queue_client.py` — `pop_usage_records(cfg)` uses redis-py against the partial RESP endpoint and returns raw JSON queue elements. It authenticates with `CLIPROXY_MANAGEMENT_KEY`, pops from `USAGE_QUEUE_KEY` using the configured count/side, and maps auth/permission failures → `AuthError`; connection/timeout/protocol/unexpected-response failures → `TransientError`.
-3. `parser.py` — `iter_records(queue_elements)` validates each Redis queue JSON element with private strict pydantic models, then yields `RequestRecord`s. Raises `SchemaError` (lives here, not in `schemas.py`) on validation failure.
+1. `config.py` — `load_config()` reads env (`CLIPROXY_BASE_URL`, `CLIPROXY_MANAGEMENT_KEY`, `USAGE_DB_PATH`, `USAGE_QUEUE_POP_COUNT`, `USAGE_HTTP_TIMEOUT_SECONDS`) via pydantic-settings. `CLIPROXY_BASE_URL` may be either the CLIProxyAPI origin or the management API base URL; default `http://localhost:8317`. Raises `ConfigError` with env-var names (not field names) in the message.
+2. `queue_client.py` — `pop_usage_records(cfg)` uses httpx against the management `usage-queue` endpoint and returns raw JSON queue elements. It authenticates with `CLIPROXY_MANAGEMENT_KEY` as a bearer token, passes the configured count, and maps auth/permission failures → `AuthError`; connection/timeout/protocol/unexpected-response failures → `TransientError`.
+3. `parser.py` — `iter_records(queue_elements)` validates each queue JSON element with private strict pydantic models, then yields `RequestRecord`s. Raises `SchemaError` (lives here, not in `schemas.py`) on validation failure.
 4. `db.py` — `open_db(path)` creates the `requests` table + indexes if missing. `insert_records` bulk-inserts with `INSERT OR IGNORE` and returns the count of genuinely new rows (via `conn.total_changes` delta).
 5. `cli.py` — `main()` wires the above. Exit codes: **0** ok, **1** transient, **2** config, **3** auth, **4** schema. Keep these stable — cron/alerts depend on them.
 
@@ -52,7 +52,7 @@ Authentication is delegated to an upstream reverse proxy; the app itself exposes
 
 - `tests/` — pytest suite. `conftest.py` exposes queue-record fixtures for collector and server/dashboard DB seeding.
 - Note the split: **`test/`** (singular) holds JSON fixtures; **`tests/`** (plural) holds the test modules. Don't conflate them.
-- `test_queue_client.py` uses fake Redis clients/factories; prefer that over a real Redis/CLIProxyAPI process.
+- `test_queue_client.py` uses `httpx.MockTransport`; prefer that over a real CLIProxyAPI process.
 
 ## Conventions
 
