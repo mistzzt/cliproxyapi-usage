@@ -722,3 +722,94 @@ def test_overview_api_keys_filter_unknown_yields_zero(client_no_pricing) -> None
     resp = client_no_pricing.get("/api/overview?range=all&api_keys=does-not-exist")
     assert resp.status_code == 200
     assert resp.json()["totals"]["requests"] == 0
+
+
+def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> None:
+    """A single Codex row's cost must match ccusage's split formula."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+        "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+        "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "2026-05-01T00:00:00.000000Z",
+            "sk-test",
+            "gpt-5",
+            "codex:tester@example.com",
+            "0",
+            100,
+            1000,
+            500,
+            0,
+            200,
+            1500,
+            0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    pricing_map = {
+        "gpt-5": ModelPricing(
+            input_cost_per_token=1.25e-6,
+            output_cost_per_token=1e-5,
+            cache_read_input_token_cost=1.25e-7,
+        )
+    }
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing_map)
+
+    expected_input = 1000 - 200
+    expected = (
+        expected_input * 1.25e-6
+        + 500 * 1e-5
+        + 200 * 1.25e-7
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/api-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["cost"] == pytest.approx(expected)
+
+
+def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
+    """Non-OpenAI sources still bill cached_tokens at cache-read rate without subtracting from input."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+        "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+        "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "2026-05-01T00:00:00.000000Z",
+            "sk-test",
+            "claude-sonnet-4-5",
+            "claude:tester@example.com",
+            "0",
+            100,
+            1000, 500, 0, 200, 1500, 0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    pricing_map = {
+        "claude-sonnet-4-5": ModelPricing(
+            input_cost_per_token=3e-6,
+            output_cost_per_token=1.5e-5,
+            cache_read_input_token_cost=3e-7,
+        )
+    }
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing_map)
+
+    expected = 1000 * 3e-6 + 500 * 1.5e-5 + 200 * 3e-7
+
+    with TestClient(app) as client:
+        resp = client.get("/api/api-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        assert rows[0]["cost"] == pytest.approx(expected)
