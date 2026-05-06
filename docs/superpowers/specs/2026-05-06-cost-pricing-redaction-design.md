@@ -41,7 +41,7 @@ Three independent issues in the dashboard:
 
 ## Design
 
-### 0. Anthropic billing — known undercount, scope-limited fix
+### 0. Anthropic billing — accepted undercount
 
 ccusage bills Anthropic usage as **three disjoint buckets**
 (`packages/internal/src/pricing.ts:318-340`):
@@ -52,35 +52,26 @@ ccusage bills Anthropic usage as **three disjoint buckets**
 | `cache_creation_input_tokens` | `cache_creation_input_token_cost` | ~1.25× input |
 | `cache_read_input_tokens` | `cache_read_input_token_cost` | ~0.1× input |
 
-Our DB schema (`db.py`, `parser.py`) collapses the two cache buckets
-into a single `cached_tokens` column — the upstream CLIProxyAPI queue
-payload itself only emits one `cached_tokens` field. Today the cost
-helpers pass that single value as `cache_read_input_tokens`, which
-means:
+Upstream CLIProxyAPI collapses `cache_creation` and `cache_read` into a
+single `cached_tokens` field in its queue payload. We consume upstream
+as-is and do not patch it. Our DB and cost helpers therefore charge
+the entire `cached_tokens` value at the cache-read rate, which
+systematically **undercounts** any Claude traffic that performs cache
+writes (cache-creation tokens are billed at ~10% of their true rate).
 
-- If `cached_tokens` upstream contains only `cache_read` → cache_creation
-  cost is missing (mild undercount; creation is rarer in steady state).
-- If it sums `cache_creation + cache_read` → the creation portion is
-  billed at the read rate (~10×–12× undercount on that portion).
-- If it contains only `cache_creation` → severe undercount.
+This is accepted, not fixed. There is no purely-backend remedy: the
+data we'd need to split the two buckets is not in the queue payload,
+the DB, or the upstream API surface we consume. Add a "Cost accuracy" subsection to `README.md` under the existing
+`## Webapp` heading, explaining: (a) Codex costs are billed per
+ccusage's split (cached subset of input); (b) Claude cache-creation
+tokens are billed at the cache-read rate because upstream collapses
+the two cache buckets into one field, so Claude totals are a lower
+bound when prompt caching is in use; (c) cost is `null` and rendered
+red when liteLLM has no pricing for a model.
 
-**Verification step** — before the implementation lands, sample a real
-Claude row's raw queue JSON (or read the upstream cliproxy emitter)
-to determine which case we're in. Recommend running:
-
-```sh
-uv run python -c "import sqlite3, pathlib; ..."  # snapshot a few rows
-```
-
-against a populated dev DB and cross-checking the magnitudes against
-Anthropic's billing console for the same window.
-
-**Scope of fix in this spec** — limited to documenting current
-behavior and adding a regression test that locks in whatever convention
-upstream uses today. Splitting `cached_tokens` into
-`cache_creation_input_tokens` + `cache_read_input_tokens` requires
-upstream proxy changes plus a collector schema migration; tracked as a
-follow-up below, not done here.
+The Codex split (next section) and the pricing-miss handling
+(section 2) are independently correct and are the actual fixes shipped
+by this spec.
 
 ### 1. Cost split for OpenAI-convention rows
 
@@ -316,12 +307,6 @@ sufficient.
 
 ## Open follow-ups (out of scope for this spec)
 
-- **Anthropic cache_creation vs cache_read split.** Upstream
-  CLIProxyAPI queue payload emits one `cached_tokens` field;
-  Anthropic's correct billing requires two. Needs upstream proxy
-  change + collector schema migration + cost helper update. Until
-  then, Claude cache costs will diverge from Anthropic's billing
-  console by some constant factor.
 - Redaction of email-style identifiers in quota responses
   (`auth_name`).
 - Surfacing per-bucket pricing status in cost timeseries (currently
@@ -329,3 +314,8 @@ sufficient.
 - A periodic background refresh of pricing independent of request
   traffic, so dashboards left open eventually heal even when no user
   request hits a missing model.
+
+The Anthropic cache-creation/cache-read collapse is **not** listed as
+a follow-up — see section 0. We do not patch upstream CLIProxyAPI; the
+limitation is permanent and is documented in `README.md` rather than
+tracked as work.
