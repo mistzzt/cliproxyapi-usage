@@ -156,11 +156,11 @@ def _compute_totals_cost(
     )
     statuses: list[PricingResolution] = []
     total = 0.0
-    for _const, model, source, inp, out, cached in rows:
+    for _const, model, _source, inp, out, cached in rows:
         entry, status = resolve(model, pricing)
         statuses.append(status)
         if entry is not None:
-            tc = split_tokens_for_cost(source, inp, out, cached)
+            tc = split_tokens_for_cost(entry, inp, out, cached)
             total += compute_cost(tc, entry)
 
     roll = rollup_cost_status(statuses)
@@ -232,13 +232,13 @@ def _query_bucket_model_costs(
 
     cell_cost: dict[tuple[str, str], float] = {}
     model_statuses: dict[str, list[PricingResolution]] = {}
-    for bkt, model, source, inp, out, cac in rows:
+    for bkt, model, _source, inp, out, cac in rows:
         entry, status = resolve(model, pricing)
         model_statuses.setdefault(model, []).append(status)
         if entry is None:
             cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0)
             continue
-        tc = split_tokens_for_cost(source, inp, out, cac)
+        tc = split_tokens_for_cost(entry, inp, out, cac)
         cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0) + compute_cost(
             tc, entry
         )
@@ -326,11 +326,11 @@ def _cost_by_api_key(
     )
     per_key_cost: dict[str, float] = {}
     per_key_statuses: dict[str, list[PricingResolution]] = {}
-    for api_key, model, source, inp, out, cached in rows:
+    for api_key, model, _source, inp, out, cached in rows:
         entry, status = resolve(model, pricing)
         per_key_statuses.setdefault(api_key, []).append(status)
         if entry is not None:
-            tc = split_tokens_for_cost(source, inp, out, cached)
+            tc = split_tokens_for_cost(entry, inp, out, cached)
             per_key_cost[api_key] = per_key_cost.get(api_key, 0.0) + compute_cost(
                 tc, entry
             )
@@ -364,11 +364,11 @@ def _cost_by_credential(
     )
     per_src_cost: dict[str, float] = {}
     per_src_statuses: dict[str, list[PricingResolution]] = {}
-    for grouping_source, model, row_source, inp, out, cached in rows:
+    for grouping_source, model, _row_source, inp, out, cached in rows:
         entry, status = resolve(model, pricing)
         per_src_statuses.setdefault(grouping_source, []).append(status)
         if entry is not None:
-            tc = split_tokens_for_cost(row_source, inp, out, cached)
+            tc = split_tokens_for_cost(entry, inp, out, cached)
             per_src_cost[grouping_source] = per_src_cost.get(
                 grouping_source, 0.0
             ) + compute_cost(tc, entry)
@@ -772,11 +772,11 @@ def build_router(db_path: Path) -> APIRouter:
         per_model_cost: dict[str, float] = {}
         per_model_status: dict[str, list[PricingResolution]] = {}
         if pricing:
-            for _const, model, source, inp, out, cached in grouped:
+            for _const, model, _source, inp, out, cached in grouped:
                 entry, status = resolve(model, pricing)
                 per_model_status.setdefault(model, []).append(status)
                 if entry is not None:
-                    tc = split_tokens_for_cost(source, inp, out, cached)
+                    tc = split_tokens_for_cost(entry, inp, out, cached)
                     per_model_cost[model] = per_model_cost.get(
                         model, 0.0
                     ) + compute_cost(tc, entry)

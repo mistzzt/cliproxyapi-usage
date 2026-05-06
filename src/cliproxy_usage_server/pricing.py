@@ -35,30 +35,37 @@ __all__ = [
 PricingResolution = Literal["live", "missing"]
 CostStatus = Literal["live", "partial_missing", "missing"]
 
-_OPENAI_SOURCE_PREFIXES: tuple[str, ...] = (
-    "codex:",
-    "openai:",
-    "openai-compat:",
+_OPENAI_LITELLM_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "openai",
+        "azure",
+    }
 )
 
 
+def _uses_openai_token_accounting(pricing: ModelPricing) -> bool:
+    """Return True when cached input is reported as a subset of input tokens."""
+    provider = (pricing.litellm_provider or "").strip().lower()
+    return provider in _OPENAI_LITELLM_PROVIDERS
+
+
 def split_tokens_for_cost(
-    source: str,
+    pricing: ModelPricing,
     input_tokens: int,
     output_tokens: int,
     cached_tokens: int,
 ) -> TokenCounts:
     """Return TokenCounts ready for compute_cost.
 
-    For OpenAI-convention sources (Codex/OpenAI/OpenAI-compat, case-insensitive
-    prefix match on `source`) cached_tokens is treated as a subset of
-    input_tokens — mirrors ccusage's apps/codex/src/command-utils.ts split.
+    For OpenAI-convention providers cached_tokens is treated as a subset of
+    input_tokens. This mirrors ccusage's Codex cost split and OpenAI Responses
+    token accounting.
 
     For all other sources the values pass through: cached_tokens flow into
     cache_read_input_tokens and input_tokens stays as the already-uncached
     count (Anthropic / Gemini convention).
     """
-    if source.lower().startswith(_OPENAI_SOURCE_PREFIXES):
+    if _uses_openai_token_accounting(pricing):
         cache_read = min(cached_tokens, input_tokens)
         return {
             "input_tokens": max(input_tokens - cache_read, 0),
@@ -96,6 +103,7 @@ class ProviderEntry(BaseModel):
 class ModelPricing(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
+    litellm_provider: str | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
     cache_creation_input_token_cost: float | None = None

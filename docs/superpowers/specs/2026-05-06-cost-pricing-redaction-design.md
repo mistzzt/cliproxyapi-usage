@@ -78,15 +78,11 @@ by this spec.
 Add a helper to `pricing.py`:
 
 ```python
-_OPENAI_SOURCE_PREFIXES: tuple[str, ...] = (
-    "codex:",
-    "openai:",
-    "openai-compat:",
-)
+_OPENAI_LITELLM_PROVIDERS: frozenset[str] = frozenset({"openai", "azure"})
 
 
 def split_tokens_for_cost(
-    source: str,
+    pricing: ModelPricing,
     input_tokens: int,
     output_tokens: int,
     cached_tokens: int,
@@ -94,7 +90,7 @@ def split_tokens_for_cost(
     """Return TokenCounts ready for compute_cost, accounting for the
     OpenAI convention where cached_tokens is a subset of input_tokens.
 
-    For Codex/OpenAI sources (case-insensitive prefix match):
+    For OpenAI-convention pricing entries:
         cache_read = min(cached_tokens, input_tokens)
         input     = max(input_tokens - cache_read, 0)
     For all other sources (Anthropic, Gemini, …): pass through unchanged
@@ -109,17 +105,19 @@ Behaviour:
   return raw token counts (`/api/token-breakdown`, the `input_tokens`
   / `cached_tokens` fields on `ModelStat`, `ApiStat`) keep showing the
   upstream values — the user-visible token displays must not change.
-- Source prefix detection is case-insensitive and explicit. New
-  OpenAI-convention providers must be added to
-  `_OPENAI_SOURCE_PREFIXES` deliberately. Model-name detection was
-  rejected as fragile against new model names.
+- Provider detection comes from the resolved liteLLM pricing entry
+  (`ModelPricing.litellm_provider`), not `source`. The real queue uses
+  `source` as a credential identifier, so source-prefix matching is not a
+  reliable provider signal. Model-name detection remains rejected as
+  fragile against new model names.
 
 Call-site changes in `routes/usage.py`:
 
 - `_grouped_cost_rows` gains `source` in the `SELECT` and `GROUP BY`.
 - `_compute_totals_cost`, `_query_bucket_model_costs`, `_cost_by_api_key`,
   `_cost_by_credential`, and the inline cost loop in `/api/model-stats`
-  iterate per `(model, source)` cell, call `split_tokens_for_cost`, then
+  iterate per `(model, source)` cell, resolve pricing, call
+  `split_tokens_for_cost` with the resolved pricing entry, then
   `compute_cost`, then sum back up to the dimension the endpoint
   returns. `/api/model-stats` rolls the source dimension up.
 - `query_model_stats` aggregate row stays per-model — only the cost
@@ -260,10 +258,9 @@ sufficient.
 - `tests/test_pricing_split.py`
   - Codex split: cached < input, cached == input, cached > input,
     cached == 0.
-  - Claude / unknown source: cached_tokens flow into
+  - Claude / unknown provider: cached_tokens flow into
     `cache_read_input_tokens` unchanged.
-  - Source-prefix matching is case-insensitive
-    (`Codex:abc`, `OPENAI:def`).
+  - Provider matching is case-insensitive (`OpenAI`).
 - `tests/test_pricing_resolve.py`
   - `resolve()` returns `(entry, "live")` for live-map hits via exact,
     prefix, and substring lookup.

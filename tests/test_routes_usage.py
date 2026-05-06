@@ -748,7 +748,7 @@ def test_overview_api_keys_filter_unknown_yields_zero(client_no_pricing) -> None
 
 
 def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> None:
-    """A single Codex row's cost must match ccusage's split formula."""
+    """OpenAI-convention rows use pricing metadata, not source prefixes."""
     db_path = tmp_path / "usage.db"
     conn = open_db(db_path)
     conn.execute(
@@ -759,7 +759,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
             "2026-05-01T00:00:00.000000Z",
             "sk-test",
             "gpt-5",
-            "codex:tester@example.com",
+            "gpt-apr26@example.com",
             "0",
             100,
             1000,
@@ -775,6 +775,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
 
     pricing_map = {
         "gpt-5": ModelPricing(
+            litellm_provider="openai",
             input_cost_per_token=1.25e-6,
             output_cost_per_token=1e-5,
             cache_read_input_token_cost=1.25e-7,
