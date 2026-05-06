@@ -42,10 +42,13 @@ from cliproxy_usage_server.aggregate import (
 )
 from cliproxy_usage_server.db import open_ro, range_window
 from cliproxy_usage_server.pricing import (
+    CostStatus,
     ModelPricing,
-    TokenCounts,
+    PricingResolution,
     compute_cost,
     resolve,
+    rollup_cost_status,
+    split_tokens_for_cost,
 )
 from cliproxy_usage_server.schemas import (
     ApiKeysResponse,
@@ -133,29 +136,36 @@ def _compute_totals_cost(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> float | None:
-    """Sum costs across all resolved models for the window.
+) -> tuple[float | None, CostStatus]:
+    """Sum costs across all (model, source) cells in the window.
 
-    Returns None if pricing is completely empty (no prices to use).
-    Returns a partial sum (possibly 0.0) if some models are resolved.
-    When *models* is set, only those models contribute to the sum.
+    Returns (cost, cost_status). cost is None only when status == "missing".
+    Empty pricing map -> (None, "missing").
     """
     if not pricing:
-        return None
+        return None, "missing"
 
-    model_stats = query_model_stats(conn, start, end, models=models, api_keys=api_keys)
-    total_cost = 0.0
-    for row in model_stats:
-        entry = resolve(row.model, pricing)
-        if entry is None:
-            continue
-        tc: TokenCounts = {
-            "input_tokens": row.input_tokens,
-            "output_tokens": row.output_tokens,
-            "cache_read_input_tokens": row.cached_tokens,
-        }
-        total_cost += compute_cost(tc, entry)
-    return total_cost
+    rows = _grouped_cost_rows(
+        conn,
+        start,
+        end,
+        "1",
+        "1",
+        models=models,
+        api_keys=api_keys,
+    )
+    statuses: list[PricingResolution] = []
+    total = 0.0
+    for _const, model, _source, inp, out, cached in rows:
+        entry, status = resolve(model, pricing)
+        statuses.append(status)
+        if entry is not None:
+            tc = split_tokens_for_cost(entry, inp, out, cached)
+            total += compute_cost(tc, entry)
+
+    roll = rollup_cost_status(statuses)
+    cost: float | None = None if roll == "missing" else total
+    return cost, roll
 
 
 def _query_bucket_model_costs(
@@ -166,14 +176,12 @@ def _query_bucket_model_costs(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> dict[tuple[str, str], float]:
-    """Query per-(bucket, model) token sums and compute cost for each cell.
+) -> tuple[dict[tuple[str, str], float], dict[str, list[PricingResolution]]]:
+    """Compute per-(bucket, model) cost and per-model status list.
 
-    Returns a dict mapping ``(bucket_label, model) → cost``.  Models without
-    pricing contribute 0.0 and are still included so callers can build a
-    complete ``__all__`` sum.
-
-    When *models* is non-None, the WHERE clause restricts to those models.
+    Groups SQL by (bucket, model, source) and applies split_tokens_for_cost
+    per cell, then rolls source up so the caller sees (bucket, model) -> cost.
+    The second return value maps model -> list of per-cell statuses.
     """
     # Replicate the aggregate._range_where logic inline.
     if start is not None:
@@ -210,30 +218,31 @@ def _query_bucket_model_costs(
         SELECT
             strftime('{bucket_fmt}', timestamp) AS bkt,
             model,
+            source,
             COALESCE(SUM(input_tokens), 0)  AS inp,
             COALESCE(SUM(output_tokens), 0) AS out,
             COALESCE(SUM(cached_tokens), 0) AS cac
         FROM requests
         {where}{mfrag}{kfrag}
-        GROUP BY bkt, model
-        ORDER BY bkt, model
+        GROUP BY bkt, model, source
+        ORDER BY bkt, model, source
         """,
         params,
     ).fetchall()
 
-    result: dict[tuple[str, str], float] = {}
-    for bkt, model, inp, out, cac in rows:
-        entry = resolve(model, pricing)
+    cell_cost: dict[tuple[str, str], float] = {}
+    model_statuses: dict[str, list[PricingResolution]] = {}
+    for bkt, model, _source, inp, out, cac in rows:
+        entry, status = resolve(model, pricing)
+        model_statuses.setdefault(model, []).append(status)
         if entry is None:
-            result[(bkt, model)] = 0.0
-        else:
-            tc: TokenCounts = {
-                "input_tokens": inp,
-                "output_tokens": out,
-                "cache_read_input_tokens": cac,
-            }
-            result[(bkt, model)] = compute_cost(tc, entry)
-    return result
+            cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0)
+            continue
+        tc = split_tokens_for_cost(entry, inp, out, cac)
+        cell_cost[(bkt, model)] = cell_cost.get((bkt, model), 0.0) + compute_cost(
+            tc, entry
+        )
+    return cell_cost, model_statuses
 
 
 def _grouped_cost_rows(
@@ -287,13 +296,14 @@ def _grouped_cost_rows(
         SELECT
             {group_cols},
             model,
+            source,
             COALESCE(SUM(input_tokens), 0)  AS input_tokens,
             COALESCE(SUM(output_tokens), 0) AS output_tokens,
             COALESCE(SUM(cached_tokens), 0) AS cached_tokens
         FROM requests
         {where}{mfrag}{kfrag}
-        GROUP BY {group_cols}, model
-        ORDER BY {order_cols}, model ASC
+        GROUP BY {group_cols}, model, source
+        ORDER BY {order_cols}, model ASC, source ASC
         """,
         params,
     ).fetchall()
@@ -306,47 +316,35 @@ def _cost_by_api_key(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> dict[str, float | None]:
-    """Compute total cost per api_key by summing costs across models.
-
-    Runs one grouped SQL query over (api_key, model) to get per-model token
-    sums, then resolves pricing per model and rolls up to api_key.
-
-    Token mapping applied per model row:
-        TokenCounts(
-            input_tokens=row.input_tokens,
-            output_tokens=row.output_tokens,
-            cache_read_input_tokens=row.cached_tokens,
-        )
-    No cache_creation_input_tokens (not stored separately in the DB).
-    reasoning_tokens not passed to compute_cost (not charged in liteLLM schema).
-
-    Returns dict mapping api_key → cost (float) if every model resolved,
-    or None if any model lacked pricing or pricing map is entirely empty.
-    When *models* is set, only those models contribute to the cost rollup.
-    """
+) -> dict[str, tuple[float | None, CostStatus]]:
+    """Compute (cost, cost_status) per api_key."""
     if not pricing:
-        return {}  # caller treats missing key as None
+        return {}
 
     rows = _grouped_cost_rows(
         conn, start, end, "api_key", "api_key ASC", models=models, api_keys=api_keys
     )
-    costs: dict[str, float | None] = {}
-    for api_key, model, inp, out, cached in rows:
-        entry = resolve(model, pricing)
-        if api_key not in costs:
-            costs[api_key] = 0.0
-        if entry is None or costs[api_key] is None:
-            costs[api_key] = None
+    per_key_cost: dict[str, float] = {}
+    per_key_statuses: dict[str, list[PricingResolution]] = {}
+    for api_key, model, _source, inp, out, cached in rows:
+        entry, status = resolve(model, pricing)
+        per_key_statuses.setdefault(api_key, []).append(status)
+        if entry is not None:
+            tc = split_tokens_for_cost(entry, inp, out, cached)
+            per_key_cost[api_key] = per_key_cost.get(api_key, 0.0) + compute_cost(
+                tc, entry
+            )
         else:
-            tc: TokenCounts = {
-                "input_tokens": inp,
-                "output_tokens": out,
-                "cache_read_input_tokens": cached,
-            }
-            costs[api_key] += compute_cost(tc, entry)  # type: ignore[operator]
+            per_key_cost.setdefault(api_key, 0.0)
 
-    return costs
+    result: dict[str, tuple[float | None, CostStatus]] = {}
+    for api_key, statuses in per_key_statuses.items():
+        roll = rollup_cost_status(statuses)
+        cost: float | None = (
+            None if roll == "missing" else per_key_cost.get(api_key, 0.0)
+        )
+        result[api_key] = (cost, roll)
+    return result
 
 
 def _cost_by_credential(
@@ -356,42 +354,33 @@ def _cost_by_credential(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> dict[str, float | None]:
-    """Compute total cost per ``source`` by summing costs across models.
-
-    Same token mapping as _cost_by_api_key (see that function's docstring).
-    Returns None for a source if any of its models lack pricing or
-    if the pricing map is entirely empty.
-    When *models* is set, only those models contribute to the cost rollup.
-    """
+) -> dict[str, tuple[float | None, CostStatus]]:
+    """Compute (cost, cost_status) per ``source``."""
     if not pricing:
-        return {}  # caller treats missing key as None
+        return {}
 
     rows = _grouped_cost_rows(
-        conn,
-        start,
-        end,
-        "source",
-        "source ASC",
-        models=models,
-        api_keys=api_keys,
+        conn, start, end, "source", "source ASC", models=models, api_keys=api_keys
     )
-    costs: dict[str, float | None] = {}
-    for source, model, inp, out, cached in rows:
-        entry = resolve(model, pricing)
-        if source not in costs:
-            costs[source] = 0.0
-        if entry is None or costs[source] is None:
-            costs[source] = None
+    per_src_cost: dict[str, float] = {}
+    per_src_statuses: dict[str, list[PricingResolution]] = {}
+    for grouping_source, model, _row_source, inp, out, cached in rows:
+        entry, status = resolve(model, pricing)
+        per_src_statuses.setdefault(grouping_source, []).append(status)
+        if entry is not None:
+            tc = split_tokens_for_cost(entry, inp, out, cached)
+            per_src_cost[grouping_source] = per_src_cost.get(
+                grouping_source, 0.0
+            ) + compute_cost(tc, entry)
         else:
-            tc: TokenCounts = {
-                "input_tokens": inp,
-                "output_tokens": out,
-                "cache_read_input_tokens": cached,
-            }
-            costs[source] += compute_cost(tc, entry)  # type: ignore[operator]
+            per_src_cost.setdefault(grouping_source, 0.0)
 
-    return costs
+    result: dict[str, tuple[float | None, CostStatus]] = {}
+    for src, statuses in per_src_statuses.items():
+        roll = rollup_cost_status(statuses)
+        cost: float | None = None if roll == "missing" else per_src_cost.get(src, 0.0)
+        result[src] = (cost, roll)
+    return result
 
 
 def build_router(db_path: Path) -> APIRouter:
@@ -445,13 +434,14 @@ def build_router(db_path: Path) -> APIRouter:
         duration_m = duration_s / 60.0 if duration_s > 0 else 0.0
         rpm = raw.requests / duration_m if duration_m > 0 else 0.0
         tpm = raw.total_tokens / duration_m if duration_m > 0 else 0.0
-        cost = _compute_totals_cost(
+        cost, cost_status = _compute_totals_cost(
             conn, start, end, pricing, models=models_list, api_keys=raw_keys
         )
         totals = Totals(
             requests=raw.requests,
             tokens=raw.total_tokens,
             cost=cost,
+            cost_status=cost_status,
             rpm=rpm,
             tpm=tpm,
         )
@@ -572,7 +562,7 @@ def build_router(db_path: Path) -> APIRouter:
 
                 # Run the cost breakdown over ALL models (no model restriction)
                 # so __all__ sums across every model.
-                cell_costs = _query_bucket_model_costs(
+                cell_costs, model_statuses = _query_bucket_model_costs(
                     conn, start, end, bfmt, pricing, models=None, api_keys=raw_keys
                 )
 
@@ -598,7 +588,18 @@ def build_router(db_path: Path) -> APIRouter:
                         model_costs[mdl].get(lbl, 0.0) for lbl in labels
                     ]
 
-                return TimeseriesResponse(buckets=labels, series=cost_series)
+                all_statuses: list[PricingResolution] = []
+                for sts in model_statuses.values():
+                    all_statuses.extend(sts)
+                series_status: dict[str, CostStatus] = {
+                    "__all__": rollup_cost_status(all_statuses),
+                }
+                for mdl in output_model_keys:
+                    series_status[mdl] = rollup_cost_status(model_statuses.get(mdl, []))
+
+                return TimeseriesResponse(
+                    buckets=labels, series=cost_series, series_status=series_status
+                )
 
             else:
                 # Explicit models= filter: get dense labels via tokens query,
@@ -614,7 +615,7 @@ def build_router(db_path: Path) -> APIRouter:
                 )
                 labels = ts.buckets
 
-                cell_costs = _query_bucket_model_costs(
+                cell_costs, model_statuses = _query_bucket_model_costs(
                     conn,
                     start,
                     end,
@@ -635,7 +636,16 @@ def build_router(db_path: Path) -> APIRouter:
                         mdl_bkt.get(lbl, 0.0) for lbl in labels
                     ]
 
-                return TimeseriesResponse(buckets=labels, series=cost_series_explicit)
+                series_status_explicit: dict[str, CostStatus] = {
+                    mdl: rollup_cost_status(model_statuses.get(mdl, []))
+                    for mdl in models_list
+                }
+
+                return TimeseriesResponse(
+                    buckets=labels,
+                    series=cost_series_explicit,
+                    series_status=series_status_explicit,
+                )
 
         # Non-cost metrics: delegate entirely to query_timeseries.
         fetch_metric: Literal["requests", "tokens", "cost"] = metric
@@ -720,7 +730,8 @@ def build_router(db_path: Path) -> APIRouter:
                 total_tokens=row.total_tokens,
                 failed=row.failed,
                 avg_latency_ms=row.avg_latency_ms,
-                cost=cost_map.get(row.api_key),
+                cost=cost_map.get(row.api_key, (None, "missing"))[0],
+                cost_status=cost_map.get(row.api_key, (None, "missing"))[1],
             )
             for row in rows
         ]
@@ -754,18 +765,32 @@ def build_router(db_path: Path) -> APIRouter:
         rows = query_model_stats(
             conn, start, end, models=models_list, api_keys=raw_keys
         )
+
+        grouped = _grouped_cost_rows(
+            conn, start, end, "1", "1", models=models_list, api_keys=raw_keys
+        )
+        per_model_cost: dict[str, float] = {}
+        per_model_status: dict[str, list[PricingResolution]] = {}
+        if pricing:
+            for _const, model, _source, inp, out, cached in grouped:
+                entry, status = resolve(model, pricing)
+                per_model_status.setdefault(model, []).append(status)
+                if entry is not None:
+                    tc = split_tokens_for_cost(entry, inp, out, cached)
+                    per_model_cost[model] = per_model_cost.get(
+                        model, 0.0
+                    ) + compute_cost(tc, entry)
+
         result: list[ModelStat] = []
         for row in rows:
-            entry = resolve(row.model, pricing) if pricing else None
-            if entry is None:
+            if not pricing:
                 cost: float | None = None
+                cost_status: CostStatus = "missing"
             else:
-                tc: TokenCounts = {
-                    "input_tokens": row.input_tokens,
-                    "output_tokens": row.output_tokens,
-                    "cache_read_input_tokens": row.cached_tokens,
-                }
-                cost = compute_cost(tc, entry)
+                statuses = per_model_status.get(row.model, [])
+                roll = rollup_cost_status(statuses)
+                cost_status = roll
+                cost = None if roll == "missing" else per_model_cost.get(row.model, 0.0)
             result.append(
                 ModelStat(
                     model=row.model,
@@ -778,6 +803,7 @@ def build_router(db_path: Path) -> APIRouter:
                     failed=row.failed,
                     avg_latency_ms=row.avg_latency_ms,
                     cost=cost,
+                    cost_status=cost_status,
                 )
             )
         return result
@@ -818,7 +844,8 @@ def build_router(db_path: Path) -> APIRouter:
                 requests=row.requests,
                 total_tokens=row.total_tokens,
                 failed=row.failed,
-                cost=cost_map.get(row.source),
+                cost=cost_map.get(row.source, (None, "missing"))[0],
+                cost_status=cost_map.get(row.source, (None, "missing"))[1],
             )
             for row in rows
         ]

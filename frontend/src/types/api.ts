@@ -2,10 +2,13 @@ export type Range = '7h' | '24h' | '7d' | 'all';
 export type Bucket = 'hour' | 'day';
 export type Metric = 'requests' | 'tokens' | 'cost';
 
+export type CostStatus = 'live' | 'partial_missing' | 'missing';
+
 export interface Totals {
   requests: number;
   tokens: number;
   cost: number | null;
+  cost_status: CostStatus;
   rpm: number;
   tpm: number;
 }
@@ -31,6 +34,7 @@ export interface OverviewResponse {
 export interface TimeseriesResponse {
   buckets: string[];
   series: Record<string, number[]>;
+  series_status: Record<string, CostStatus>;
 }
 
 export interface TokenBreakdownResponse {
@@ -48,6 +52,7 @@ export interface ApiStat {
   output_tokens: number;
   total_tokens: number;
   cost: number | null;
+  cost_status: CostStatus;
   failed: number;
   avg_latency_ms: number;
 }
@@ -61,6 +66,7 @@ export interface ModelStat {
   reasoning_tokens: number;
   total_tokens: number;
   cost: number | null;
+  cost_status: CostStatus;
   avg_latency_ms: number;
   failed: number;
 }
@@ -71,6 +77,7 @@ export interface CredentialStat {
   total_tokens: number;
   failed: number;
   cost: number | null;
+  cost_status: CostStatus;
 }
 
 export interface LatencyPercentiles {

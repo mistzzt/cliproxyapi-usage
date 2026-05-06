@@ -70,6 +70,25 @@ def client_no_pricing(app_no_pricing):
         yield c
 
 
+@pytest.fixture()
+def app_with_full_pricing(seeded_db_path: pathlib.Path):
+    """App with pricing for every model present in the seed."""
+    records = _load_records()
+    distinct_models = sorted({r.model for r in records})
+    pricing = {
+        m: ModelPricing(input_cost_per_token=1e-6, output_cost_per_token=1e-6)
+        for m in distinct_models
+    }
+    cfg = ServerConfig(db_path=seeded_db_path)  # pyright: ignore[reportCallIssue]
+    return create_app(cfg, pricing_provider=lambda: pricing)
+
+
+@pytest.fixture()
+def client_with_full_pricing(app_with_full_pricing):
+    with TestClient(app_with_full_pricing) as c:
+        yield c
+
+
 def _make_stub_pricing(model: str, rate: float) -> dict[str, ModelPricing]:
     """Single-model pricing stub: rate is input_cost_per_token."""
     return {model: ModelPricing(input_cost_per_token=rate, output_cost_per_token=rate)}
@@ -261,7 +280,7 @@ def _compute_expected_bucket_costs(
     # Compute cost per (bucket, model), then sum per bucket
     bucket_costs: dict[str, float] = defaultdict(float)
     for (lbl, model), tok in sums.items():
-        entry = resolve(model, pricing)
+        entry, _ = resolve(model, pricing)
         if entry is None:
             continue
         tc: TokenCounts = {
@@ -662,7 +681,11 @@ def test_credential_stats_models_filter_restricts_rows(client_no_pricing) -> Non
     assert resp.status_code == 200, resp.text
     rows = resp.json()
 
-    expected_credentials = {r.source for r in records if r.model == model}
+    from cliproxy_usage_server.redact import redact_source
+
+    expected_credentials = {
+        redact_source(r.source) for r in records if r.model == model
+    }
     returned_credentials = {row["source"] for row in rows}
     assert returned_credentials == expected_credentials
 
@@ -722,3 +745,172 @@ def test_overview_api_keys_filter_unknown_yields_zero(client_no_pricing) -> None
     resp = client_no_pricing.get("/api/overview?range=all&api_keys=does-not-exist")
     assert resp.status_code == 200
     assert resp.json()["totals"]["requests"] == 0
+
+
+def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> None:
+    """OpenAI-convention rows use pricing metadata, not source prefixes."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+        "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+        "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "2026-05-01T00:00:00.000000Z",
+            "sk-test",
+            "gpt-5",
+            "openai-account@example.test",
+            "0",
+            100,
+            1000,
+            500,
+            0,
+            200,
+            1500,
+            0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    pricing_map = {
+        "gpt-5": ModelPricing(
+            litellm_provider="openai",
+            input_cost_per_token=1.25e-6,
+            output_cost_per_token=1e-5,
+            cache_read_input_token_cost=1.25e-7,
+        )
+    }
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing_map)
+
+    expected_input = 1000 - 200
+    expected = expected_input * 1.25e-6 + 500 * 1e-5 + 200 * 1.25e-7
+
+    with TestClient(app) as client:
+        resp = client.get("/api/api-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["cost"] == pytest.approx(expected)
+
+
+def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
+    """Non-OpenAI: cached billed at cache-read rate; input unchanged."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+        "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+        "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "2026-05-01T00:00:00.000000Z",
+            "sk-test",
+            "claude-sonnet-4-5",
+            "claude-account@example.test",
+            "0",
+            100,
+            1000,
+            500,
+            0,
+            200,
+            1500,
+            0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    pricing_map = {
+        "claude-sonnet-4-5": ModelPricing(
+            input_cost_per_token=3e-6,
+            output_cost_per_token=1.5e-5,
+            cache_read_input_token_cost=3e-7,
+        )
+    }
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing_map)
+
+    expected = 1000 * 3e-6 + 500 * 1.5e-5 + 200 * 3e-7
+
+    with TestClient(app) as client:
+        resp = client.get("/api/api-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        assert rows[0]["cost"] == pytest.approx(expected)
+
+
+def test_timeseries_cost_emits_series_status_live(client_with_full_pricing) -> None:
+    """When every model in the window has live pricing, series_status is all 'live'."""
+    resp = client_with_full_pricing.get(
+        "/api/timeseries?range=all&bucket=day&metric=cost"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "series_status" in body
+    assert body["series_status"]
+    assert all(v == "live" for v in body["series_status"].values())
+
+
+def test_timeseries_cost_emits_series_status_missing(client_no_pricing) -> None:
+    """With empty pricing every series is 'missing'."""
+    resp = client_no_pricing.get("/api/timeseries?range=all&bucket=day&metric=cost")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["series_status"]["__all__"] == "missing"
+
+
+def test_timeseries_non_cost_metric_has_empty_series_status(
+    client_with_full_pricing,
+) -> None:
+    resp = client_with_full_pricing.get(
+        "/api/timeseries?range=all&bucket=day&metric=tokens"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["series_status"] == {}
+
+
+def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
+    """API-key sources get redacted; email sources pass through."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    rows = [
+        ("openai:sk-proj-secret-abc12345", "gpt-5"),
+        ("codex-reviewer@example.test", "gpt-5"),
+        ("anthropic:sk-ant-01-tail9999", "claude-sonnet-4-5"),
+    ]
+    for i, (source, model) in enumerate(rows):
+        conn.execute(
+            "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+            "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+            "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"2026-05-01T00:00:0{i}.000000Z",
+                "sk-test",
+                model,
+                source,
+                "0",
+                100,
+                100,
+                50,
+                0,
+                0,
+                150,
+                0,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        resp = client.get("/api/credential-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        sources = {row["source"] for row in resp.json()}
+        assert "openai:sk-*******-abc12345" in sources
+        assert "codex-reviewer@example.test" in sources
+        assert "anthropic:sk-*******-tail9999" in sources
+        assert "openai:sk-proj-secret-abc12345" not in sources

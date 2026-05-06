@@ -4,12 +4,13 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import type { ModelStat } from '@/types/api';
 import { sortRows } from './sort';
 import type { SortState } from './sort';
+import { CostCell } from './CostCell';
 import styles from './ModelStatsCard.module.scss';
 
 export interface ModelStatsCardProps {
   rows: ModelStat[];
   loading: boolean;
-  hasPricing: boolean;
+  hasPricing?: boolean;
 }
 
 type ModelSortKey =
@@ -29,7 +30,7 @@ function arrow(state: SortState<ModelSortKey>, key: ModelSortKey): string {
   return state.order === 'asc' ? ' ▲' : ' ▼';
 }
 
-export default function ModelStatsCard({ rows, loading, hasPricing }: ModelStatsCardProps) {
+export default function ModelStatsCard({ rows, loading }: ModelStatsCardProps) {
   const [sort, setSort] = useState<SortState<ModelSortKey>>({ key: 'requests', order: 'desc' });
 
   const handleSort = (key: ModelSortKey) => {
@@ -42,11 +43,6 @@ export default function ModelStatsCard({ rows, loading, hasPricing }: ModelStats
   };
 
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
-
-  const renderCost = (cost: number | null) => {
-    if (!hasPricing || cost === null) return '—';
-    return `$${cost.toFixed(4)}`;
-  };
 
   return (
     <Card title="Model Stats">
@@ -124,7 +120,7 @@ export default function ModelStatsCard({ rows, loading, hasPricing }: ModelStats
                     <td>{row.cached_tokens.toLocaleString()}</td>
                     <td>{row.reasoning_tokens.toLocaleString()}</td>
                     <td>{row.total_tokens.toLocaleString()}</td>
-                    <td>{renderCost(row.cost)}</td>
+                    <td><CostCell cost={row.cost} status={row.cost_status} /></td>
                     <td>{row.avg_latency_ms.toFixed(0)}</td>
                     <td>{row.failed.toLocaleString()}</td>
                   </tr>

@@ -14,3 +14,19 @@ def redact_key(key: str) -> str:
     # the input is raw or already-redacted.
     base = key.removeprefix("*******")
     return f"*******{base[-4:]}"
+
+
+def redact_source(source: str) -> str:
+    """Redact a credential source for safe display.
+
+    OAuth sources are email-like values and pass through unchanged. All
+    non-email values are treated as opaque keys/secrets and redacted as a
+    single string.
+    """
+    if not source:
+        return source
+    if "***" in source:
+        return source
+    if "@" in source:
+        return source
+    return redact_key(source)

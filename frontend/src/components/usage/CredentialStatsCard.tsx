@@ -12,12 +12,13 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import type { CredentialStat } from '@/types/api';
 import { sortRows } from './sort';
 import type { SortState } from './sort';
+import { CostCell } from './CostCell';
 import styles from './CredentialStatsCard.module.scss';
 
 export interface CredentialStatsCardProps {
   rows: CredentialStat[];
   loading: boolean;
-  hasPricing: boolean;
+  hasPricing?: boolean;
 }
 
 type CredSortKey = 'source' | 'requests' | 'total_tokens' | 'failed' | 'cost';
@@ -27,7 +28,7 @@ function arrow(state: SortState<CredSortKey>, key: CredSortKey): string {
   return state.order === 'asc' ? ' ▲' : ' ▼';
 }
 
-export default function CredentialStatsCard({ rows, loading, hasPricing }: CredentialStatsCardProps) {
+export default function CredentialStatsCard({ rows, loading }: CredentialStatsCardProps) {
   const [sort, setSort] = useState<SortState<CredSortKey>>({ key: 'requests', order: 'desc' });
 
   const handleSort = (key: CredSortKey) => {
@@ -40,11 +41,6 @@ export default function CredentialStatsCard({ rows, loading, hasPricing }: Crede
   };
 
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
-
-  const renderCost = (cost: number | null) => {
-    if (!hasPricing || cost === null) return '—';
-    return `$${cost.toFixed(4)}`;
-  };
 
   return (
     <Card title="Credential Stats">
@@ -88,13 +84,13 @@ export default function CredentialStatsCard({ rows, loading, hasPricing }: Crede
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row) => (
-                  <tr key={row.source}>
+                {sorted.map((row, index) => (
+                  <tr key={`${row.source}-${index}`}>
                     <td>{row.source}</td>
                     <td>{row.requests.toLocaleString()}</td>
                     <td>{row.total_tokens.toLocaleString()}</td>
                     <td>{row.failed.toLocaleString()}</td>
-                    <td>{renderCost(row.cost)}</td>
+                    <td><CostCell cost={row.cost} status={row.cost_status} /></td>
                   </tr>
                 ))}
               </tbody>

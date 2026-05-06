@@ -1,6 +1,6 @@
 import pytest
 
-from cliproxy_usage_server.redact import redact_key
+from cliproxy_usage_server.redact import redact_key, redact_source
 from cliproxy_usage_server.schemas import ApiStat
 
 
@@ -45,7 +45,44 @@ def test_api_stat_redacts_api_key_on_construction() -> None:
         failed=0,
         avg_latency_ms=0.0,
         cost=None,
+        cost_status="missing",
     )
     assert stat.api_key == "sk-*******-abc123xyz"
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # OAuth emails pass through unchanged
+        ("codex-user@example.test", "codex-user@example.test"),
+        ("claude-user@example.test", "claude-user@example.test"),
+        ("team-account@example.test", "team-account@example.test"),
+        # Non-email values are treated as keys/opaque secrets
+        ("openai:sk-proj-abc123xyz", "openai:sk-*******-abc123xyz"),
+        ("anthropic:sk-ant-12345678", "anthropic:sk-*******-12345678"),
+        ("openai-compat:sk-team-proj-abcd", "openai-*******-abcd"),
+        ("openai:abc123xyz9", "*******xyz9"),
+        ("sk-rawkey-abc-1234", "sk-*******-1234"),
+        ("rawkey1234", "*******1234"),
+        # Empty
+        ("", ""),
+    ],
+)
+def test_redact_source(raw: str, expected: str) -> None:
+    assert redact_source(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "codex-user@example.test",
+        "openai:sk-proj-abc123xyz",
+        "openai:abc123xyz9",
+        "sk-rawkey-abc-1234",
+        "",
+    ],
+)
+def test_redact_source_idempotent(raw: str) -> None:
+    once = redact_source(raw)
+    twice = redact_source(once)
+    assert once == twice

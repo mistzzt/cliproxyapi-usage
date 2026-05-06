@@ -41,14 +41,14 @@ def pricing_map(raw_fixture: dict[str, Any]) -> dict[str, ModelPricing]:
 
 def test_resolve_exact(pricing_map: dict[str, ModelPricing]) -> None:
     """Name present as-is → returns that entry."""
-    result = resolve("gpt-5", pricing_map)
+    result, _ = resolve("gpt-5", pricing_map)
     assert result is not None
     assert result.input_cost_per_token == 3e-6
 
 
 def test_resolve_via_prefix(pricing_map: dict[str, ModelPricing]) -> None:
     """'claude-4-sonnet-20250514' → resolves to 'anthropic/claude-4-sonnet-20250514'."""
-    result = resolve("claude-4-sonnet-20250514", pricing_map)
+    result, _ = resolve("claude-4-sonnet-20250514", pricing_map)
     assert result is not None
     # Should be the anthropic entry (has tiered fields)
     assert result.input_cost_per_token_above_200k_tokens == 6e-6
@@ -57,14 +57,14 @@ def test_resolve_via_prefix(pricing_map: dict[str, ModelPricing]) -> None:
 def test_resolve_substring_fallback(pricing_map: dict[str, ModelPricing]) -> None:
     """Model name is a unique substring of a key → returns that entry."""
     # "gemini-2.5-flash" is in pricing_map; "gemini-2.5" should match it
-    result = resolve("gemini-2.5", pricing_map)
+    result, _ = resolve("gemini-2.5", pricing_map)
     assert result is not None
     assert result.input_cost_per_token == 1.25e-7
 
 
 def test_resolve_missing(pricing_map: dict[str, ModelPricing]) -> None:
     """Unrelated name → None."""
-    result = resolve("totally-unknown-model-xyz", pricing_map)
+    result, _ = resolve("totally-unknown-model-xyz", pricing_map)
     assert result is None
 
 

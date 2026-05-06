@@ -85,17 +85,21 @@ export default function CostTrendChart({ data, loading, hasPricing }: CostTrendC
 
     const datasets = entries.map(([key, values]) => {
       const isAll = key === '__all__';
-      const color = isAll ? ALL_MODEL_COLOR : modelColor(key);
+      const status = data.series_status?.[key] ?? 'live';
+      const isWarning = status !== 'live';
+      const baseColor = isAll ? ALL_MODEL_COLOR : modelColor(key);
+      const color = isWarning ? 'rgba(214, 69, 61, 0.9)' : baseColor;
       return {
         label: isAll ? 'All' : key,
         data: values,
         borderColor: color,
-        backgroundColor: isAll ? buildAllGradient : 'transparent',
+        backgroundColor: isAll && !isWarning ? buildAllGradient : 'transparent',
         pointBackgroundColor: color,
         pointBorderColor: color,
         borderWidth: isAll ? 3 : 1.5,
+        borderDash: isWarning ? [6, 4] : undefined,
         pointRadius: data.buckets.length > 60 ? 0 : isAll ? 3 : 2,
-        fill: isAll,
+        fill: isAll && !isWarning,
         tension: 0.35,
       };
     });
@@ -125,6 +129,20 @@ export default function CostTrendChart({ data, loading, hasPricing }: CostTrendC
       ) : (
         <div className={styles.chartArea}>
           <Line data={chartData} options={chartOptions} />
+          {(() => {
+            const degraded = Object.entries(data?.series_status ?? {}).filter(
+              ([, s]) => s !== 'live',
+            );
+            if (degraded.length === 0) return null;
+            return (
+              <small className={styles.warning}>
+                Partial/missing pricing:{' '}
+                {degraded
+                  .map(([n]) => (n === '__all__' ? 'total' : n))
+                  .join(', ')}
+              </small>
+            );
+          })()}
         </div>
       )}
     </Card>
