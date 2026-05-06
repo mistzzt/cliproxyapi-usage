@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from cliproxy_usage_server.aggregate import (
     query_api_stats,
@@ -49,10 +49,6 @@ from cliproxy_usage_server.pricing import (
     resolve,
     rollup_cost_status,
     split_tokens_for_cost,
-)
-from cliproxy_usage_server.pricing_refresh import (
-    PricingRefreshState,
-    maybe_refresh_pricing,
 )
 from cliproxy_usage_server.schemas import (
     ApiKeysResponse,
@@ -133,31 +129,6 @@ _BucketParam = Annotated[Literal["hour", "day"], Query()]
 _MetricParam = Annotated[Literal["requests", "tokens", "cost"], Query()]
 
 
-def _maybe_refresh_pricing(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    statuses: list[PricingResolution],
-) -> None:
-    """Schedule a non-blocking pricing refresh if any status is 'missing'."""
-    if not any(s == "missing" for s in statuses):
-        return
-    state: PricingRefreshState | None = getattr(
-        request.app.state, "pricing_refresh", None
-    )
-    if state is None:
-        return
-    target = request.app.state.pricing
-    config = getattr(request.app.state, "pricing_config", None)
-    if config is None:
-        return
-    background_tasks.add_task(
-        maybe_refresh_pricing,
-        state=state,
-        fetcher=config.fetcher,
-        target=target,
-    )
-
-
 def _compute_totals_cost(
     conn: sqlite3.Connection,
     start: datetime | None,
@@ -165,14 +136,14 @@ def _compute_totals_cost(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> tuple[float | None, CostStatus, list[PricingResolution]]:
+) -> tuple[float | None, CostStatus]:
     """Sum costs across all (model, source) cells in the window.
 
-    Returns (cost, cost_status, statuses). cost is None only when status == "missing".
-    Empty pricing map -> (None, "missing", []).
+    Returns (cost, cost_status). cost is None only when status == "missing".
+    Empty pricing map -> (None, "missing").
     """
     if not pricing:
-        return None, "missing", ["missing"]
+        return None, "missing"
 
     rows = _grouped_cost_rows(
         conn,
@@ -194,7 +165,7 @@ def _compute_totals_cost(
 
     roll = rollup_cost_status(statuses)
     cost: float | None = None if roll == "missing" else total
-    return cost, roll, statuses
+    return cost, roll
 
 
 def _query_bucket_model_costs(
@@ -345,10 +316,10 @@ def _cost_by_api_key(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> tuple[dict[str, tuple[float | None, CostStatus]], list[PricingResolution]]:
-    """Compute (cost, cost_status) per api_key plus a flat status list."""
+) -> dict[str, tuple[float | None, CostStatus]]:
+    """Compute (cost, cost_status) per api_key."""
     if not pricing:
-        return {}, ["missing"]
+        return {}
 
     rows = _grouped_cost_rows(
         conn, start, end, "api_key", "api_key ASC", models=models, api_keys=api_keys
@@ -367,15 +338,13 @@ def _cost_by_api_key(
             per_key_cost.setdefault(api_key, 0.0)
 
     result: dict[str, tuple[float | None, CostStatus]] = {}
-    flat: list[PricingResolution] = []
     for api_key, statuses in per_key_statuses.items():
         roll = rollup_cost_status(statuses)
         cost: float | None = (
             None if roll == "missing" else per_key_cost.get(api_key, 0.0)
         )
         result[api_key] = (cost, roll)
-        flat.extend(statuses)
-    return result, flat
+    return result
 
 
 def _cost_by_credential(
@@ -385,10 +354,10 @@ def _cost_by_credential(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
-) -> tuple[dict[str, tuple[float | None, CostStatus]], list[PricingResolution]]:
-    """Compute (cost, cost_status) per ``source`` plus a flat status list."""
+) -> dict[str, tuple[float | None, CostStatus]]:
+    """Compute (cost, cost_status) per ``source``."""
     if not pricing:
-        return {}, ["missing"]
+        return {}
 
     rows = _grouped_cost_rows(
         conn, start, end, "source", "source ASC", models=models, api_keys=api_keys
@@ -407,13 +376,11 @@ def _cost_by_credential(
             per_src_cost.setdefault(grouping_source, 0.0)
 
     result: dict[str, tuple[float | None, CostStatus]] = {}
-    flat: list[PricingResolution] = []
     for src, statuses in per_src_statuses.items():
         roll = rollup_cost_status(statuses)
         cost: float | None = None if roll == "missing" else per_src_cost.get(src, 0.0)
         result[src] = (cost, roll)
-        flat.extend(statuses)
-    return result, flat
+    return result
 
 
 def build_router(db_path: Path) -> APIRouter:
@@ -440,8 +407,6 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/overview", response_model=OverviewResponse)
     def overview(
-        request: Request,
-        background_tasks: BackgroundTasks,
         range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
@@ -469,10 +434,9 @@ def build_router(db_path: Path) -> APIRouter:
         duration_m = duration_s / 60.0 if duration_s > 0 else 0.0
         rpm = raw.requests / duration_m if duration_m > 0 else 0.0
         tpm = raw.total_tokens / duration_m if duration_m > 0 else 0.0
-        cost, cost_status, totals_statuses = _compute_totals_cost(
+        cost, cost_status = _compute_totals_cost(
             conn, start, end, pricing, models=models_list, api_keys=raw_keys
         )
-        _maybe_refresh_pricing(request, background_tasks, totals_statuses)
         totals = Totals(
             requests=raw.requests,
             tokens=raw.total_tokens,
@@ -547,8 +511,6 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/timeseries", response_model=TimeseriesResponse)
     def timeseries(
-        request: Request,
-        background_tasks: BackgroundTasks,
         range_: _RangeParam,
         bucket: _BucketParam,
         metric: _MetricParam,
@@ -635,8 +597,6 @@ def build_router(db_path: Path) -> APIRouter:
                 for mdl in output_model_keys:
                     series_status[mdl] = rollup_cost_status(model_statuses.get(mdl, []))
 
-                _maybe_refresh_pricing(request, background_tasks, all_statuses)
-
                 return TimeseriesResponse(
                     buckets=labels, series=cost_series, series_status=series_status
                 )
@@ -680,10 +640,6 @@ def build_router(db_path: Path) -> APIRouter:
                     mdl: rollup_cost_status(model_statuses.get(mdl, []))
                     for mdl in models_list
                 }
-                all_explicit: list[PricingResolution] = []
-                for mdl in models_list:
-                    all_explicit.extend(model_statuses.get(mdl, []))
-                _maybe_refresh_pricing(request, background_tasks, all_explicit)
 
                 return TimeseriesResponse(
                     buckets=labels,
@@ -743,8 +699,6 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/api-stats", response_model=list[ApiStat])
     def api_stats(
-        request: Request,
-        background_tasks: BackgroundTasks,
         range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
@@ -764,10 +718,9 @@ def build_router(db_path: Path) -> APIRouter:
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         rows = query_api_stats(conn, start, end, models=models_list, api_keys=raw_keys)
-        cost_map, api_statuses = _cost_by_api_key(
+        cost_map = _cost_by_api_key(
             conn, start, end, pricing, models=models_list, api_keys=raw_keys
         )
-        _maybe_refresh_pricing(request, background_tasks, api_statuses)
         return [
             ApiStat(
                 api_key=row.api_key,
@@ -789,8 +742,6 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/model-stats", response_model=list[ModelStat])
     def model_stats(
-        request: Request,
-        background_tasks: BackgroundTasks,
         range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
@@ -829,10 +780,6 @@ def build_router(db_path: Path) -> APIRouter:
                     per_model_cost[model] = per_model_cost.get(
                         model, 0.0
                     ) + compute_cost(tc, entry)
-        flat_model_statuses: list[PricingResolution] = [
-            s for sts in per_model_status.values() for s in sts
-        ]
-        _maybe_refresh_pricing(request, background_tasks, flat_model_statuses)
 
         result: list[ModelStat] = []
         for row in rows:
@@ -867,8 +814,6 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/credential-stats", response_model=list[CredentialStat])
     def credential_stats(
-        request: Request,
-        background_tasks: BackgroundTasks,
         range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
@@ -890,10 +835,9 @@ def build_router(db_path: Path) -> APIRouter:
         rows = query_credential_stats(
             conn, start, end, models=models_list, api_keys=raw_keys
         )
-        cost_map, cred_statuses = _cost_by_credential(
+        cost_map = _cost_by_credential(
             conn, start, end, pricing, models=models_list, api_keys=raw_keys
         )
-        _maybe_refresh_pricing(request, background_tasks, cred_statuses)
         return [
             CredentialStat(
                 source=row.source,

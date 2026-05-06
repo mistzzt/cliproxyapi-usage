@@ -148,10 +148,11 @@ disk-cached locally) and a few provider-aware adjustments. Three things to know:
   cache-write/read ratio. There is no purely-backend fix because the data
   needed to split the two buckets is not in the queue payload.
 - **Missing pricing.** When liteLLM has no entry for a model the dashboard
-  renders that row's cost as `—` in red ("missing") and triggers a
-  background re-fetch (rate-limited to one per minute). Roll-up rows that
-  combine some live and some missing models render their partial total in
-  red ("partial_missing").
+  renders that row's cost as `—` in red ("missing"). The pricing map is
+  refreshed periodically (`PRICING_TTL_SECONDS`, default daily); restart the
+  server or shorten the TTL if you need a newly-released model picked up
+  sooner. Roll-up rows that combine some live and some missing models render
+  their partial total in red ("partial_missing").
 
 ### Production run (single process)
 

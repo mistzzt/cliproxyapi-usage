@@ -7,7 +7,6 @@ import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
@@ -17,7 +16,6 @@ from fastapi.staticfiles import StaticFiles
 
 from cliproxy_usage_server.config import ServerConfig, load_config
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
-from cliproxy_usage_server.pricing_refresh import PricingRefreshState
 from cliproxy_usage_server.quota.client import CliProxyClient
 from cliproxy_usage_server.quota.providers import PROVIDERS
 from cliproxy_usage_server.quota.service import QuotaService
@@ -34,22 +32,6 @@ def _resolve_cache_path(config: ServerConfig) -> Path:
     if config.pricing_cache is not None:
         return config.pricing_cache
     return config.db_path.parent / "pricing.json"
-
-
-@dataclass
-class _PricingConfig:
-    fetcher: Callable[[], dict[str, ModelPricing]]
-
-
-def _build_fetcher(config: ServerConfig) -> Callable[[], dict[str, ModelPricing]]:
-    def fetch() -> dict[str, ModelPricing]:
-        return fetch_pricing(
-            url=config.pricing_url,
-            cache_path=_resolve_cache_path(config),
-            ttl_seconds=0,
-        )
-
-    return fetch
 
 
 async def _refresh_loop(app: FastAPI, config: ServerConfig) -> None:
@@ -157,7 +139,6 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if pricing_provider is not None:
             app.state.pricing = dict(pricing_provider())
-            app.state.pricing_refresh = PricingRefreshState()
             try:
                 yield
             finally:
@@ -171,8 +152,6 @@ def create_app(
             cache_path=_resolve_cache_path(config),
             ttl_seconds=config.pricing_ttl_seconds,
         )
-        app.state.pricing_refresh = PricingRefreshState()
-        app.state.pricing_config = _PricingConfig(fetcher=_build_fetcher(config))
         refresh_task = asyncio.create_task(_refresh_loop(app, config))
         try:
             yield
