@@ -11,9 +11,10 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from cliproxy_usage_server.pricing import CostStatus
-from cliproxy_usage_server.redact import redact_key
+from cliproxy_usage_server.redact import redact_key, redact_source
 
 RedactedApiKey = Annotated[str, BeforeValidator(redact_key)]
+RedactedSource = Annotated[str, BeforeValidator(redact_source)]
 
 
 class Totals(BaseModel):
@@ -142,7 +143,7 @@ class CredentialStat(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    source: str
+    source: RedactedSource
     requests: int
     total_tokens: int
     failed: int

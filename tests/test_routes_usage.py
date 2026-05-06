@@ -681,7 +681,9 @@ def test_credential_stats_models_filter_restricts_rows(client_no_pricing) -> Non
     assert resp.status_code == 200, resp.text
     rows = resp.json()
 
-    expected_credentials = {r.source for r in records if r.model == model}
+    from cliproxy_usage_server.redact import redact_source
+
+    expected_credentials = {redact_source(r.source) for r in records if r.model == model}
     returned_credentials = {row["source"] for row in rows}
     assert returned_credentials == expected_credentials
 
@@ -863,3 +865,38 @@ def test_timeseries_non_cost_metric_has_empty_series_status(client_with_full_pri
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["series_status"] == {}
+
+
+def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
+    """API-key sources get redacted; email sources pass through."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    rows = [
+        ("openai:sk-proj-secret-abc12345", "gpt-5"),
+        ("codex:tester@example.com", "gpt-5"),
+        ("anthropic:sk-ant-01-tail9999", "claude-sonnet-4-5"),
+    ]
+    for i, (source, model) in enumerate(rows):
+        conn.execute(
+            "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+            "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+            "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"2026-05-01T00:00:0{i}.000000Z",
+                "sk-test", model, source, "0", 100, 100, 50, 0, 0, 150, 0,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        resp = client.get("/api/credential-stats?range=all")
+        assert resp.status_code == 200, resp.text
+        sources = {row["source"] for row in resp.json()}
+        assert "openai:sk-*******-abc12345" in sources
+        assert "codex:tester@example.com" in sources
+        assert "anthropic:sk-*******-tail9999" in sources
+        assert "openai:sk-proj-secret-abc12345" not in sources
