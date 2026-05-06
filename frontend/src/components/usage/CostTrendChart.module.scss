@@ -14,3 +14,9 @@
   position: relative;
   height: 240px;
 }
+
+.warning {
+  color: var(--color-danger, #d6453d);
+  display: block;
+  margin-top: 0.25rem;
+}
