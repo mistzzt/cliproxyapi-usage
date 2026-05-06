@@ -28,7 +28,7 @@ def main(
         Accepted for future-proofing; not parsed.
     queue_client:
         Callable that drains one batch of raw queue elements. Tests can inject
-        a fake callable to avoid touching Redis.
+        a fake callable to avoid touching CLIProxyAPI.
 
     Returns
     -------

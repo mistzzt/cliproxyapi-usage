@@ -1,14 +1,14 @@
 # cliproxy-usage
 
-A cron-runnable collector that drains request records from CLIProxyAPI's Redis
-RESP usage queue and stores them in a local SQLite database. Each run pops a
-bounded batch from the upstream queue and inserts new rows by timestamp, so
-running the collector repeatedly is safe. Transient errors exit non-zero so a
-cron scheduler will retry on the next tick.
+A cron-runnable collector that drains request records from CLIProxyAPI's HTTP
+management usage queue and stores them in a local SQLite database. Each run
+pops a bounded batch from the upstream queue and inserts new rows by timestamp,
+so running the collector repeatedly is safe. Transient errors exit non-zero so
+a cron scheduler will retry on the next tick.
 
-Before running the collector, enable usage publishing and the Redis usage queue
-in CLIProxyAPI. See the upstream setup guide:
-https://help.router-for.me/management/redis-usage-queue.html
+Before running the collector, enable usage publishing and the HTTP management
+usage queue in CLIProxyAPI. See the upstream API docs:
+https://help.router-for.me/management/api.html#usage-telemetry-queue
 
 ## Environment variables
 
@@ -17,10 +17,8 @@ https://help.router-for.me/management/redis-usage-queue.html
 | `CLIPROXY_BASE_URL`                   | `http://localhost:8317` | no       |
 | `CLIPROXY_MANAGEMENT_KEY`             | —                       | **yes**  |
 | `USAGE_DB_PATH`                       | `./usage.db`            | no       |
-| `USAGE_QUEUE_KEY`                     | `queue`                 | no       |
 | `USAGE_QUEUE_POP_COUNT`               | `500`                   | no       |
-| `USAGE_QUEUE_POP_SIDE`                | `left`                  | no       |
-| `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS`  | `10.0`                  | no       |
+| `USAGE_HTTP_TIMEOUT_SECONDS`          | `10.0`                  | no       |
 
 ## Install and run
 
@@ -36,31 +34,24 @@ settings):
 CLIPROXY_MANAGEMENT_KEY=your-key \
 CLIPROXY_BASE_URL=http://localhost:8317 \
 USAGE_DB_PATH=./usage.db \
-USAGE_QUEUE_KEY=queue \
 USAGE_QUEUE_POP_COUNT=500 \
-USAGE_QUEUE_POP_SIDE=left \
-USAGE_REDIS_SOCKET_TIMEOUT_SECONDS=10.0 \
+USAGE_HTTP_TIMEOUT_SECONDS=10.0 \
 uv run cliproxy-usage-collect
 ```
 
-- `CLIPROXY_MANAGEMENT_KEY` — required. Used as the Redis `AUTH` password for
-  the CLIProxyAPI RESP listener.
+- `CLIPROXY_MANAGEMENT_KEY` — required. Used as the Bearer token for the
+  CLIProxyAPI management API.
 - `CLIPROXY_BASE_URL` — optional, defaults to `http://localhost:8317`. This is
-  the CLIProxyAPI origin for the RESP listener, not a management API path.
-  Override if your proxy is on a different host/port (e.g.
-  `https://proxy.internal.example.com`).
+  the CLIProxyAPI origin or `/v0/management` base. Override if your proxy is on
+  a different host/port (e.g. `https://proxy.internal.example.com` or
+  `https://proxy.internal.example.com/v0/management`).
 - `USAGE_DB_PATH` — optional, defaults to `./usage.db` (relative to the working
   directory). For a cron deployment, point it at a stable absolute path like
   `/var/lib/cliproxy/usage.db`.
-- `USAGE_QUEUE_KEY` — optional, defaults to `queue`. CLIProxyAPI currently
-  ignores the key argument, but `queue` matches the upstream readability
-  convention.
 - `USAGE_QUEUE_POP_COUNT` — optional, defaults to `500`. This is the maximum
   number of queue elements drained per collector run; valid values are 1-10000.
-- `USAGE_QUEUE_POP_SIDE` — optional, defaults to `left`. Use `left` or `right`
-  to choose which end of the queue this collector drains from.
-- `USAGE_REDIS_SOCKET_TIMEOUT_SECONDS` — optional, defaults to `10.0`. Applies
-  to both Redis connection and read timeouts.
+- `USAGE_HTTP_TIMEOUT_SECONDS` — optional, defaults to `10.0`. Applies to the
+  management API request timeout.
 
 ## Cron example (every 5 minutes)
 
@@ -135,6 +126,33 @@ and `/api/quota/*` (JSON). Successful quota responses are cached for
 the TTL returns the cached value rather than re-hitting the upstream OAuth
 endpoints. When either variable is unset, `/api/quota/*` returns `503` and the
 UI shows a disabled banner; the dashboard remains available.
+
+### Cost accuracy
+
+The webapp computes per-row cost using liteLLM's pricing data
+(`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`,
+disk-cached locally) and a few provider-aware adjustments. Three things to know:
+
+- **Codex/OpenAI rows** apply ccusage's split: upstream returns
+  `cached_tokens` as a *subset* of `input_tokens`, so the dashboard subtracts
+  the cached portion from input before billing input rate, and bills the cached
+  portion at the cache-read rate. This matches the math in
+  `apps/codex/src/command-utils.ts` of `ghcr.io/ryoppippi/ccusage`.
+- **Anthropic rows undercount cache writes.** Upstream CLIProxyAPI collapses
+  Anthropic's `cache_creation_input_tokens` and `cache_read_input_tokens` into
+  a single `cached_tokens` value before pushing to its usage queue. The
+  webapp bills that combined value at the cache-read rate (~10% of input)
+  rather than the cache-creation rate (~125% of input) for the
+  creation portion. Claude totals are therefore a **lower bound** when prompt
+  caching is in use; the magnitude of the undercount depends on your
+  cache-write/read ratio. There is no purely-backend fix because the data
+  needed to split the two buckets is not in the queue payload.
+- **Missing pricing.** When liteLLM has no entry for a model the dashboard
+  renders that row's cost as `—` in red ("missing"). The pricing map is
+  refreshed periodically (`PRICING_TTL_SECONDS`, default daily); restart the
+  server or shorten the TTL if you need a newly-released model picked up
+  sooner. Roll-up rows that combine some live and some missing models render
+  their partial total in red ("partial_missing").
 
 ### Production run (single process)
 

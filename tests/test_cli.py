@@ -35,7 +35,7 @@ def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> str:
 
 def _queue_client(records: list[str]):
     def pop_usage_records(cfg: Config) -> list[str]:
-        assert cfg.queue_key == "queue"
+        assert cfg.queue_pop_count == 500
         return records
 
     return pop_usage_records
@@ -127,7 +127,7 @@ def test_queue_auth_error_returns_3(env_vars, capsys):
 
 def test_queue_transient_error_returns_1(env_vars, capsys):
     def queue_client(cfg: Config) -> list[str]:
-        raise TransientError("redis unavailable")
+        raise TransientError("usage queue unavailable")
 
     result = main(queue_client=queue_client)
 

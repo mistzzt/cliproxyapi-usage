@@ -10,9 +10,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
-from cliproxy_usage_server.redact import redact_key
+from cliproxy_usage_server.pricing import CostStatus
+from cliproxy_usage_server.redact import redact_key, redact_source
 
 RedactedApiKey = Annotated[str, BeforeValidator(redact_key)]
+RedactedSource = Annotated[str, BeforeValidator(redact_source)]
 
 
 class Totals(BaseModel):
@@ -23,6 +25,7 @@ class Totals(BaseModel):
     requests: int
     tokens: int
     cost: float | None
+    cost_status: CostStatus
     rpm: float
     tpm: float
 
@@ -86,6 +89,7 @@ class TimeseriesResponse(BaseModel):
 
     buckets: list[str]  # ISO-8601 strings
     series: dict[str, list[float]]  # key: model name or "__all__"
+    series_status: dict[str, CostStatus] = Field(default_factory=dict)
 
 
 class TokenBreakdownResponse(BaseModel):
@@ -111,6 +115,7 @@ class ApiStat(BaseModel):
     output_tokens: int
     total_tokens: int
     cost: float | None
+    cost_status: CostStatus
     failed: int
     avg_latency_ms: float
 
@@ -128,6 +133,7 @@ class ModelStat(BaseModel):
     reasoning_tokens: int
     total_tokens: int
     cost: float | None
+    cost_status: CostStatus
     avg_latency_ms: float
     failed: int
 
@@ -137,11 +143,12 @@ class CredentialStat(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    source: str
+    source: RedactedSource
     requests: int
     total_tokens: int
     failed: int
     cost: float | None
+    cost_status: CostStatus
 
 
 class HealthResponse(BaseModel):
