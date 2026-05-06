@@ -759,7 +759,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
             "2026-05-01T00:00:00.000000Z",
             "sk-test",
             "gpt-5",
-            "gpt-apr26@example.com",
+            "openai-account@example.test",
             "0",
             100,
             1000,
@@ -807,7 +807,7 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
             "2026-05-01T00:00:00.000000Z",
             "sk-test",
             "claude-sonnet-4-5",
-            "claude:tester@example.com",
+            "claude-account@example.test",
             "0",
             100,
             1000,
@@ -877,7 +877,7 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
     conn = open_db(db_path)
     rows = [
         ("openai:sk-proj-secret-abc12345", "gpt-5"),
-        ("codex:tester@example.com", "gpt-5"),
+        ("codex-reviewer@example.test", "gpt-5"),
         ("anthropic:sk-ant-01-tail9999", "claude-sonnet-4-5"),
     ]
     for i, (source, model) in enumerate(rows):
@@ -911,6 +911,6 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
         assert resp.status_code == 200, resp.text
         sources = {row["source"] for row in resp.json()}
         assert "openai:sk-*******-abc12345" in sources
-        assert "codex:tester@example.com" in sources
+        assert "codex-reviewer@example.test" in sources
         assert "anthropic:sk-*******-tail9999" in sources
         assert "openai:sk-proj-secret-abc12345" not in sources

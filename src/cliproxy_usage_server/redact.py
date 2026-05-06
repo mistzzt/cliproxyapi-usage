@@ -17,21 +17,16 @@ def redact_key(key: str) -> str:
 
 
 def redact_source(source: str) -> str:
-    """Redact the credential identifier in a `<provider>:<id>` source.
+    """Redact a credential source for safe display.
 
-    - id contains '@' (OAuth email)  -> return source unchanged.
-    - id has no '@'                  -> treat as API key; rejoin as
-                                        f"{provider}:{redact_key(id)}".
-    - no ':' separator               -> redact_key on the whole string.
-    - Idempotent: any '***' inside the id returns input unchanged.
+    OAuth sources are email-like values and pass through unchanged. All
+    non-email values are treated as opaque keys/secrets and redacted as a
+    single string.
     """
     if not source:
         return source
     if "***" in source:
         return source
-    if ":" not in source:
-        return redact_key(source)
-    provider, _, ident = source.partition(":")
-    if "@" in ident:
+    if "@" in source:
         return source
-    return f"{provider}:{redact_key(ident)}"
+    return redact_key(source)

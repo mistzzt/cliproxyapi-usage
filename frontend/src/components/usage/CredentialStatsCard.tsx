@@ -84,8 +84,8 @@ export default function CredentialStatsCard({ rows, loading }: CredentialStatsCa
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row) => (
-                  <tr key={row.source}>
+                {sorted.map((row, index) => (
+                  <tr key={`${row.source}-${index}`}>
                     <td>{row.source}</td>
                     <td>{row.requests.toLocaleString()}</td>
                     <td>{row.total_tokens.toLocaleString()}</td>

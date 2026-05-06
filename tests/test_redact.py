@@ -54,15 +54,14 @@ def test_api_stat_redacts_api_key_on_construction() -> None:
     "raw,expected",
     [
         # OAuth emails pass through unchanged
-        ("codex:user@gmail.com", "codex:user@gmail.com"),
-        ("claude:foo@example.org", "claude:foo@example.org"),
-        ("anthropic:a@b.io", "anthropic:a@b.io"),
-        # Key-based provider:key splits and applies redact_key to id
+        ("codex-user@example.test", "codex-user@example.test"),
+        ("claude-user@example.test", "claude-user@example.test"),
+        ("team-account@example.test", "team-account@example.test"),
+        # Non-email values are treated as keys/opaque secrets
         ("openai:sk-proj-abc123xyz", "openai:sk-*******-abc123xyz"),
         ("anthropic:sk-ant-12345678", "anthropic:sk-*******-12345678"),
-        ("openai-compat:sk-team-proj-abcd", "openai-compat:sk-*******-abcd"),
-        ("openai:abc123xyz9", "openai:*******xyz9"),
-        # No colon -> redact_key on the whole string
+        ("openai-compat:sk-team-proj-abcd", "openai-*******-abcd"),
+        ("openai:abc123xyz9", "*******xyz9"),
         ("sk-rawkey-abc-1234", "sk-*******-1234"),
         ("rawkey1234", "*******1234"),
         # Empty
@@ -76,7 +75,7 @@ def test_redact_source(raw: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        "codex:user@gmail.com",
+        "codex-user@example.test",
         "openai:sk-proj-abc123xyz",
         "openai:abc123xyz9",
         "sk-rawkey-abc-1234",

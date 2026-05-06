@@ -22,12 +22,10 @@ Three independent issues in the dashboard:
    row's cost collapses to `null`. There is no retry, no fallback, and no
    signal to the frontend to differentiate "cost is genuinely zero" from
    "we don't have pricing for this model".
-3. **`/api/credential-stats` leaks raw API keys.** When the upstream auth
-   is key-based (openai, openai-compat, anthropic, etc.), the `source`
-   column on `CredentialStat` is something like `openai:sk-...` and the
-   raw key is returned to the client unchanged. OAuth sources
-   (`codex:user@gmail.com`, `claude:foo@example.com`) are not sensitive in
-   the same way and can pass through.
+3. **`/api/credential-stats` leaks raw API keys.** The `source` column on
+   `CredentialStat` is a credential identifier, not a reliable provider tag.
+   OAuth sources are email-like values and are safe to display. Non-email
+   sources may contain raw API keys or opaque secrets and must be redacted.
 
 ## Non-goals
 
@@ -228,13 +226,11 @@ Add to `redact.py`:
 
 ```python
 def redact_source(source: str) -> str:
-    """Redact the credential identifier in a `<provider>:<id>` source.
+    """Redact a credential source for safe display.
 
-    - id contains '@' (OAuth email)  -> return source unchanged.
-    - id has no '@'                  -> treat as API key, run redact_key
-                                        on it; rejoin as f"{provider}:{redacted}".
-    - no ':' separator               -> redact_key on the whole string.
-    - Idempotent: any '***' in id    -> return source unchanged.
+    - source contains '@'            -> return source unchanged.
+    - source does not contain '@'    -> redact_key on the whole string.
+    - Idempotent: any '***' in source returns input unchanged.
     """
 ```
 
@@ -274,12 +270,10 @@ sufficient.
   - Refresh failures don't surface to the user; the request still
     returns with `cost_status="missing"`.
 - `tests/test_redact_source.py`
-  - Email passthrough: `codex:user@gmail.com` → unchanged;
-    `claude:a@b.io` → unchanged.
-  - Key redaction: `openai:sk-abc-1234567890` →
-    `openai:sk-*******-1234567890` (uses `redact_key` rules).
-  - Provider-prefix variants: `openai-compat:`, `anthropic:`.
-  - Missing colon: `sk-rawkey…` → bare `redact_key` result.
+  - Email passthrough: `codex-user@example.test` → unchanged.
+  - Key/opaque redaction: `openai:sk-abc-1234567890` →
+    `openai:sk-*******-1234567890` (uses `redact_key` on the whole string).
+  - `sk-rawkey…` → `redact_key` result.
   - Idempotency: redacting an already-redacted source is a no-op.
 - `tests/test_routes_usage.py`
   - Codex fixture row produces ccusage-equivalent cost (small fixture

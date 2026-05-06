@@ -60,7 +60,7 @@ from cliproxy_usage_server.pricing import split_tokens_for_cost
 
 @pytest.mark.parametrize(
     "source",
-    ["codex:user@gmail.com", "openai:sk-abc", "openai-compat:foo", "Codex:Bar", "OPENAI:baz"],
+    ["openai", "OpenAI", "azure"],
 )
 def test_openai_sources_subtract_cached_from_input(source: str) -> None:
     """For OpenAI-convention sources cached_tokens is a subset of input_tokens."""
@@ -88,7 +88,7 @@ def test_openai_cached_exceeds_input_clamps() -> None:
     assert out == {"input_tokens": 0, "output_tokens": 500, "cache_read_input_tokens": 1000}
 
 
-@pytest.mark.parametrize("source", ["claude:user@x.io", "anthropic:sk-ant", "gemini:foo", "openrouter:bar"])
+@pytest.mark.parametrize("source", ["anthropic", "gemini", "openrouter", None])
 def test_non_openai_sources_passthrough(source: str) -> None:
     """Non-OpenAI sources keep cached_tokens in cache_read and input untouched."""
     out = split_tokens_for_cost(source, input_tokens=1000, output_tokens=500, cached_tokens=200)
@@ -404,7 +404,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
             "2026-05-01T00:00:00.000000Z",
             "sk-test",
             "gpt-5",
-            "codex:tester@example.com",
+            "openai-account@example.test",
             "0",
             100,
             1000,  # input_tokens (includes cached)
@@ -456,7 +456,7 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
             "2026-05-01T00:00:00.000000Z",
             "sk-test",
             "claude-sonnet-4-5",
-            "claude:tester@example.com",
+            "claude-account@example.test",
             "0",
             100,
             1000, 500, 0, 200, 1500, 0,
@@ -1222,15 +1222,14 @@ from cliproxy_usage_server.redact import redact_source
     "raw,expected",
     [
         # OAuth emails pass through unchanged
-        ("codex:user@gmail.com", "codex:user@gmail.com"),
-        ("claude:foo@example.org", "claude:foo@example.org"),
-        ("anthropic:a@b.io", "anthropic:a@b.io"),
-        # Key-based provider:key splits and applies redact_key to id
+        ("codex-user@example.test", "codex-user@example.test"),
+        ("claude-user@example.test", "claude-user@example.test"),
+        ("team-account@example.test", "team-account@example.test"),
+        # Non-email values are treated as keys/opaque secrets
         ("openai:sk-proj-abc123xyz", "openai:sk-*******-abc123xyz"),
         ("anthropic:sk-ant-12345678", "anthropic:sk-*******-12345678"),
-        ("openai-compat:sk-team-proj-abcd", "openai-compat:sk-*******-abcd"),
-        ("openai:abc123xyz9", "openai:*******xyz9"),
-        # No colon -> redact_key on the whole string
+        ("openai-compat:sk-team-proj-abcd", "openai-*******-abcd"),
+        ("openai:abc123xyz9", "*******xyz9"),
         ("sk-rawkey-abc-1234", "sk-*******-1234"),
         ("rawkey1234", "*******1234"),
         # Empty
@@ -1244,7 +1243,7 @@ def test_redact_source(raw: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        "codex:user@gmail.com",
+        "codex-user@example.test",
         "openai:sk-proj-abc123xyz",
         "openai:abc123xyz9",
         "sk-rawkey-abc-1234",
@@ -1283,13 +1282,11 @@ def redact_key(key: str) -> str:
 
 
 def redact_source(source: str) -> str:
-    """Redact the credential identifier in a `<provider>:<id>` source.
+    """Redact a credential source for safe display.
 
-    - id contains '@' (OAuth email)  -> return source unchanged.
-    - id has no '@'                  -> treat as API key; rejoin as
-                                        f"{provider}:{redact_key(id)}".
-    - no ':' separator               -> redact_key on the whole string.
-    - Idempotent: any '***' inside the id returns input unchanged.
+    - source contains '@'            -> return source unchanged.
+    - source does not contain '@'    -> redact_key on the whole string.
+    - Idempotent: any '***' in source returns input unchanged.
     """
     if "***" in source:
         return source
@@ -1333,7 +1330,7 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
     conn = open_db(db_path)
     rows = [
         ("openai:sk-proj-secret-abc12345", "gpt-5"),
-        ("codex:tester@example.com", "gpt-5"),
+        ("codex-reviewer@example.test", "gpt-5"),
         ("anthropic:sk-ant-01-tail9999", "claude-sonnet-4-5"),
     ]
     for source, model in rows:
@@ -1357,7 +1354,7 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
         assert resp.status_code == 200, resp.text
         sources = {row["source"] for row in resp.json()}
         assert "openai:sk-*******-abc12345" in sources
-        assert "codex:tester@example.com" in sources
+        assert "codex-reviewer@example.test" in sources
         assert "anthropic:sk-*******-tail9999" in sources
         # Raw key must NOT be present.
         assert "openai:sk-proj-secret-abc12345" not in sources
