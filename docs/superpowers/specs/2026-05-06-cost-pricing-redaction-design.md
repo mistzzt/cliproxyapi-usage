@@ -1,4 +1,4 @@
-# Cost accuracy, pricing fallback, and credential redaction
+# Cost accuracy, pricing-miss handling, and credential redaction
 
 Date: 2026-05-06
 Scope: `cliproxy_usage_server` backend + `frontend` dashboard
@@ -40,6 +40,47 @@ Three independent issues in the dashboard:
   follow-up, not part of this spec.
 
 ## Design
+
+### 0. Anthropic billing — known undercount, scope-limited fix
+
+ccusage bills Anthropic usage as **three disjoint buckets**
+(`packages/internal/src/pricing.ts:318-340`):
+
+| bucket | rate | typical magnitude |
+| --- | --- | --- |
+| `input_tokens` (uncached) | `input_cost_per_token` | 1× |
+| `cache_creation_input_tokens` | `cache_creation_input_token_cost` | ~1.25× input |
+| `cache_read_input_tokens` | `cache_read_input_token_cost` | ~0.1× input |
+
+Our DB schema (`db.py`, `parser.py`) collapses the two cache buckets
+into a single `cached_tokens` column — the upstream CLIProxyAPI queue
+payload itself only emits one `cached_tokens` field. Today the cost
+helpers pass that single value as `cache_read_input_tokens`, which
+means:
+
+- If `cached_tokens` upstream contains only `cache_read` → cache_creation
+  cost is missing (mild undercount; creation is rarer in steady state).
+- If it sums `cache_creation + cache_read` → the creation portion is
+  billed at the read rate (~10×–12× undercount on that portion).
+- If it contains only `cache_creation` → severe undercount.
+
+**Verification step** — before the implementation lands, sample a real
+Claude row's raw queue JSON (or read the upstream cliproxy emitter)
+to determine which case we're in. Recommend running:
+
+```sh
+uv run python -c "import sqlite3, pathlib; ..."  # snapshot a few rows
+```
+
+against a populated dev DB and cross-checking the magnitudes against
+Anthropic's billing console for the same window.
+
+**Scope of fix in this spec** — limited to documenting current
+behavior and adding a regression test that locks in whatever convention
+upstream uses today. Splitting `cached_tokens` into
+`cache_creation_input_tokens` + `cache_read_input_tokens` requires
+upstream proxy changes plus a collector schema migration; tracked as a
+follow-up below, not done here.
 
 ### 1. Cost split for OpenAI-convention rows
 
@@ -93,57 +134,47 @@ Call-site changes in `routes/usage.py`:
 - `query_model_stats` aggregate row stays per-model — only the cost
   computation widens the GROUP BY.
 
-### 2. Pricing fallback, retry, and status surfacing
+### 2. Pricing retry and status surfacing
 
-#### Fallback table
-
-New module `cliproxy_usage_server/pricing_fallback.py`:
-
-```python
-FALLBACK_PRICING: dict[str, ModelPricing] = {
-    # hand-curated entries for models we expect to see but liteLLM may lag on.
-    # Keys use the same naming convention as the live liteLLM map.
-}
-```
-
-The table starts small and is grown by hand. It is a Python literal —
-not fetched, not cached on disk. Edits ship in normal commits.
+No hand-curated fallback table. liteLLM is the only source of truth —
+we already disk-cache it and TTL-refresh. The fix is just to retry on
+miss and tell the frontend which rows lack pricing.
 
 #### Resolve
 
 `resolve()` is widened to return a status:
 
 ```python
-PricingResolution = Literal["live", "fallback", "missing"]
+PricingResolution = Literal["live", "missing"]
 
 def resolve(
     model_name: str,
     pricing: Mapping[str, ModelPricing],
-    fallback: Mapping[str, ModelPricing] = FALLBACK_PRICING,
 ) -> tuple[ModelPricing | None, PricingResolution]:
     ...
 ```
 
-Lookup order: live exact / live prefix / live substring / fallback
-exact / fallback prefix / fallback substring / `(None, "missing")`.
+Lookup order is unchanged (exact / prefix / substring); the only
+addition is the status return.
 
 #### Background refresh on miss
 
-When any row in the response resolves as `fallback` or `missing`, the
-endpoint triggers a non-blocking pricing refresh by calling a
-rate-limited helper on `app.state`:
+When any row in the response resolves as `missing`, the endpoint
+triggers a non-blocking pricing refresh by calling a rate-limited
+helper on `app.state`:
 
 - `app.state.last_pricing_refresh: datetime`
 - Helper: at most one refresh per 60 seconds; runs the existing
   `fetch_pricing` with `cache_path` mtime cleared (so TTL is bypassed).
-- The current request is **not** delayed; it returns with the fallback
-  data. The next request reaps the refreshed map.
+- The current request is **not** delayed; it returns with the
+  current (still missing) status. The next request reaps the refreshed
+  map if liteLLM has caught up.
 
 Threading: the existing pricing fetcher is sync (`httpx.Client`). Route
 handlers in `routes/usage.py` are currently `def` (sync). Dispatch the
 refresh by accepting a `BackgroundTasks` parameter on each cost-bearing
 endpoint and calling `background_tasks.add_task(refresh_fn)` when any
-fallback/missing row is detected. `refresh_fn` itself runs on FastAPI's
+missing row is detected. `refresh_fn` itself runs on FastAPI's
 threadpool, takes a lock on `app.state.last_pricing_refresh`, checks the
 60-second rate limit, calls `fetch_pricing` with the cache treated as
 expired, and writes the result back to `app.state.pricing`. All
@@ -154,7 +185,7 @@ exceptions are caught and logged. Startup-path fetch is unchanged.
 `schemas.py`:
 
 ```python
-CostStatus = Literal["live", "fallback", "partial_fallback", "missing"]
+CostStatus = Literal["live", "partial_missing", "missing"]
 ```
 
 New field added to:
@@ -164,29 +195,23 @@ New field added to:
 - `ModelStat.cost_status`
 - `CredentialStat.cost_status`
 
-Per-row endpoints (`/api/model-stats`) only ever produce `live`,
-`fallback`, or `missing` — never `partial_fallback`, since each row is
-one model. Roll-up endpoints (`/api/overview` totals, `/api/api-stats`,
+Per-row endpoints (`/api/model-stats`) only ever produce `live` or
+`missing` — never `partial_missing`, since each row is one model.
+Roll-up endpoints (`/api/overview` totals, `/api/api-stats`,
 `/api/credential-stats`) compute `cost_status` as:
 
-- All component models `live` → `live`
-- All component models `fallback` → `fallback`
-- All component models `missing` → `missing` and `cost = None`
-- Mix of `live` + `fallback` (no missing) → `partial_fallback`
-- Any `missing` mixed with anything → `partial_fallback` for
-  cost-bearing components, with the missing models contributing 0 to
-  the sum. Document this clearly: a `missing` model in a roll-up does
-  not null the whole row, it just lowers the displayed cost.
-
-`cost` is `None` only when `cost_status == "missing"` *and* the row has
-no other models contributing.
+- All component models `live` → `live`, `cost = sum(...)`
+- All component models `missing` → `missing`, `cost = None`
+- Mix of `live` + `missing` → `partial_missing`, `cost = sum(live
+  components only)`. The frontend renders this as the partial number
+  in the warning color with a tooltip listing the missing models.
 
 For `/api/timeseries?metric=cost`: add a sibling field
 `series_status: dict[str, CostStatus]` keyed by the same series name as
 `series` (`__all__`, `<model>`). Per-bucket statuses are not surfaced —
 the worst case across buckets in the window wins. The `cost` series
 itself never contains `null`; missing-pricing models contribute `0.0`
-and the series status records the degradation.
+to the bucket sum and the series status records the degradation.
 
 `TimeseriesResponse` gets the new field as optional with a default of
 empty dict for backward-compat shape on non-cost metrics.
@@ -197,16 +222,16 @@ empty dict for backward-compat shape on non-cost metrics.
 optional fields on each DTO. Components:
 
 - `components/usage/StatsTable.tsx` (and any cost-rendering component)
-  — when `cost_status` is `fallback` or `partial_fallback`, render the
-  cost number in a warning color (existing theme token; pick the red
-  used for failed-rate alerts) with a tooltip "Estimated — upstream
-  pricing unavailable for some models". When `missing`, render `—` in
-  the same color with the same tooltip.
+  — when `cost_status` is `partial_missing`, render the (partial) cost
+  in the warning color (existing theme token; pick the red used for
+  failed-rate alerts) with a tooltip "Pricing unavailable for some
+  models — partial total". When `missing`, render `—` in the same
+  color with tooltip "No pricing available for this model".
 - `components/usage/Totals.tsx` — same rule applied to the totals row.
 - `components/charts/CostChart.tsx` — when
-  `series_status[<model>]` is `fallback` / `partial_fallback`, render
-  the line dashed and add a chip in the legend ("estimated"). When
-  `missing`, render the line dotted and grey it out.
+  `series_status[<model>]` is `partial_missing`, render the line
+  dashed with a legend chip ("partial"). When `missing`, render the
+  line dotted and greyed out.
 
 ### 3. Credential redaction
 
@@ -248,19 +273,18 @@ sufficient.
     `cache_read_input_tokens` unchanged.
   - Source-prefix matching is case-insensitive
     (`Codex:abc`, `OPENAI:def`).
-- `tests/test_pricing_fallback.py`
-  - `resolve()` returns `(entry, "live")` for live-map hits.
-  - Returns `(entry, "fallback")` when only the fallback table has the
-    model.
-  - Returns `(None, "missing")` otherwise.
-  - Roll-up `cost_status` computation: all-live, all-fallback,
-    live+fallback (`partial_fallback`), any-missing (`partial_fallback`
-    with reduced cost), all-missing (`missing` + `cost=None`).
+- `tests/test_pricing_resolve.py`
+  - `resolve()` returns `(entry, "live")` for live-map hits via exact,
+    prefix, and substring lookup.
+  - Returns `(None, "missing")` for a model not in the map.
+  - Roll-up `cost_status` computation: all-live (`live`), all-missing
+    (`missing` + `cost=None`), mixed (`partial_missing` with sum of
+    live components only).
 - `tests/test_pricing_refresh.py`
-  - Background refresh fires when a request resolves any
-    fallback/missing row.
+  - Background refresh fires when a request resolves any `missing` row.
   - Refresh is rate-limited to one per 60s.
-  - Refresh failures don't surface to the user.
+  - Refresh failures don't surface to the user; the request still
+    returns with `cost_status="missing"`.
 - `tests/test_redact_source.py`
   - Email passthrough: `codex:user@gmail.com` → unchanged;
     `claude:a@b.io` → unchanged.
@@ -292,10 +316,16 @@ sufficient.
 
 ## Open follow-ups (out of scope for this spec)
 
+- **Anthropic cache_creation vs cache_read split.** Upstream
+  CLIProxyAPI queue payload emits one `cached_tokens` field;
+  Anthropic's correct billing requires two. Needs upstream proxy
+  change + collector schema migration + cost helper update. Until
+  then, Claude cache costs will diverge from Anthropic's billing
+  console by some constant factor.
 - Redaction of email-style identifiers in quota responses
   (`auth_name`).
 - Surfacing per-bucket pricing status in cost timeseries (currently
   rolled up to one status per series).
 - A periodic background refresh of pricing independent of request
-  traffic, so dashboards left open eventually heal even without a
-  fallback hit.
+  traffic, so dashboards left open eventually heal even when no user
+  request hits a missing model.
