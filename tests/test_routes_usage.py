@@ -70,6 +70,25 @@ def client_no_pricing(app_no_pricing):
         yield c
 
 
+@pytest.fixture()
+def app_with_full_pricing(seeded_db_path: pathlib.Path):
+    """App with pricing for every model present in the seed."""
+    records = _load_records()
+    distinct_models = sorted({r.model for r in records})
+    pricing = {
+        m: ModelPricing(input_cost_per_token=1e-6, output_cost_per_token=1e-6)
+        for m in distinct_models
+    }
+    cfg = ServerConfig(db_path=seeded_db_path)  # pyright: ignore[reportCallIssue]
+    return create_app(cfg, pricing_provider=lambda: pricing)
+
+
+@pytest.fixture()
+def client_with_full_pricing(app_with_full_pricing):
+    with TestClient(app_with_full_pricing) as c:
+        yield c
+
+
 def _make_stub_pricing(model: str, rate: float) -> dict[str, ModelPricing]:
     """Single-model pricing stub: rate is input_cost_per_token."""
     return {model: ModelPricing(input_cost_per_token=rate, output_cost_per_token=rate)}
@@ -813,3 +832,34 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
         assert resp.status_code == 200, resp.text
         rows = resp.json()
         assert rows[0]["cost"] == pytest.approx(expected)
+
+
+def test_timeseries_cost_emits_series_status_live(client_with_full_pricing) -> None:
+    """When every model in the window has live pricing, series_status is all 'live'."""
+    resp = client_with_full_pricing.get(
+        "/api/timeseries?range=all&bucket=day&metric=cost"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "series_status" in body
+    assert body["series_status"]
+    assert all(v == "live" for v in body["series_status"].values())
+
+
+def test_timeseries_cost_emits_series_status_missing(client_no_pricing) -> None:
+    """With empty pricing every series is 'missing'."""
+    resp = client_no_pricing.get(
+        "/api/timeseries?range=all&bucket=day&metric=cost"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["series_status"]["__all__"] == "missing"
+
+
+def test_timeseries_non_cost_metric_has_empty_series_status(client_with_full_pricing) -> None:
+    resp = client_with_full_pricing.get(
+        "/api/timeseries?range=all&bucket=day&metric=tokens"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["series_status"] == {}

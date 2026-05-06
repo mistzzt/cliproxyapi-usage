@@ -559,7 +559,7 @@ def build_router(db_path: Path) -> APIRouter:
 
                 # Run the cost breakdown over ALL models (no model restriction)
                 # so __all__ sums across every model.
-                cell_costs, _model_statuses = _query_bucket_model_costs(
+                cell_costs, model_statuses = _query_bucket_model_costs(
                     conn, start, end, bfmt, pricing, models=None, api_keys=raw_keys
                 )
 
@@ -585,7 +585,18 @@ def build_router(db_path: Path) -> APIRouter:
                         model_costs[mdl].get(lbl, 0.0) for lbl in labels
                     ]
 
-                return TimeseriesResponse(buckets=labels, series=cost_series)
+                all_statuses: list[PricingResolution] = []
+                for sts in model_statuses.values():
+                    all_statuses.extend(sts)
+                series_status: dict[str, CostStatus] = {
+                    "__all__": rollup_cost_status(all_statuses),
+                }
+                for mdl in output_model_keys:
+                    series_status[mdl] = rollup_cost_status(model_statuses.get(mdl, []))
+
+                return TimeseriesResponse(
+                    buckets=labels, series=cost_series, series_status=series_status
+                )
 
             else:
                 # Explicit models= filter: get dense labels via tokens query,
@@ -601,7 +612,7 @@ def build_router(db_path: Path) -> APIRouter:
                 )
                 labels = ts.buckets
 
-                cell_costs, _model_statuses = _query_bucket_model_costs(
+                cell_costs, model_statuses = _query_bucket_model_costs(
                     conn,
                     start,
                     end,
@@ -622,7 +633,16 @@ def build_router(db_path: Path) -> APIRouter:
                         mdl_bkt.get(lbl, 0.0) for lbl in labels
                     ]
 
-                return TimeseriesResponse(buckets=labels, series=cost_series_explicit)
+                series_status_explicit: dict[str, CostStatus] = {
+                    mdl: rollup_cost_status(model_statuses.get(mdl, []))
+                    for mdl in models_list
+                }
+
+                return TimeseriesResponse(
+                    buckets=labels,
+                    series=cost_series_explicit,
+                    series_status=series_status_explicit,
+                )
 
         # Non-cost metrics: delegate entirely to query_timeseries.
         fetch_metric: Literal["requests", "tokens", "cost"] = metric
