@@ -118,6 +118,7 @@ def test_runtime_config_served_in_root_mode() -> None:
     with TestClient(app) as client:
         resp = client.get("/usage-config.js")
     assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
     assert "application/javascript" in resp.headers["content-type"]
     assert 'basePath":"/"' in resp.text
     assert 'apiBase":"/api"' in resp.text
@@ -129,6 +130,7 @@ def test_runtime_config_served_under_configured_base_path() -> None:
     with TestClient(app) as client:
         resp = client.get("/api-usage/usage-config.js")
     assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
     assert 'basePath":"/api-usage"' in resp.text
     assert 'apiBase":"/api-usage/api"' in resp.text
 
@@ -159,8 +161,10 @@ def test_prefixed_spa_and_assets_use_configured_base_path(
     assert redirect.status_code == 307
     assert redirect.headers["location"] == "/api-usage/"
     assert shell.status_code == 200
+    assert shell.headers["cache-control"] == "no-store"
     assert shell.text == "<html>usage app</html>"
     assert asset.status_code == 200
+    assert "cache-control" not in asset.headers
     assert asset.text == "console.log('ok')"
     assert unprefixed_shell.status_code == 404
     assert unprefixed_asset.status_code == 404

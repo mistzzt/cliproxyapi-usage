@@ -26,6 +26,7 @@ from cliproxy_usage_server.routes.usage import build_router as build_usage_route
 _log = logging.getLogger(__name__)
 
 _SPA_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 
 
 def _resolve_cache_path(config: ServerConfig) -> Path:
@@ -181,6 +182,7 @@ def create_app(
         return Response(
             f"window.__CLIPROXY_USAGE_CONFIG__={payload};\n",
             media_type="application/javascript",
+            headers=_NO_STORE_HEADERS,
         )
 
     if service is not None:
@@ -204,7 +206,7 @@ def create_app(
             @app.get("/{full_path:path}", include_in_schema=False)
             async def _spa_fallback(full_path: str) -> FileResponse:
                 del full_path  # unused; any non-API GET renders the SPA shell
-                return FileResponse(_index_html)
+                return FileResponse(_index_html, headers=_NO_STORE_HEADERS)
 
         else:
 
@@ -215,7 +217,7 @@ def create_app(
             @app.get(f"{config.base_path}/{{full_path:path}}", include_in_schema=False)
             async def _prefixed_spa_fallback(full_path: str) -> FileResponse:
                 del full_path  # unused; any base-path GET renders the SPA shell
-                return FileResponse(_index_html)
+                return FileResponse(_index_html, headers=_NO_STORE_HEADERS)
 
     return app
 
