@@ -14,14 +14,45 @@ _USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 def _window_from_raw(
     window_id: str,
     label: str,
-    used_percent: float,
-    reset_at: int | float,
+    used_percent: object,
+    reset_at: object,
 ) -> QuotaWindow:
+    if not isinstance(used_percent, (int, float)):
+        raise QuotaSchemaError(
+            f"Expected numeric used_percent for Codex window '{window_id}'"
+        )
+    if not isinstance(reset_at, (int, float)):
+        raise QuotaSchemaError(
+            f"Expected numeric reset_at for Codex window '{window_id}'"
+        )
+
     return QuotaWindow(
         id=window_id,
         label=label,
         used_percent=float(used_percent),
         resets_at=datetime.fromtimestamp(reset_at, tz=UTC),
+    )
+
+
+def _append_window_from_rate_limit(
+    windows: list[QuotaWindow],
+    *,
+    window_id: str,
+    label: str,
+    rate_limit: dict[object, object],
+    key: str,
+) -> None:
+    raw_window = rate_limit.get(key)
+    if not isinstance(raw_window, dict):
+        return
+
+    windows.append(
+        _window_from_raw(
+            window_id,
+            label,
+            raw_window.get("used_percent"),
+            raw_window.get("reset_at"),
+        )
     )
 
 
@@ -66,27 +97,20 @@ class CodexProvider:
         # Parse primary/secondary windows from rate_limit
         rate_limit = upstream_body.get("rate_limit")
         if isinstance(rate_limit, dict):
-            primary_window = rate_limit.get("primary_window")
-            if isinstance(primary_window, dict):
-                windows.append(
-                    _window_from_raw(
-                        "primary",
-                        "Primary 5h Window",
-                        primary_window["used_percent"],  # type: ignore[arg-type]
-                        primary_window["reset_at"],  # type: ignore[arg-type]
-                    )
-                )
-
-            secondary_window = rate_limit.get("secondary_window")
-            if isinstance(secondary_window, dict):
-                windows.append(
-                    _window_from_raw(
-                        "secondary",
-                        "Secondary 7d Window",
-                        secondary_window["used_percent"],  # type: ignore[arg-type]
-                        secondary_window["reset_at"],  # type: ignore[arg-type]
-                    )
-                )
+            _append_window_from_rate_limit(
+                windows,
+                window_id="primary",
+                label="Primary 5h Window",
+                rate_limit=rate_limit,
+                key="primary_window",
+            )
+            _append_window_from_rate_limit(
+                windows,
+                window_id="secondary",
+                label="Secondary 7d Window",
+                rate_limit=rate_limit,
+                key="secondary_window",
+            )
 
         # Parse additional_rate_limits
         additional = upstream_body.get("additional_rate_limits")
@@ -97,14 +121,34 @@ class CodexProvider:
                 limit_name = entry.get("limit_name")
                 if not isinstance(limit_name, str):
                     continue
-                windows.append(
-                    _window_from_raw(
-                        f"additional:{limit_name}",
-                        limit_name,
-                        entry["used_percent"],  # type: ignore[arg-type]
-                        entry["reset_at"],  # type: ignore[arg-type]
+
+                if "used_percent" in entry or "reset_at" in entry:
+                    windows.append(
+                        _window_from_raw(
+                            f"additional:{limit_name}",
+                            limit_name,
+                            entry.get("used_percent"),
+                            entry.get("reset_at"),
+                        )
                     )
-                )
+                    continue
+
+                additional_rate_limit = entry.get("rate_limit")
+                if isinstance(additional_rate_limit, dict):
+                    _append_window_from_rate_limit(
+                        windows,
+                        window_id=f"additional:{limit_name}:primary",
+                        label=f"{limit_name} Primary 5h Window",
+                        rate_limit=additional_rate_limit,
+                        key="primary_window",
+                    )
+                    _append_window_from_rate_limit(
+                        windows,
+                        window_id=f"additional:{limit_name}:secondary",
+                        label=f"{limit_name} Secondary 7d Window",
+                        rate_limit=additional_rate_limit,
+                        key="secondary_window",
+                    )
 
         return ProviderQuota(
             provider="codex",
