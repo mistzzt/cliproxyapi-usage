@@ -46,14 +46,6 @@ def _is_window_shape(value: object) -> bool:
 
 
 def _parse_window(key: str, value: dict[str, object]) -> QuotaWindow:
-    utilization = float(value["utilization"])  # type: ignore[arg-type]
-    # Normalize: if 0 <= utilization <= 1, it's a fraction — convert to percent.
-    # Values > 1 are already percent-scale.
-    if utilization > 1 or utilization < 0:
-        used_percent = utilization
-    else:
-        used_percent = utilization * 100
-
     resets_at_raw = value.get("resets_at")
     if resets_at_raw is None:
         resets_at: datetime | None = None
@@ -63,7 +55,7 @@ def _parse_window(key: str, value: dict[str, object]) -> QuotaWindow:
     return QuotaWindow(
         id=key,
         label=_key_to_label(key),
-        used_percent=used_percent,
+        used_percent=float(value["utilization"]),  # type: ignore[arg-type],
         resets_at=resets_at,
     )
 
