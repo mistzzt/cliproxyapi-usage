@@ -1,11 +1,21 @@
 """Usage endpoints: /api/overview, /api/timeseries, /api/token-breakdown,
 /api/health, /api/models, /api/api-keys.
 
-Sparkline bucketing decisions (documented here per spec):
-  - 7h  → hour buckets → 7 entries
-  - 24h → hour buckets → 24 entries
-  - 7d  → day buckets  → 7 entries   (visually distinct from 24h view)
-  - all → day buckets, capped at 30 (most recent 30 days of data)
+Range-consuming endpoints take an explicit ``(start, end)`` window rather than
+a rolling-range enum. ``start`` is an optional ISO-8601 instant (absent = open
+start / all time); ``end`` defaults to server ``now``. Naive datetimes are
+rejected (422); ``start > end`` is rejected (422). ``tz_offset_minutes`` shifts
+day/hour bucket grouping and labels into the viewer's local time.
+
+Sparkline bucketing (``overview``) is span-derived:
+  - open start ("all") → day buckets over full history (uncapped; day
+    granularity is naturally bounded).
+  - span <= 48h → hour buckets (covers 7h/24h/calendar-day).
+  - otherwise → day buckets (calendar week/month, wide custom ranges).
+
+``timeseries``/``token-breakdown`` take an explicit ``bucket`` but auto-coarsen
+``hour`` → ``day`` for wide windows (bucket-count guard); the effective bucket
+is echoed back in the response.
 
 ``metric=cost`` for timeseries:
   Uses a grouped ``(bucket, model)`` query to obtain the input/output/cached
@@ -26,7 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from cliproxy_usage_server.aggregate import (
     query_api_stats,
@@ -40,7 +50,12 @@ from cliproxy_usage_server.aggregate import (
     query_totals,
     resolve_redacted_api_keys,
 )
-from cliproxy_usage_server.db import open_ro, range_window
+from cliproxy_usage_server.db import (
+    bucket_for_span,
+    coarsen_bucket,
+    open_ro,
+    tz_sql_modifier,
+)
 from cliproxy_usage_server.pricing import (
     CostStatus,
     ModelPricing,
@@ -112,21 +127,41 @@ _MINUTES: dict[str, int] = {
     "day": 1440,
 }
 
-# Map from range string → sparkline bucket type.
-_SPARKLINE_BUCKET: dict[str, Literal["hour", "day"]] = {
-    "7h": "hour",
-    "24h": "hour",
-    "7d": "day",
-    "all": "day",
-}
-
-# Type alias for the range query parameter.
-_RangeParam = Annotated[
-    Literal["7h", "24h", "7d", "all"],
-    Query(alias="range"),
-]
+# Type aliases for the window query parameters.
+_StartParam = Annotated[datetime | None, Query()]
+_EndParam = Annotated[datetime | None, Query()]
+_TzOffsetParam = Annotated[int, Query()]
 _BucketParam = Annotated[Literal["hour", "day"], Query()]
 _MetricParam = Annotated[Literal["requests", "tokens", "cost"], Query()]
+
+
+def _resolve_window(
+    start: datetime | None,
+    end: datetime | None,
+    now: datetime,
+) -> tuple[datetime | None, datetime]:
+    """Validate and normalise the (start, end) window to UTC.
+
+    - Naive datetimes (no tz offset) → HTTP 422 (the frontend always emits an
+      offset; this only guards misuse, avoiding a silent local-tz assumption).
+    - Absent ``end`` → server ``now``.
+    - ``start > end`` → HTTP 422 (FastAPI does not check ordering).
+
+    Returns ``(start_utc | None, end_utc)``.
+    """
+    if start is not None and start.tzinfo is None:
+        raise HTTPException(
+            status_code=422, detail="start must include a timezone offset"
+        )
+    if end is not None and end.tzinfo is None:
+        raise HTTPException(
+            status_code=422, detail="end must include a timezone offset"
+        )
+    resolved_start = start.astimezone(UTC) if start is not None else None
+    resolved_end = (end if end is not None else now).astimezone(UTC)
+    if resolved_start is not None and resolved_start > resolved_end:
+        raise HTTPException(status_code=422, detail="start must be <= end")
+    return resolved_start, resolved_end
 
 
 def _compute_totals_cost(
@@ -176,6 +211,7 @@ def _query_bucket_model_costs(
     pricing: Mapping[str, ModelPricing],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
+    tz_offset_minutes: int = 0,
 ) -> tuple[dict[tuple[str, str], float], dict[str, list[PricingResolution]]]:
     """Compute per-(bucket, model) cost and per-model status list.
 
@@ -213,10 +249,11 @@ def _query_bucket_model_costs(
             kfrag = f" AND api_key IN ({placeholders_k})"
             params.extend(api_keys)
 
+    modifier = tz_sql_modifier(tz_offset_minutes)
     rows = conn.execute(
         f"""
         SELECT
-            strftime('{bucket_fmt}', timestamp) AS bkt,
+            strftime('{bucket_fmt}', timestamp, '{modifier}') AS bkt,
             model,
             source,
             COALESCE(SUM(input_tokens), 0)  AS inp,
@@ -407,24 +444,25 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/overview", response_model=OverviewResponse)
     def overview(
-        range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> OverviewResponse:
-        """Return summary totals and sparklines for the requested range.
+        """Return summary totals and sparklines for the requested window.
 
-        Sparkline bucketing:
-          7h  → hour (7 pts), 24h → hour (24 pts),
-          7d  → day (7 pts),  all → day (≤30 pts, capped to most recent 30 days).
+        Sparkline bucketing is span-derived: open start ("all") → day buckets;
+        span <= 48h → hour buckets; otherwise → day buckets.
 
         ``models`` / ``api_keys`` are optional comma-separated lists.
         Absent or 'all' → aggregate mode.
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
-        bucket = _SPARKLINE_BUCKET[range_]
+        start, end = _resolve_window(start, end, now)
+        bucket = bucket_for_span(start, end)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
 
@@ -448,10 +486,24 @@ def build_router(db_path: Path) -> APIRouter:
 
         # --- sparklines ---
         req_ts = query_timeseries(
-            conn, start, end, bucket, "requests", models_list, api_keys=raw_keys
+            conn,
+            start,
+            end,
+            bucket,
+            "requests",
+            models_list,
+            api_keys=raw_keys,
+            tz_offset_minutes=tz_offset_minutes,
         )
         tok_ts = query_timeseries(
-            conn, start, end, bucket, "tokens", models_list, api_keys=raw_keys
+            conn,
+            start,
+            end,
+            bucket,
+            "tokens",
+            models_list,
+            api_keys=raw_keys,
+            tz_offset_minutes=tz_offset_minutes,
         )
         req_labels, req_series = req_ts.buckets, req_ts.series
         tok_labels, tok_series = tok_ts.buckets, tok_ts.series
@@ -511,11 +563,13 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/timeseries", response_model=TimeseriesResponse)
     def timeseries(
-        range_: _RangeParam,
         bucket: _BucketParam,
         metric: _MetricParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         top_n: Annotated[int | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
@@ -532,15 +586,17 @@ def build_router(db_path: Path) -> APIRouter:
         sums across all models (not restricted to top-N).
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
+        eff_bucket = coarsen_bucket(start, end, bucket)
 
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         is_all_mode = models_list is None
 
         if metric == "cost":
-            # Use the bucket_fmt that mirrors aggregate._bucket_fmt.
-            bfmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%d"
+            # Use the bucket_fmt that mirrors aggregate._bucket_fmt, on the
+            # coarsened effective bucket so cost keys line up with the labels.
+            bfmt = "%Y-%m-%dT%H:00:00Z" if eff_bucket == "hour" else "%Y-%m-%d"
 
             if is_all_mode:
                 # Need dense bucket labels — fetch them via a tokens query.
@@ -548,11 +604,12 @@ def build_router(db_path: Path) -> APIRouter:
                     conn,
                     start,
                     end,
-                    bucket,
+                    eff_bucket,
                     "tokens",
                     models_list,
                     top_n,
                     api_keys=raw_keys,
+                    tz_offset_minutes=tz_offset_minutes,
                 )
                 labels = ts.buckets
                 # Determine which per-model series to include in the output.
@@ -563,7 +620,14 @@ def build_router(db_path: Path) -> APIRouter:
                 # Run the cost breakdown over ALL models (no model restriction)
                 # so __all__ sums across every model.
                 cell_costs, model_statuses = _query_bucket_model_costs(
-                    conn, start, end, bfmt, pricing, models=None, api_keys=raw_keys
+                    conn,
+                    start,
+                    end,
+                    bfmt,
+                    pricing,
+                    models=None,
+                    api_keys=raw_keys,
+                    tz_offset_minutes=tz_offset_minutes,
                 )
 
                 # Build __all__ series: sum all models per bucket.
@@ -598,7 +662,10 @@ def build_router(db_path: Path) -> APIRouter:
                     series_status[mdl] = rollup_cost_status(model_statuses.get(mdl, []))
 
                 return TimeseriesResponse(
-                    buckets=labels, series=cost_series, series_status=series_status
+                    buckets=labels,
+                    series=cost_series,
+                    series_status=series_status,
+                    bucket=eff_bucket,
                 )
 
             else:
@@ -608,10 +675,11 @@ def build_router(db_path: Path) -> APIRouter:
                     conn,
                     start,
                     end,
-                    bucket,
+                    eff_bucket,
                     "tokens",
                     models_list,
                     api_keys=raw_keys,
+                    tz_offset_minutes=tz_offset_minutes,
                 )
                 labels = ts.buckets
 
@@ -623,6 +691,7 @@ def build_router(db_path: Path) -> APIRouter:
                     pricing,
                     models=models_list,
                     api_keys=raw_keys,
+                    tz_offset_minutes=tz_offset_minutes,
                 )
 
                 assert models_list is not None
@@ -645,6 +714,7 @@ def build_router(db_path: Path) -> APIRouter:
                     buckets=labels,
                     series=cost_series_explicit,
                     series_status=series_status_explicit,
+                    bucket=eff_bucket,
                 )
 
         # Non-cost metrics: delegate entirely to query_timeseries.
@@ -653,13 +723,16 @@ def build_router(db_path: Path) -> APIRouter:
             conn,
             start,
             end,
-            bucket,
+            eff_bucket,
             fetch_metric,
             models_list,
             top_n,
             api_keys=raw_keys,
+            tz_offset_minutes=tz_offset_minutes,
         )
-        return TimeseriesResponse(buckets=ts.buckets, series=ts.series)
+        return TimeseriesResponse(
+            buckets=ts.buckets, series=ts.series, bucket=eff_bucket
+        )
 
     # -----------------------------------------------------------------------
     # GET /api/token-breakdown
@@ -667,23 +740,33 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/token-breakdown", response_model=TokenBreakdownResponse)
     def token_breakdown(
-        range_: _RangeParam,
         bucket: _BucketParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> TokenBreakdownResponse:
         """Return per-bucket token type breakdown (input/output/cached/reasoning).
 
-        ``models`` / ``api_keys`` are optional comma-separated lists.
-        Absent or 'all' → aggregate mode.
+        Auto-coarsens ``hour`` → ``day`` for wide windows; the effective bucket
+        is echoed back. ``models`` / ``api_keys`` are optional comma-separated
+        lists. Absent or 'all' → aggregate mode.
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
+        eff_bucket = coarsen_bucket(start, end, bucket)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         tb = query_token_breakdown(
-            conn, start, end, bucket, models=models_list, api_keys=raw_keys
+            conn,
+            start,
+            end,
+            eff_bucket,
+            models=models_list,
+            api_keys=raw_keys,
+            tz_offset_minutes=tz_offset_minutes,
         )
         return TokenBreakdownResponse(
             buckets=tb.buckets,
@@ -691,6 +774,7 @@ def build_router(db_path: Path) -> APIRouter:
             output=tb.output,
             cached=tb.cached,
             reasoning=tb.reasoning,
+            bucket=eff_bucket,
         )
 
     # -----------------------------------------------------------------------
@@ -699,9 +783,11 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/api-stats", response_model=list[ApiStat])
     def api_stats(
-        range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> list[ApiStat]:
@@ -714,7 +800,7 @@ def build_router(db_path: Path) -> APIRouter:
         Absent or 'all' → aggregate mode.
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         rows = query_api_stats(conn, start, end, models=models_list, api_keys=raw_keys)
@@ -742,9 +828,11 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/model-stats", response_model=list[ModelStat])
     def model_stats(
-        range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> list[ModelStat]:
@@ -759,7 +847,7 @@ def build_router(db_path: Path) -> APIRouter:
         aggregate mode (all models).
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         rows = query_model_stats(
@@ -814,9 +902,11 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/credential-stats", response_model=list[CredentialStat])
     def credential_stats(
-        range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
         pricing: Annotated[Mapping[str, ModelPricing], Depends(get_pricing)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> list[CredentialStat]:
@@ -829,7 +919,7 @@ def build_router(db_path: Path) -> APIRouter:
         Absent or 'all' → aggregate mode.
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         rows = query_credential_stats(
@@ -856,18 +946,20 @@ def build_router(db_path: Path) -> APIRouter:
 
     @r.get("/health", response_model=HealthResponse)
     def health(
-        range_: _RangeParam,
         conn: Annotated[sqlite3.Connection, Depends(get_conn)],
+        start: _StartParam = None,
+        end: _EndParam = None,
+        tz_offset_minutes: _TzOffsetParam = 0,
         models: Annotated[str | None, Query()] = None,
         api_keys: Annotated[str | None, Query()] = None,
     ) -> HealthResponse:
-        """Return health stats including latency percentiles for the requested range.
+        """Return health stats including latency percentiles for the requested window.
 
         ``models`` / ``api_keys`` are optional comma-separated lists.
         Absent or 'all' → aggregate mode.
         """
         now = datetime.now(UTC)
-        start, end = range_window(range_, now)
+        start, end = _resolve_window(start, end, now)
         models_list = _parse_models(models)
         raw_keys = _resolve_api_keys(conn, _parse_api_keys(api_keys))
         raw = query_health(conn, start, end, models=models_list, api_keys=raw_keys)

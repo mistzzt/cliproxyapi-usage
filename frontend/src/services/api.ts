@@ -9,10 +9,10 @@ import type {
   ModelsResponse,
   OverviewResponse,
   PricingResponse,
-  Range,
   TimeseriesResponse,
   TokenBreakdownResponse,
 } from '@/types/api';
+import type { ResolvedRange } from '@/utils/rangeResolver';
 import { apiPath } from './runtimeConfig';
 
 export class ApiError extends Error {
@@ -59,14 +59,28 @@ function filterQuery(f: FilterParams): Record<string, string | undefined> {
   };
 }
 
-export function getOverview(params: { range: Range } & FilterParams): Promise<OverviewResponse> {
+/**
+ * Serialize a resolved range into query params. `start` is dropped by
+ * `buildQuery` when absent (open start = "all time").
+ */
+function rangeQuery(r: ResolvedRange): Record<string, string | undefined> {
+  return {
+    start: r.start,
+    end: r.end,
+    tz_offset_minutes: String(r.tzOffsetMinutes),
+  };
+}
+
+export function getOverview(
+  params: { range: ResolvedRange } & FilterParams,
+): Promise<OverviewResponse> {
   return request<OverviewResponse>(
-    apiPath(`/overview${buildQuery({ range: params.range, ...filterQuery(params) })}`),
+    apiPath(`/overview${buildQuery({ ...rangeQuery(params.range), ...filterQuery(params) })}`),
   );
 }
 
 export function getTimeseries(params: {
-  range: Range;
+  range: ResolvedRange;
   bucket: Bucket;
   metric: Metric;
   top_n?: number;
@@ -74,7 +88,7 @@ export function getTimeseries(params: {
   const { range, bucket, metric, top_n } = params;
   return request<TimeseriesResponse>(
     apiPath(`/timeseries${buildQuery({
-      range,
+      ...rangeQuery(range),
       bucket,
       metric,
       top_n: top_n !== undefined ? String(top_n) : undefined,
@@ -84,41 +98,45 @@ export function getTimeseries(params: {
 }
 
 export function getTokenBreakdown(params: {
-  range: Range;
+  range: ResolvedRange;
   bucket: Bucket;
 } & FilterParams): Promise<TokenBreakdownResponse> {
   return request<TokenBreakdownResponse>(
     apiPath(`/token-breakdown${buildQuery({
-      range: params.range,
+      ...rangeQuery(params.range),
       bucket: params.bucket,
       ...filterQuery(params),
     })}`),
   );
 }
 
-export function getApiStats(params: { range: Range } & FilterParams): Promise<ApiStat[]> {
+export function getApiStats(params: { range: ResolvedRange } & FilterParams): Promise<ApiStat[]> {
   return request<ApiStat[]>(
-    apiPath(`/api-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
+    apiPath(`/api-stats${buildQuery({ ...rangeQuery(params.range), ...filterQuery(params) })}`),
   );
 }
 
-export function getModelStats(params: { range: Range } & FilterParams): Promise<ModelStat[]> {
+export function getModelStats(
+  params: { range: ResolvedRange } & FilterParams,
+): Promise<ModelStat[]> {
   return request<ModelStat[]>(
-    apiPath(`/model-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
+    apiPath(`/model-stats${buildQuery({ ...rangeQuery(params.range), ...filterQuery(params) })}`),
   );
 }
 
 export function getCredentialStats(
-  params: { range: Range } & FilterParams,
+  params: { range: ResolvedRange } & FilterParams,
 ): Promise<CredentialStat[]> {
   return request<CredentialStat[]>(
-    apiPath(`/credential-stats${buildQuery({ range: params.range, ...filterQuery(params) })}`),
+    apiPath(
+      `/credential-stats${buildQuery({ ...rangeQuery(params.range), ...filterQuery(params) })}`,
+    ),
   );
 }
 
-export function getHealth(params: { range: Range } & FilterParams): Promise<HealthResponse> {
+export function getHealth(params: { range: ResolvedRange } & FilterParams): Promise<HealthResponse> {
   return request<HealthResponse>(
-    apiPath(`/health${buildQuery({ range: params.range, ...filterQuery(params) })}`),
+    apiPath(`/health${buildQuery({ ...rangeQuery(params.range), ...filterQuery(params) })}`),
   );
 }
 

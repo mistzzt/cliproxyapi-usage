@@ -90,6 +90,7 @@ class TimeseriesResponse(BaseModel):
     buckets: list[str]  # ISO-8601 strings
     series: dict[str, list[float]]  # key: model name or "__all__"
     series_status: dict[str, CostStatus] = Field(default_factory=dict)
+    bucket: Literal["hour", "day"]  # effective bucket after auto-coarsening
 
 
 class TokenBreakdownResponse(BaseModel):
@@ -102,6 +103,7 @@ class TokenBreakdownResponse(BaseModel):
     output: list[int]
     cached: list[int]
     reasoning: list[int]
+    bucket: Literal["hour", "day"]  # effective bucket after auto-coarsening
 
 
 class ApiStat(BaseModel):

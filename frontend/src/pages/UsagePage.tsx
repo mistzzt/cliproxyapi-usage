@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { CHART_TOP_N } from './usage-constants';
-import type { Range } from '@/types/api';
+import type { RangeSpec } from '@/types/api';
+import { resolveRange } from '@/utils/rangeResolver';
 import {
   getOverview,
   getTimeseries,
@@ -29,13 +30,25 @@ import CredentialStatsCard from '@/components/usage/CredentialStatsCard';
 import ServiceHealthCard from '@/components/usage/ServiceHealthCard';
 import styles from './UsagePage.module.scss';
 
-function defaultPeriod(range: Range): 'hour' | 'day' {
-  return range === '7d' || range === 'all' ? 'day' : 'hour';
+function defaultPeriod(spec: RangeSpec): 'hour' | 'day' {
+  switch (spec.kind) {
+    case 'all':
+      return 'day';
+    case 'calendar':
+      return spec.unit === 'day' ? 'hour' : 'day';
+    case 'custom':
+      return spec.startDate === spec.endDate ? 'hour' : 'day';
+    case 'rolling':
+      return 'hour';
+  }
 }
 
 export default function UsagePage() {
   // Persisted state
-  const [range, setRange] = useLocalStorage<Range>('usage.range.v1', '24h');
+  const [range, setRange] = useLocalStorage<RangeSpec>('usage.range.v2', {
+    kind: 'rolling',
+    preset: '24h',
+  });
   const [selectedModels, setSelectedModels] = useLocalStorage<string[]>(
     'usage.models-filter.v1',
     ['all'],
@@ -52,6 +65,12 @@ export default function UsagePage() {
   // Session state
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [period, setPeriod] = useState<'hour' | 'day'>(() => defaultPeriod(range));
+  // `now` is recomputed once per load/refresh, then held stable so the resolved
+  // window doesn't drift on unrelated re-renders.
+  const [now, setNow] = useState<Date>(() => new Date());
+
+  // Resolve the selection into concrete instants + tz offset for the API.
+  const resolved = useMemo(() => resolveRange(range, now), [range, now]);
 
   // Media queries
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -78,7 +97,10 @@ export default function UsagePage() {
   );
 
   // --- Data hooks ---
-  const overview = useApi(() => getOverview({ range, ...filterArgs }), [range, filterArgs]);
+  const overview = useApi(
+    () => getOverview({ range: resolved, ...filterArgs }),
+    [resolved, filterArgs],
+  );
   const models = useApi(() => getModels(), []);
   const apiKeys = useApi(() => getApiKeys(), []);
   const pricing = useApi(() => getPricing(), []);
@@ -86,55 +108,79 @@ export default function UsagePage() {
   const timeseriesRequests = useApi(
     () =>
       getTimeseries({
-        range,
+        range: resolved,
         bucket: period,
         metric: 'requests',
         ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
         ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
       }),
-    [range, period, isAllModels, selectedModels, apiKeysParam],
+    [resolved, period, isAllModels, selectedModels, apiKeysParam],
   );
   const timeseriesTokens = useApi(
     () =>
       getTimeseries({
-        range,
+        range: resolved,
         bucket: period,
         metric: 'tokens',
         ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
         ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
       }),
-    [range, period, isAllModels, selectedModels, apiKeysParam],
+    [resolved, period, isAllModels, selectedModels, apiKeysParam],
   );
   const timeseriesCost = useApi(
     () =>
       getTimeseries({
-        range,
+        range: resolved,
         bucket: period,
         metric: 'cost',
         ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
         ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
       }),
-    [range, period, isAllModels, selectedModels, apiKeysParam],
+    [resolved, period, isAllModels, selectedModels, apiKeysParam],
   );
 
   const tokenBreakdown = useApi(
-    () => getTokenBreakdown({ range, bucket: period, ...filterArgs }),
-    [range, period, filterArgs],
+    () => getTokenBreakdown({ range: resolved, bucket: period, ...filterArgs }),
+    [resolved, period, filterArgs],
   );
 
-  const apiStats = useApi(() => getApiStats({ range, ...filterArgs }), [range, filterArgs]);
-  const modelStats = useApi(() => getModelStats({ range, ...filterArgs }), [range, filterArgs]);
-  const credentialStats = useApi(
-    () => getCredentialStats({ range, ...filterArgs }),
-    [range, filterArgs],
+  const apiStats = useApi(
+    () => getApiStats({ range: resolved, ...filterArgs }),
+    [resolved, filterArgs],
   );
-  const health = useApi(() => getHealth({ range, ...filterArgs }), [range, filterArgs]);
+  const modelStats = useApi(
+    () => getModelStats({ range: resolved, ...filterArgs }),
+    [resolved, filterArgs],
+  );
+  const credentialStats = useApi(
+    () => getCredentialStats({ range: resolved, ...filterArgs }),
+    [resolved, filterArgs],
+  );
+  const health = useApi(() => getHealth({ range: resolved, ...filterArgs }), [resolved, filterArgs]);
+
+  // Honor the server's effective bucket: wide windows auto-coarsen hour -> day,
+  // so reflect the actual bucket in the period toggle. Key off the response
+  // object identity (which changes on every fetch) rather than the bucket value,
+  // so a coarsen hour -> day is picked up even when the previous response was
+  // already day-bucketed. useApi keeps the prior data during reload, so this only
+  // fires once fresh data arrives, never on the in-flight toggle itself.
+  const requestsData = timeseriesRequests.data;
+  useEffect(() => {
+    const effectiveBucket = requestsData?.bucket;
+    if (effectiveBucket && effectiveBucket !== period) {
+      setPeriod(effectiveBucket);
+    }
+    // Only react to new server responses; including `period` would revert
+    // the user's toggle before the refetch resolves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestsData]);
 
   // Derived hasPricing
   const hasPricing = pricing.data !== null && Object.keys(pricing.data.pricing).length > 0;
 
   // Refresh all
   function handleRefresh() {
+    setNow(new Date());
     overview.reload();
     models.reload();
     apiKeys.reload();
@@ -149,7 +195,11 @@ export default function UsagePage() {
     health.reload();
   }
 
-  function handleRangeChange(next: Range) {
+  function handleRangeChange(next: RangeSpec) {
+    // Refresh the clock too: rolling/`all` windows end at `now`, so a stale
+    // `now` (from page load or the last refresh) would ask for an old `end` and
+    // miss recent records until the user hits Refresh.
+    setNow(new Date());
     setRange(next);
     setPeriod(defaultPeriod(next));
   }
