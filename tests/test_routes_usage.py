@@ -6,7 +6,7 @@ import json
 import pathlib
 import sqlite3
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import usage_export_queue_elements
@@ -39,6 +39,11 @@ _FIXTURE = (
     / "fixtures"
     / "usage-export-2026-04-23T05-01-45-283Z.json"
 )
+
+# All fixture rows fall on 2026-04-23 (UTC). A 24h window covering that day
+# keeps ``bucket=hour`` requests on hour granularity (under the coarsen cap)
+# while still including every seeded record.
+_FIXTURE_DAY_WINDOW = "start=2026-04-23T00:00:00Z&end=2026-04-24T00:00:00Z"
 
 
 def _load_records() -> list:
@@ -94,6 +99,22 @@ def _make_stub_pricing(model: str, rate: float) -> dict[str, ModelPricing]:
     return {model: ModelPricing(input_cost_per_token=rate, output_cost_per_token=rate)}
 
 
+def _iso_z(dt: datetime) -> str:
+    """Render a UTC datetime as a ``Z``-suffixed ISO instant (URL-safe)."""
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _rolling_window(hours: int) -> str:
+    """Build a ``start=..&end=..`` query fragment for a rolling window ending now.
+
+    Uses tz-aware (UTC) ``Z``-suffixed instants — the endpoints reject naive
+    datetimes, and ``Z`` avoids the ``+`` → space URL-decoding pitfall.
+    """
+    now = datetime.now(UTC)
+    start = now - timedelta(hours=hours)
+    return f"start={_iso_z(start)}&end={_iso_z(now)}"
+
+
 # ---------------------------------------------------------------------------
 # Test 2: overview totals match seed
 # ---------------------------------------------------------------------------
@@ -105,7 +126,7 @@ def test_overview_totals_match_seed(client_no_pricing) -> None:
     expected_requests = len(records)
     expected_tokens = sum(r.total_tokens for r in records)
 
-    resp = client_no_pricing.get("/api/overview?range=all")
+    resp = client_no_pricing.get("/api/overview")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     totals = body["totals"]
@@ -126,7 +147,7 @@ def test_overview_sparkline_length(client_no_pricing) -> None:
     "24 buckets for hour-based ranges" as a target; we allow ±1 to account for
     the flooring behaviour without coupling the test to wall-clock alignment.
     """
-    resp = client_no_pricing.get("/api/overview?range=24h")
+    resp = client_no_pricing.get(f"/api/overview?{_rolling_window(24)}")
     assert resp.status_code == 200, resp.text
     sparklines = resp.json()["sparklines"]
     for key in ("requests", "tokens", "rpm", "tpm", "cost"):
@@ -143,7 +164,7 @@ def test_overview_sparkline_length(client_no_pricing) -> None:
 
 def test_timeseries_all_models_shape(client_no_pricing) -> None:
     """No models filter → single '__all__' series; buckets and series aligned."""
-    resp = client_no_pricing.get("/api/timeseries?range=all&bucket=day&metric=requests")
+    resp = client_no_pricing.get("/api/timeseries?bucket=day&metric=requests")
     assert resp.status_code == 200, resp.text
     body = TimeseriesResponse.model_validate(resp.json())
     assert "__all__" in body.series
@@ -163,7 +184,7 @@ def test_timeseries_filtered_models(client_no_pricing) -> None:
     m1, m2 = distinct[0], distinct[1]
 
     resp = client_no_pricing.get(
-        f"/api/timeseries?range=all&bucket=day&metric=tokens&models={m1},{m2}",
+        f"/api/timeseries?bucket=day&metric=tokens&models={m1},{m2}",
     )
     assert resp.status_code == 200, resp.text
     body = TimeseriesResponse.model_validate(resp.json())
@@ -193,7 +214,7 @@ def test_timeseries_cost_metric_uses_pricing(
 
     with TestClient(app) as client:
         cost_resp = client.get(
-            f"/api/timeseries?range=all&bucket=day&metric=cost&models={model}",
+            f"/api/timeseries?bucket=day&metric=cost&models={model}",
         )
         assert cost_resp.status_code == 200
         cost_vals = cost_resp.json()["series"][model]
@@ -221,7 +242,7 @@ def test_timeseries_cost_no_pricing_returns_nulls(client_no_pricing) -> None:
     model = distinct[0]
 
     resp = client_no_pricing.get(
-        f"/api/timeseries?range=all&bucket=day&metric=cost&models={model}",
+        f"/api/timeseries?bucket=day&metric=cost&models={model}",
     )
     assert resp.status_code == 200, resp.text
     body = TimeseriesResponse.model_validate(resp.json())
@@ -309,7 +330,7 @@ def test_timeseries_cost_allmode_top_n_real_cost(seeded_db_path: pathlib.Path) -
 
     with TestClient(app) as client:
         resp = client.get(
-            "/api/timeseries?range=all&bucket=hour&metric=cost&top_n=8",
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost&top_n=8",
         )
 
     assert resp.status_code == 200, resp.text
@@ -364,7 +385,7 @@ def test_timeseries_cost_allmode_no_topn_returns_real_cost(
 
     with TestClient(app) as client:
         resp = client.get(
-            "/api/timeseries?range=all&bucket=hour&metric=cost",
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost",
         )
 
     assert resp.status_code == 200, resp.text
@@ -406,7 +427,7 @@ def test_token_breakdown_sums_match(client_no_pricing) -> None:
     expected_cached = sum(r.cached_tokens for r in records)
     expected_reasoning = sum(r.reasoning_tokens for r in records)
 
-    resp = client_no_pricing.get("/api/token-breakdown?range=all&bucket=day")
+    resp = client_no_pricing.get("/api/token-breakdown?bucket=day")
     assert resp.status_code == 200, resp.text
     body = TokenBreakdownResponse.model_validate(resp.json())
     assert sum(body.input) == expected_input
@@ -416,14 +437,55 @@ def test_token_breakdown_sums_match(client_no_pricing) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 9: invalid range → 422
+# Test 9: window validation → 422
 # ---------------------------------------------------------------------------
 
 
-def test_range_invalid_returns_422(client_no_pricing) -> None:
-    """An unrecognised range value must return 422 Unprocessable Entity."""
-    resp = client_no_pricing.get("/api/overview?range=foo")
+def test_window_start_after_end_returns_422(client_no_pricing) -> None:
+    """start > end is an ordering violation → 422."""
+    now = datetime.now(UTC)
+    start = _iso_z(now)
+    end = _iso_z(now - timedelta(hours=1))
+    resp = client_no_pricing.get(f"/api/overview?start={start}&end={end}")
     assert resp.status_code == 422
+
+
+def test_window_naive_start_returns_422(client_no_pricing) -> None:
+    """A naive (offset-less) start datetime is rejected rather than assumed UTC."""
+    resp = client_no_pricing.get("/api/overview?start=2026-04-23T00:00:00")
+    assert resp.status_code == 422
+
+
+def test_window_naive_end_returns_422(client_no_pricing) -> None:
+    """A naive (offset-less) end datetime is rejected."""
+    resp = client_no_pricing.get("/api/overview?end=2026-04-23T00:00:00")
+    assert resp.status_code == 422
+
+
+def test_window_explicit_range_scopes_totals(client_no_pricing) -> None:
+    """An explicit [start, end) window restricts totals to rows inside it.
+
+    The fixture spans 2026-04-23; a window fully covering that day returns all
+    records, while a disjoint later window returns none.
+    """
+    records = _load_records()
+    covering = "start=2026-04-23T00:00:00Z&end=2026-04-24T00:00:00Z"
+    resp = client_no_pricing.get(f"/api/overview?{covering}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["totals"]["requests"] == len(records)
+
+    disjoint = "start=2026-05-01T00:00:00Z&end=2026-05-02T00:00:00Z"
+    resp2 = client_no_pricing.get(f"/api/overview?{disjoint}")
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["totals"]["requests"] == 0
+
+
+def test_open_start_returns_all_time(client_no_pricing) -> None:
+    """Omitting start (open start) returns all-time totals."""
+    records = _load_records()
+    resp = client_no_pricing.get("/api/overview")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["totals"]["requests"] == len(records)
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +499,7 @@ def test_api_stats_rows_and_totals(client_no_pricing) -> None:
     expected_total_requests = len(records)
     expected_row_count = len({r.api_key for r in records})
 
-    resp = client_no_pricing.get("/api/api-stats?range=all")
+    resp = client_no_pricing.get("/api/api-stats")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
     assert len(rows) == expected_row_count
@@ -471,7 +533,7 @@ def test_model_stats_cost_with_pricing(
     app = create_app(cfg, pricing_provider=lambda: pricing)
 
     with TestClient(app) as client:
-        resp = client.get("/api/model-stats?range=all")
+        resp = client.get("/api/model-stats")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
 
@@ -504,7 +566,7 @@ def test_model_stats_cost_with_pricing(
 
 def test_model_stats_cost_null_without_pricing(client_no_pricing) -> None:
     """Empty pricing → every model row has cost=None."""
-    resp = client_no_pricing.get("/api/model-stats?range=all")
+    resp = client_no_pricing.get("/api/model-stats")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
     assert len(rows) > 0
@@ -526,7 +588,7 @@ def test_credential_stats_groups_by_source(
     records = _load_records()
     expected_distinct = len({r.source for r in records})
 
-    resp = client_no_pricing.get("/api/credential-stats?range=all")
+    resp = client_no_pricing.get("/api/credential-stats")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
     assert len(rows) == expected_distinct
@@ -547,7 +609,7 @@ def test_credential_stats_groups_by_source(
 
 def test_health_percentile_order(client_no_pricing) -> None:
     """p50 <= p95 <= p99 must hold for any non-empty range."""
-    resp = client_no_pricing.get("/api/health?range=all")
+    resp = client_no_pricing.get("/api/health")
     assert resp.status_code == 200, resp.text
     body = HealthResponse.model_validate(resp.json())
     assert body.latency.p50 <= body.latency.p95 <= body.latency.p99
@@ -563,8 +625,8 @@ def test_health_empty_range(seeded_db_path: pathlib.Path) -> None:
     cfg = ServerConfig(db_path=seeded_db_path)  # pyright: ignore[reportCallIssue]
     app = create_app(cfg, pricing_provider=lambda: {})
     with TestClient(app) as client:
-        # 7h range is very unlikely to contain fixture data (from 2026-04-23)
-        resp = client.get("/api/health?range=7h")
+        # A 7h window ending now cannot contain fixture data (from 2026-04-23).
+        resp = client.get(f"/api/health?{_rolling_window(7)}")
     assert resp.status_code == 200, resp.text
     body = HealthResponse.model_validate(resp.json())
     assert body.total_requests == 0
@@ -608,12 +670,12 @@ def test_overview_models_filter_reduces_totals(client_no_pricing) -> None:
     model = _first_model()
 
     # Baseline (all models)
-    base = client_no_pricing.get("/api/overview?range=all")
+    base = client_no_pricing.get("/api/overview")
     assert base.status_code == 200, base.text
     base_requests = base.json()["totals"]["requests"]
 
     # Filtered
-    resp = client_no_pricing.get(f"/api/overview?range=all&models={model}")
+    resp = client_no_pricing.get(f"/api/overview?models={model}")
     assert resp.status_code == 200, resp.text
     filtered_requests = resp.json()["totals"]["requests"]
 
@@ -627,9 +689,7 @@ def test_token_breakdown_models_filter_reduces_totals(client_no_pricing) -> None
     records = _load_records()
     model = _first_model()
 
-    resp = client_no_pricing.get(
-        f"/api/token-breakdown?range=all&bucket=day&models={model}"
-    )
+    resp = client_no_pricing.get(f"/api/token-breakdown?bucket=day&models={model}")
     assert resp.status_code == 200, resp.text
     body = TokenBreakdownResponse.model_validate(resp.json())
 
@@ -637,7 +697,7 @@ def test_token_breakdown_models_filter_reduces_totals(client_no_pricing) -> None
     assert sum(body.input) == expected_input
 
     # Must be strictly less than unfiltered total (fixture has multiple models)
-    full_resp = client_no_pricing.get("/api/token-breakdown?range=all&bucket=day")
+    full_resp = client_no_pricing.get("/api/token-breakdown?bucket=day")
     full_body = TokenBreakdownResponse.model_validate(full_resp.json())
     assert sum(body.input) < sum(full_body.input)
 
@@ -647,7 +707,7 @@ def test_api_stats_models_filter_restricts_rows(client_no_pricing) -> None:
     records = _load_records()
     model = _first_model()
 
-    resp = client_no_pricing.get(f"/api/api-stats?range=all&models={model}")
+    resp = client_no_pricing.get(f"/api/api-stats?models={model}")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
 
@@ -657,7 +717,7 @@ def test_api_stats_models_filter_restricts_rows(client_no_pricing) -> None:
     assert returned_api_keys == expected_api_keys
 
     # Filtered row count must be ≤ baseline
-    base = client_no_pricing.get("/api/api-stats?range=all")
+    base = client_no_pricing.get("/api/api-stats")
     assert len(rows) <= len(base.json())
 
 
@@ -665,7 +725,7 @@ def test_model_stats_models_filter_returns_exactly_one(client_no_pricing) -> Non
     """models=<single> returns exactly one row for that model."""
     model = _first_model()
 
-    resp = client_no_pricing.get(f"/api/model-stats?range=all&models={model}")
+    resp = client_no_pricing.get(f"/api/model-stats?models={model}")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
     assert len(rows) == 1
@@ -677,7 +737,7 @@ def test_credential_stats_models_filter_restricts_rows(client_no_pricing) -> Non
     records = _load_records()
     model = _first_model()
 
-    resp = client_no_pricing.get(f"/api/credential-stats?range=all&models={model}")
+    resp = client_no_pricing.get(f"/api/credential-stats?models={model}")
     assert resp.status_code == 200, resp.text
     rows = resp.json()
 
@@ -689,7 +749,7 @@ def test_credential_stats_models_filter_restricts_rows(client_no_pricing) -> Non
     returned_credentials = {row["source"] for row in rows}
     assert returned_credentials == expected_credentials
 
-    base = client_no_pricing.get("/api/credential-stats?range=all")
+    base = client_no_pricing.get("/api/credential-stats")
     assert len(rows) <= len(base.json())
 
 
@@ -698,14 +758,14 @@ def test_health_models_filter_reduces_totals(client_no_pricing) -> None:
     records = _load_records()
     model = _first_model()
 
-    resp = client_no_pricing.get(f"/api/health?range=all&models={model}")
+    resp = client_no_pricing.get(f"/api/health?models={model}")
     assert resp.status_code == 200, resp.text
     body = HealthResponse.model_validate(resp.json())
 
     expected_total = len([r for r in records if r.model == model])
     assert body.total_requests == expected_total
 
-    base = client_no_pricing.get("/api/health?range=all")
+    base = client_no_pricing.get("/api/health")
     base_body = HealthResponse.model_validate(base.json())
     assert body.total_requests < base_body.total_requests
 
@@ -727,11 +787,11 @@ def test_overview_api_keys_filter_reduces_totals(client_no_pricing) -> None:
     key = records[0].api_key
     redacted = redact_key(key)
 
-    base = client_no_pricing.get("/api/overview?range=all")
+    base = client_no_pricing.get("/api/overview")
     assert base.status_code == 200
     base_requests = base.json()["totals"]["requests"]
 
-    resp = client_no_pricing.get(f"/api/overview?range=all&api_keys={redacted}")
+    resp = client_no_pricing.get(f"/api/overview?api_keys={redacted}")
     assert resp.status_code == 200, resp.text
     filtered_requests = resp.json()["totals"]["requests"]
 
@@ -742,7 +802,7 @@ def test_overview_api_keys_filter_reduces_totals(client_no_pricing) -> None:
 
 def test_overview_api_keys_filter_unknown_yields_zero(client_no_pricing) -> None:
     """An unknown redacted form yields zero rows (not a silent passthrough)."""
-    resp = client_no_pricing.get("/api/overview?range=all&api_keys=does-not-exist")
+    resp = client_no_pricing.get("/api/overview?api_keys=does-not-exist")
     assert resp.status_code == 200
     assert resp.json()["totals"]["requests"] == 0
 
@@ -788,7 +848,7 @@ def test_codex_cost_split_matches_ccusage_formula(tmp_path: pathlib.Path) -> Non
     expected = expected_input * 1.25e-6 + 500 * 1e-5 + 200 * 1.25e-7
 
     with TestClient(app) as client:
-        resp = client.get("/api/api-stats?range=all")
+        resp = client.get("/api/api-stats")
         assert resp.status_code == 200, resp.text
         rows = resp.json()
         assert len(rows) == 1
@@ -834,7 +894,7 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
     expected = 1000 * 3e-6 + 500 * 1.5e-5 + 200 * 3e-7
 
     with TestClient(app) as client:
-        resp = client.get("/api/api-stats?range=all")
+        resp = client.get("/api/api-stats")
         assert resp.status_code == 200, resp.text
         rows = resp.json()
         assert rows[0]["cost"] == pytest.approx(expected)
@@ -842,9 +902,7 @@ def test_anthropic_cost_unaffected_by_split(tmp_path: pathlib.Path) -> None:
 
 def test_timeseries_cost_emits_series_status_live(client_with_full_pricing) -> None:
     """When every model in the window has live pricing, series_status is all 'live'."""
-    resp = client_with_full_pricing.get(
-        "/api/timeseries?range=all&bucket=day&metric=cost"
-    )
+    resp = client_with_full_pricing.get("/api/timeseries?bucket=day&metric=cost")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "series_status" in body
@@ -854,7 +912,7 @@ def test_timeseries_cost_emits_series_status_live(client_with_full_pricing) -> N
 
 def test_timeseries_cost_emits_series_status_missing(client_no_pricing) -> None:
     """With empty pricing every series is 'missing'."""
-    resp = client_no_pricing.get("/api/timeseries?range=all&bucket=day&metric=cost")
+    resp = client_no_pricing.get("/api/timeseries?bucket=day&metric=cost")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["series_status"]["__all__"] == "missing"
@@ -863,9 +921,7 @@ def test_timeseries_cost_emits_series_status_missing(client_no_pricing) -> None:
 def test_timeseries_non_cost_metric_has_empty_series_status(
     client_with_full_pricing,
 ) -> None:
-    resp = client_with_full_pricing.get(
-        "/api/timeseries?range=all&bucket=day&metric=tokens"
-    )
+    resp = client_with_full_pricing.get("/api/timeseries?bucket=day&metric=tokens")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["series_status"] == {}
@@ -907,10 +963,145 @@ def test_credential_stats_redacts_key_sources(tmp_path: pathlib.Path) -> None:
     app = create_app(cfg, pricing_provider=lambda: {})
 
     with TestClient(app) as client:
-        resp = client.get("/api/credential-stats?range=all")
+        resp = client.get("/api/credential-stats")
         assert resp.status_code == 200, resp.text
         sources = {row["source"] for row in resp.json()}
         assert "openai:sk-*******-abc12345" in sources
         assert "codex-reviewer@example.test" in sources
         assert "anthropic:sk-*******-tail9999" in sources
         assert "openai:sk-proj-secret-abc12345" not in sources
+
+
+# ---------------------------------------------------------------------------
+# Bucket-count guard: hour auto-coarsens to day for wide / open windows
+# ---------------------------------------------------------------------------
+
+
+def test_timeseries_hour_autocoarsens_wide_window(client_no_pricing) -> None:
+    """bucket=hour over a >10-day window is coarsened to day (effective bucket)."""
+    window = "start=2026-04-01T00:00:00Z&end=2026-04-23T00:00:00Z"  # ~22 days
+    resp = client_no_pricing.get(
+        f"/api/timeseries?{window}&bucket=hour&metric=requests"
+    )
+    assert resp.status_code == 200, resp.text
+    body = TimeseriesResponse.model_validate(resp.json())
+    assert body.bucket == "day"
+    # Day granularity keeps the label count small (not 500+ hour points).
+    assert len(body.buckets) <= 32
+
+
+def test_timeseries_hour_open_start_autocoarsens(client_no_pricing) -> None:
+    """bucket=hour with an open start (all-time) is always coarsened to day."""
+    resp = client_no_pricing.get("/api/timeseries?bucket=hour&metric=requests")
+    assert resp.status_code == 200, resp.text
+    body = TimeseriesResponse.model_validate(resp.json())
+    assert body.bucket == "day"
+
+
+def test_token_breakdown_hour_autocoarsens_wide_window(client_no_pricing) -> None:
+    """token-breakdown mirrors the same hour→day guard."""
+    window = "start=2026-04-01T00:00:00Z&end=2026-04-23T00:00:00Z"
+    resp = client_no_pricing.get(f"/api/token-breakdown?{window}&bucket=hour")
+    assert resp.status_code == 200, resp.text
+    body = TokenBreakdownResponse.model_validate(resp.json())
+    assert body.bucket == "day"
+
+
+# ---------------------------------------------------------------------------
+# tz_offset_minutes shifts day-bucket boundaries (and cost keys line up)
+# ---------------------------------------------------------------------------
+
+
+def _single_row_db(tmp_path: pathlib.Path, timestamp: str) -> pathlib.Path:
+    """Seed a DB with one gpt-5 row at *timestamp* (1000 input / 500 output)."""
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    conn.execute(
+        "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+        "latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, "
+        "total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            timestamp,
+            "sk-test",
+            "gpt-5",
+            "openai-account@example.test",
+            "0",
+            100,
+            1000,
+            500,
+            0,
+            0,
+            1500,
+            0,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+# Window bracketing 2026-04-30 / 2026-05-01 for the boundary row below.
+_BOUNDARY_WINDOW = "start=2026-04-29T00:00:00Z&end=2026-05-02T00:00:00Z"
+
+
+def test_tz_offset_shifts_token_breakdown_day_bucket(tmp_path: pathlib.Path) -> None:
+    """A row at 02:00 UTC lands on the prior local day under a UTC-8 offset.
+
+    The dense day labels and the grouped data must shift together, so the
+    input-token total stays attached to the correct (shifted) bucket.
+    """
+    db_path = _single_row_db(tmp_path, "2026-05-01T02:00:00.000000Z")
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        # UTC: bucket stays on 2026-05-01.
+        utc = client.get(f"/api/token-breakdown?{_BOUNDARY_WINDOW}&bucket=day")
+        assert utc.status_code == 200, utc.text
+        utc_body = TokenBreakdownResponse.model_validate(utc.json())
+        utc_nonzero = {
+            lbl: v for lbl, v in zip(utc_body.buckets, utc_body.input, strict=True) if v
+        }
+        assert utc_nonzero == {"2026-05-01": 1000}
+
+        # UTC-8 (-480): 02:00Z → 18:00 previous local day, bucket 2026-04-30.
+        shifted = client.get(
+            f"/api/token-breakdown?{_BOUNDARY_WINDOW}&bucket=day&tz_offset_minutes=-480"
+        )
+        assert shifted.status_code == 200, shifted.text
+        shifted_body = TokenBreakdownResponse.model_validate(shifted.json())
+        shifted_nonzero = {
+            lbl: v
+            for lbl, v in zip(shifted_body.buckets, shifted_body.input, strict=True)
+            if v
+        }
+        assert shifted_nonzero == {"2026-04-30": 1000}
+
+
+def test_tz_offset_shifts_cost_day_bucket(tmp_path: pathlib.Path) -> None:
+    """The cost path applies the same offset/bucket as the labels.
+
+    Guards the highest-risk bug: if the cost bucketing did not honor the tz
+    offset, its keys would miss the shifted labels and the series would zero.
+    """
+    db_path = _single_row_db(tmp_path, "2026-05-01T02:00:00.000000Z")
+    pricing = {"gpt-5": ModelPricing(input_cost_per_token=1e-6)}
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing)
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_BOUNDARY_WINDOW}&bucket=day&metric=cost"
+            "&tz_offset_minutes=-480"
+        )
+        assert resp.status_code == 200, resp.text
+        body = TimeseriesResponse.model_validate(resp.json())
+        assert body.bucket == "day"
+        nonzero = {
+            lbl: v
+            for lbl, v in zip(body.buckets, body.series["__all__"], strict=True)
+            if v
+        }
+        # Cost must be non-zero and attached to the shifted local day.
+        assert set(nonzero) == {"2026-04-30"}
+        assert nonzero["2026-04-30"] == pytest.approx(1000 * 1e-6)

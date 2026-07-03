@@ -1,14 +1,24 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import type { ReactNode } from 'react';
+import { parseISO, format } from 'date-fns';
+import * as Popover from '@radix-ui/react-popover';
+import type { DateRange } from 'react-day-picker';
 import { CHART_MAX_LINES } from '@/pages/usage-constants';
-import type { Range } from '@/types/api';
-import Select, { type SelectOption } from '@/components/ui/Select';
+import type { RangeSpec } from '@/types/api';
+import {
+  stepAnchor,
+  isCurrentPeriod,
+  anchorFor,
+  formatCalendarLabel,
+} from '@/utils/rangeResolver';
 import Button from '@/components/ui/Button';
+import RangeCalendar from '@/components/usage/RangeCalendar';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import styles from './FilterSidebar.module.scss';
 
 export interface FilterSidebarProps {
-  range: Range;
-  onRangeChange: (r: Range) => void;
+  range: RangeSpec;
+  onRangeChange: (r: RangeSpec) => void;
   models: string[];
   selectedModels: string[];
   onModelsChange: (next: string[]) => void;
@@ -22,16 +32,9 @@ export interface FilterSidebarProps {
   onMobileClose?: () => void;
 }
 
-const RANGE_OPTIONS: SelectOption[] = [
-  { value: '7h', label: 'Last 7 hours' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: 'all', label: 'All time' },
-];
-
 interface SidebarBodyProps {
-  range: Range;
-  onRangeChange: (r: Range) => void;
+  range: RangeSpec;
+  onRangeChange: (r: RangeSpec) => void;
   models: string[];
   selectedModels: string[];
   onModelsChange: (next: string[]) => void;
@@ -70,6 +73,159 @@ function FilterIcon() {
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+type CalendarUnit = 'day' | 'week' | 'month';
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`${styles.chip} ${active ? styles.chipActive : ''}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RangeControl({
+  range,
+  onRangeChange,
+}: {
+  range: RangeSpec;
+  onRangeChange: (r: RangeSpec) => void;
+}) {
+  const now = new Date();
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState<DateRange | undefined>(undefined);
+
+  const isRolling = (preset: '7h' | '24h') =>
+    range.kind === 'rolling' && range.preset === preset;
+  const isCalendarLive = (unit: CalendarUnit) =>
+    range.kind === 'calendar' && range.unit === unit && isCurrentPeriod(unit, range.anchor, now);
+
+  const selectCalendar = (unit: CalendarUnit) =>
+    onRangeChange({ kind: 'calendar', unit, anchor: anchorFor(now) });
+
+  const handleCustomOpenChange = (open: boolean) => {
+    if (open) {
+      setDraft(
+        range.kind === 'custom'
+          ? { from: parseISO(range.startDate), to: parseISO(range.endDate) }
+          : undefined,
+      );
+    }
+    setCustomOpen(open);
+  };
+
+  const applyCustom = () => {
+    if (!draft?.from) return;
+    const to = draft.to ?? draft.from;
+    onRangeChange({
+      kind: 'custom',
+      startDate: format(draft.from, 'yyyy-MM-dd'),
+      endDate: format(to, 'yyyy-MM-dd'),
+    });
+    setCustomOpen(false);
+  };
+
+  return (
+    <div className={styles.section}>
+      <span className={styles.sectionLabel}>Range</span>
+      <div className={styles.chipRow} role="group" aria-label="Time range">
+        <Chip active={isRolling('7h')} onClick={() => onRangeChange({ kind: 'rolling', preset: '7h' })}>
+          7h
+        </Chip>
+        <Chip
+          active={isRolling('24h')}
+          onClick={() => onRangeChange({ kind: 'rolling', preset: '24h' })}
+        >
+          24h
+        </Chip>
+        <Chip active={isCalendarLive('day')} onClick={() => selectCalendar('day')}>
+          Today
+        </Chip>
+        <Chip active={isCalendarLive('week')} onClick={() => selectCalendar('week')}>
+          This week
+        </Chip>
+        <Chip active={isCalendarLive('month')} onClick={() => selectCalendar('month')}>
+          This month
+        </Chip>
+        <Chip active={range.kind === 'all'} onClick={() => onRangeChange({ kind: 'all' })}>
+          All
+        </Chip>
+
+        <Popover.Root open={customOpen} onOpenChange={handleCustomOpenChange}>
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              className={`${styles.chip} ${range.kind === 'custom' ? styles.chipActive : ''}`}
+              aria-pressed={range.kind === 'custom'}
+            >
+              Custom
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              className={styles.popover}
+              sideOffset={8}
+              align="start"
+              collisionPadding={12}
+            >
+              <RangeCalendar value={draft} onChange={setDraft} today={now} />
+              <div className={styles.popoverActions}>
+                <Button variant="secondary" onClick={() => setCustomOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={applyCustom} disabled={!draft?.from}>
+                  Apply
+                </Button>
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      </div>
+
+      {range.kind === 'calendar' && (
+        <div className={styles.stepper}>
+          <button
+            type="button"
+            className={styles.stepButton}
+            aria-label="Previous period"
+            onClick={() =>
+              onRangeChange({ ...range, anchor: stepAnchor(range.unit, range.anchor, -1) })
+            }
+          >
+            ‹
+          </button>
+          <span className={styles.stepLabel}>
+            {formatCalendarLabel(range.unit, range.anchor)}
+          </span>
+          <button
+            type="button"
+            className={styles.stepButton}
+            aria-label="Next period"
+            disabled={isCurrentPeriod(range.unit, range.anchor, now)}
+            onClick={() =>
+              onRangeChange({ ...range, anchor: stepAnchor(range.unit, range.anchor, 1) })
+            }
+          >
+            ›
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -180,17 +336,7 @@ function SidebarBody({
 }: SidebarBodyProps) {
   return (
     <div id="filter-sidebar-body">
-      <div className={styles.section}>
-        <label className={styles.sectionLabel} htmlFor="filter-sidebar-range">
-          Range
-        </label>
-        <Select
-          id="filter-sidebar-range"
-          options={RANGE_OPTIONS}
-          value={range}
-          onChange={(v) => onRangeChange(v as Range)}
-        />
-      </div>
+      <RangeControl range={range} onRangeChange={onRangeChange} />
 
       <MultiSelectSection
         id="filter-sidebar-models"

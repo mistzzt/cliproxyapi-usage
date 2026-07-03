@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from cliproxy_usage_server.db import tz_sql_modifier
 from cliproxy_usage_server.redact import redact_key as _redact_key
 
 # ---------------------------------------------------------------------------
@@ -199,23 +200,35 @@ def query_distinct_api_keys(conn: sqlite3.Connection) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _hour_labels(start: datetime, end: datetime) -> list[str]:
-    """Generate hourly bucket labels from *start* (floored) to *end* (exclusive)."""
-    floored = start.replace(minute=0, second=0, microsecond=0)
+def _hour_labels(start: datetime, end: datetime, tz_offset_minutes: int) -> list[str]:
+    """Generate hourly bucket labels from *start* (floored) to *end* (exclusive).
+
+    Labels are emitted in the local time implied by *tz_offset_minutes* so they
+    line up with SQLite groups produced by the same ``strftime`` modifier.
+    """
+    off = timedelta(minutes=tz_offset_minutes)
+    end_local = end + off
+    floored = (start + off).replace(minute=0, second=0, microsecond=0)
     labels: list[str] = []
     cur = floored
-    while cur < end:
+    while cur < end_local:
         labels.append(cur.strftime("%Y-%m-%dT%H:00:00Z"))
         cur += timedelta(hours=1)
     return labels
 
 
-def _day_labels(start: datetime, end: datetime) -> list[str]:
-    """Generate daily bucket labels from *start* (floored to day) to *end* exclusive."""
-    floored = start.replace(hour=0, minute=0, second=0, microsecond=0)
+def _day_labels(start: datetime, end: datetime, tz_offset_minutes: int) -> list[str]:
+    """Generate daily bucket labels from *start* (floored to day) to *end* exclusive.
+
+    Labels are emitted in the local time implied by *tz_offset_minutes* so they
+    line up with SQLite groups produced by the same ``strftime`` modifier.
+    """
+    off = timedelta(minutes=tz_offset_minutes)
+    end_local = end + off
+    floored = (start + off).replace(hour=0, minute=0, second=0, microsecond=0)
     labels: list[str] = []
     cur = floored
-    while cur < end:
+    while cur < end_local:
         labels.append(cur.strftime("%Y-%m-%d"))
         cur += timedelta(days=1)
     return labels
@@ -226,6 +239,7 @@ def _bucket_labels(
     end: datetime,
     bucket: Literal["hour", "day"],
     conn: sqlite3.Connection,
+    tz_offset_minutes: int = 0,
 ) -> list[str]:
     """Return the full dense list of bucket label strings for the window."""
     if start is None:
@@ -238,8 +252,8 @@ def _bucket_labels(
         start = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
 
     if bucket == "hour":
-        return _hour_labels(start, end)
-    return _day_labels(start, end)
+        return _hour_labels(start, end, tz_offset_minutes)
+    return _day_labels(start, end, tz_offset_minutes)
 
 
 def _bucket_fmt(bucket: Literal["hour", "day"]) -> str:
@@ -307,6 +321,7 @@ def query_timeseries(
     models: list[str] | None,
     top_n: int | None = None,
     api_keys: list[str] | None = None,
+    tz_offset_minutes: int = 0,
 ) -> TimeseriesResult:
     """Return bucket labels and per-model (or ``"__all__"``) series.
 
@@ -327,7 +342,8 @@ def query_timeseries(
     Buckets are dense — intervals with no data are filled with ``0.0``.
     """
     fmt = _bucket_fmt(bucket)
-    labels = _bucket_labels(start, end, bucket, conn)
+    modifier = tz_sql_modifier(tz_offset_minutes)
+    labels = _bucket_labels(start, end, bucket, conn, tz_offset_minutes)
 
     # "tokens" and "cost" both emit total_tokens; cost computation is
     # deferred to the caller which applies per-model pricing.
@@ -345,7 +361,7 @@ def query_timeseries(
         # Always compute the __all__ series over the full unfiltered population.
         rows = conn.execute(
             f"""
-            SELECT strftime('{fmt}', timestamp) AS bkt, {agg_expr} AS val
+            SELECT strftime('{fmt}', timestamp, '{modifier}') AS bkt, {agg_expr} AS val
             FROM requests
             {where}{kfrag}
             GROUP BY bkt
@@ -384,7 +400,10 @@ def query_timeseries(
         mfrag_top, mparams_top = _models_where(top_models)
         model_rows = conn.execute(
             f"""
-            SELECT strftime('{fmt}', timestamp) AS bkt, model, {agg_expr} AS val
+            SELECT
+                strftime('{fmt}', timestamp, '{modifier}') AS bkt,
+                model,
+                {agg_expr} AS val
             FROM requests
             {where}{mfrag_top}{kfrag}
             GROUP BY bkt, model
@@ -410,7 +429,10 @@ def query_timeseries(
     mfrag, mparams = _models_where(models)
     per_model_rows = conn.execute(
         f"""
-        SELECT strftime('{fmt}', timestamp) AS bkt, model, {agg_expr} AS val
+        SELECT
+            strftime('{fmt}', timestamp, '{modifier}') AS bkt,
+            model,
+            {agg_expr} AS val
         FROM requests
         {where}{mfrag}{kfrag}
         GROUP BY bkt, model
@@ -439,13 +461,15 @@ def query_token_breakdown(
     bucket: Literal["hour", "day"],
     models: list[str] | None = None,
     api_keys: list[str] | None = None,
+    tz_offset_minutes: int = 0,
 ) -> TokenBreakdownResult:
     """Return per-bucket token breakdown (input/output/cached/reasoning).
 
     All value lists are ints; missing buckets are filled with ``0``.
     """
     fmt = _bucket_fmt(bucket)
-    labels = _bucket_labels(start, end, bucket, conn)
+    modifier = tz_sql_modifier(tz_offset_minutes)
+    labels = _bucket_labels(start, end, bucket, conn, tz_offset_minutes)
     where, params = _range_where(start, end, conn)
     mfrag, mparams = _models_where(models)
     kfrag, kparams = _api_keys_where(api_keys)
@@ -453,7 +477,7 @@ def query_token_breakdown(
     rows = conn.execute(
         f"""
         SELECT
-            strftime('{fmt}', timestamp)       AS bkt,
+            strftime('{fmt}', timestamp, '{modifier}')       AS bkt,
             COALESCE(SUM(input_tokens), 0)     AS inp,
             COALESCE(SUM(output_tokens), 0)    AS out,
             COALESCE(SUM(cached_tokens), 0)    AS cac,

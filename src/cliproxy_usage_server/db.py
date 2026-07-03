@@ -5,13 +5,15 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
-_RANGE_DELTAS: dict[str, timedelta | None] = {
-    "7h": timedelta(hours=7),
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-    "all": None,
-}
+# Span at or below which sparklines/auto-selection prefer hour buckets.
+_HOUR_SPAN_MAX = timedelta(hours=48)
+
+# Bucket-count guard: an "hour" window wider than this many hours is
+# auto-coarsened to "day" buckets to avoid emitting thousands of labels /
+# SQL groups / chart points. ~240 hours ≈ 10 days.
+_HOUR_BUCKET_CAP_HOURS = 240
 
 
 def open_ro(path: Path) -> sqlite3.Connection:
@@ -30,17 +32,51 @@ def open_ro(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(uri, uri=True, check_same_thread=False)
 
 
-def range_window(range_: str, now: datetime) -> tuple[datetime | None, datetime]:
-    """Map a range string to a ``(start, end)`` pair relative to *now*.
+def bucket_for_span(
+    start: datetime | None,
+    end: datetime,
+) -> Literal["hour", "day"]:
+    """Pick a bucket granularity from the window span.
 
-    Supported values: ``"7h"``, ``"24h"``, ``"7d"``, ``"all"``.
-
-    ``"all"`` returns ``(None, now)``.
-    Any other value raises ``ValueError``.
+    - ``start is None`` (open-ended "all") → ``"day"`` (no span to measure).
+    - span ``<= 48h`` → ``"hour"``.
+    - otherwise → ``"day"``.
     """
-    if range_ not in _RANGE_DELTAS:
-        valid = list(_RANGE_DELTAS)
-        raise ValueError(f"invalid range {range_!r}; must be one of {valid}")
-    delta = _RANGE_DELTAS[range_]
-    start = None if delta is None else now - delta
-    return start, now
+    if start is None:
+        return "day"
+    return "hour" if (end - start) <= _HOUR_SPAN_MAX else "day"
+
+
+def coarsen_bucket(
+    start: datetime | None,
+    end: datetime,
+    bucket: Literal["hour", "day"],
+) -> Literal["hour", "day"]:
+    """Auto-coarsen an ``"hour"`` bucket to ``"day"`` for wide windows.
+
+    Guards the unbounded dense-label generators against runaway bucket counts:
+
+    - ``"day"`` buckets pass through unchanged (naturally bounded).
+    - ``start is None`` with ``"hour"`` → ``"day"`` unconditionally (an
+      open-ended all-time hourly series is the worst runaway).
+    - an ``"hour"`` window wider than the cap (~10 days) → ``"day"``.
+    """
+    if bucket != "hour":
+        return bucket
+    if start is None:
+        return "day"
+    if (end - start) > timedelta(hours=_HOUR_BUCKET_CAP_HOURS):
+        return "day"
+    return "hour"
+
+
+def tz_sql_modifier(tz_offset_minutes: int) -> str:
+    """Build a SQLite ``strftime`` timezone modifier like ``'-08:00'``.
+
+    ``-480`` → ``'-08:00'``, ``+330`` → ``'+05:30'``, ``0`` → ``'+00:00'``.
+    Requires SQLite >= 3.42 at the call site for the modifier to apply.
+    """
+    sign = "-" if tz_offset_minutes < 0 else "+"
+    total = abs(tz_offset_minutes)
+    hh, mm = divmod(total, 60)
+    return f"{sign}{hh:02d}:{mm:02d}"

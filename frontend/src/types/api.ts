@@ -1,4 +1,15 @@
-export type Range = '7h' | '24h' | '7d' | 'all';
+/**
+ * The user's time-range *selection*. Resolved into concrete UTC instants by
+ * `resolveRange` (src/utils/rangeResolver.ts) before being sent to the API.
+ */
+export type RangeSpec =
+  | { kind: 'rolling'; preset: '7h' | '24h' }
+  | { kind: 'all' }
+  // `anchor` is a local calendar date (YYYY-MM-DD) somewhere inside the period.
+  | { kind: 'calendar'; unit: 'day' | 'week' | 'month'; anchor: string }
+  // `startDate`/`endDate` are local calendar dates (YYYY-MM-DD), inclusive.
+  | { kind: 'custom'; startDate: string; endDate: string };
+
 export type Bucket = 'hour' | 'day';
 export type Metric = 'requests' | 'tokens' | 'cost';
 
@@ -32,12 +43,16 @@ export interface OverviewResponse {
 }
 
 export interface TimeseriesResponse {
+  /** Effective bucket used by the server (may be coarsened hour -> day). */
+  bucket: Bucket;
   buckets: string[];
   series: Record<string, number[]>;
   series_status: Record<string, CostStatus>;
 }
 
 export interface TokenBreakdownResponse {
+  /** Effective bucket used by the server (may be coarsened hour -> day). */
+  bucket: Bucket;
   buckets: string[];
   input: number[];
   output: number[];
