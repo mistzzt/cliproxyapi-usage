@@ -176,6 +176,7 @@ def create_app(
             {
                 "basePath": config.base_path,
                 "apiBase": api_prefix,
+                "title": config.page_title,
             },
             separators=(",", ":"),
         )
@@ -200,13 +201,26 @@ def create_app(
             name="spa-assets",
         )
         _index_html = _SPA_DIR / "index.html"
+        _spa_root = _SPA_DIR.resolve()
+
+        def _serve_spa(full_path: str) -> FileResponse:
+            """Serve a dist root-level file (e.g. favicon.svg) when the request
+            maps to one; otherwise render the SPA shell so client-side routes
+            resolve. Deep routes request root files relative to the route, so
+            fall back to matching by basename."""
+            for candidate in (full_path, Path(full_path).name):
+                if not candidate or candidate == "index.html":
+                    continue
+                resolved = (_SPA_DIR / candidate).resolve()
+                if resolved.is_file() and _spa_root in resolved.parents:
+                    return FileResponse(resolved, headers=_NO_STORE_HEADERS)
+            return FileResponse(_index_html, headers=_NO_STORE_HEADERS)
 
         if config.base_path == "/":
 
             @app.get("/{full_path:path}", include_in_schema=False)
             async def _spa_fallback(full_path: str) -> FileResponse:
-                del full_path  # unused; any non-API GET renders the SPA shell
-                return FileResponse(_index_html, headers=_NO_STORE_HEADERS)
+                return _serve_spa(full_path)
 
         else:
 
@@ -216,8 +230,7 @@ def create_app(
 
             @app.get(f"{config.base_path}/{{full_path:path}}", include_in_schema=False)
             async def _prefixed_spa_fallback(full_path: str) -> FileResponse:
-                del full_path  # unused; any base-path GET renders the SPA shell
-                return FileResponse(_index_html, headers=_NO_STORE_HEADERS)
+                return _serve_spa(full_path)
 
     return app
 

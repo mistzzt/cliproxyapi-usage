@@ -110,6 +110,7 @@ collector.
 | `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no           |
 | `USAGE_SERVER_PORT`         | `8318`                                                 | no           |
 | `USAGE_BASE_PATH`           | `/`                                                    | no           |
+| `USAGE_PAGE_TITLE`          | `CLIProxyAPI Usage Dashboard`                          | no           |
 | `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no           |
 | `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no           |
 | `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no           |
@@ -126,6 +127,10 @@ and `/api/quota/*` (JSON). Successful quota responses are cached for
 the TTL returns the cached value rather than re-hitting the upstream OAuth
 endpoints. When either variable is unset, `/api/quota/*` returns `503` and the
 UI shows a disabled banner; the dashboard remains available.
+
+`USAGE_PAGE_TITLE` sets the browser tab title (default `CLIProxyAPI Usage
+Dashboard`). It is injected at runtime, so a single prebuilt `frontend/dist/`
+can be relabeled by restarting the server, no rebuild required.
 
 ### Cost accuracy
 
