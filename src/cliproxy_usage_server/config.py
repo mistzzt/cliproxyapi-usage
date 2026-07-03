@@ -49,6 +49,10 @@ class ServerConfig(BaseSettings):
         default="/",
         validation_alias=AliasChoices("base_path", "USAGE_BASE_PATH"),
     )
+    page_title: str = Field(
+        default="CLIProxyAPI Usage Dashboard",
+        validation_alias=AliasChoices("page_title", "USAGE_PAGE_TITLE"),
+    )
     cliproxy_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("cliproxy_base_url", "CLIPROXY_BASE_URL"),

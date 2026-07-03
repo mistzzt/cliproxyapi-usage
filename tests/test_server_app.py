@@ -122,6 +122,19 @@ def test_runtime_config_served_in_root_mode() -> None:
     assert "application/javascript" in resp.headers["content-type"]
     assert 'basePath":"/"' in resp.text
     assert 'apiBase":"/api"' in resp.text
+    assert 'title":"CLIProxyAPI Usage Dashboard"' in resp.text
+
+
+def test_runtime_config_includes_configured_page_title() -> None:
+    cfg = ServerConfig(  # pyright: ignore[reportCallIssue]
+        db_path=Path("/tmp/test-server-app.db"),
+        page_title="My Proxy",
+    )
+    app = create_app(cfg, pricing_provider=lambda: {})
+    with TestClient(app) as client:
+        resp = client.get("/usage-config.js")
+    assert resp.status_code == 200
+    assert 'title":"My Proxy"' in resp.text
 
 
 def test_runtime_config_served_under_configured_base_path() -> None:
@@ -168,6 +181,39 @@ def test_prefixed_spa_and_assets_use_configured_base_path(
     assert asset.text == "console.log('ok')"
     assert unprefixed_shell.status_code == 404
     assert unprefixed_asset.status_code == 404
+
+
+def test_root_level_static_files_served(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spa_dir = tmp_path / "dist"
+    (spa_dir / "assets").mkdir(parents=True)
+    (spa_dir / "index.html").write_text("<html>usage app</html>", encoding="utf-8")
+    (spa_dir / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+
+    import cliproxy_usage_server.main as main_mod
+
+    monkeypatch.setattr(main_mod, "_SPA_DIR", spa_dir)
+
+    cfg = _make_config()
+    app = create_app(cfg, pricing_provider=lambda: {})
+    with TestClient(app) as client:
+        favicon = client.get("/favicon.svg")
+        # Deep client routes request the favicon relative to the route.
+        nested_favicon = client.get("/quota/favicon.svg")
+        shell = client.get("/quota")
+        traversal = client.get("/../etc/passwd")
+
+    assert favicon.status_code == 200
+    assert favicon.text == "<svg/>"
+    assert nested_favicon.status_code == 200
+    assert nested_favicon.text == "<svg/>"
+    # A non-file path still renders the SPA shell.
+    assert shell.status_code == 200
+    assert shell.text == "<html>usage app</html>"
+    # Path traversal is not served as a file; it falls back to the shell.
+    assert traversal.text == "<html>usage app</html>"
 
 
 # ---------------------------------------------------------------------------
