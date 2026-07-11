@@ -70,7 +70,7 @@
 
       cliproxy-usage = python.pkgs.buildPythonApplication {
         pname = "cliproxy-usage";
-        version = "0.1.0";
+        version = "0.2.0";
         pyproject = true;
 
         src = pkgs.lib.fileset.toSource {

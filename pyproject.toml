@@ -1,6 +1,6 @@
 [project]
 name = "cliproxy-usage"
-version = "0.1.0"
+version = "0.2.0"
 description = "CLI proxy usage reporter"
 authors = [
     { name = "Ziteng Wang", email = "z@wzt.me" }
@@ -19,7 +19,7 @@ cliproxy-usage-collect = "cliproxy_usage_collect.cli:_entry"
 cliproxy-usage-server = "cliproxy_usage_server.main:run"
 
 [build-system]
-requires = ["uv_build>=0.10.0,<0.11.0"]
+requires = ["uv_build>=0.10.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
