@@ -11,11 +11,15 @@ router converts to before returning them over the wire.
 
 Note on ``query_timeseries`` metric semantics:
   - ``metric="requests"`` → COUNT(*) per bucket.
-  - ``metric="tokens"``   → SUM(total_tokens) per bucket.
-  - ``metric="cost"``     → SUM(total_tokens) per bucket (same as "tokens").
-    Cost computation is deferred to the caller, which applies per-model
-    pricing.  This function just emits the token sums so the caller has the
-    raw material.
+  - ``metric="tokens"``   → SUM(input_tokens + output_tokens) per bucket.
+  - ``metric="cost"``     → SUM(input_tokens + output_tokens) per bucket (same
+    as "tokens"). Cost computation is deferred to the caller, which applies
+    per-model pricing.  This function just emits the token sums so the caller
+    has the raw material.
+
+Token totals are always ``input_tokens + output_tokens`` (cached tokens are
+excluded); the stored ``total_tokens`` column may include cached tokens and is
+never summed for a reported token total. See ``_TOKENS_TOTAL_EXPR``.
 """
 
 from __future__ import annotations
@@ -28,6 +32,12 @@ from typing import Literal
 
 from cliproxy_usage_server.db import tz_sql_modifier
 from cliproxy_usage_server.redact import redact_key as _redact_key
+
+# Reported token total = input_tokens + output_tokens.  Cached tokens are
+# deliberately excluded, and the stored ``total_tokens`` column (which may
+# include cached tokens) is never summed for a token total.  Shared by every
+# aggregation that reports a token total or the "tokens" timeseries metric.
+_TOKENS_TOTAL_EXPR = "COALESCE(SUM(input_tokens + output_tokens), 0)"
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -284,7 +294,7 @@ def query_totals(
             COUNT(*)                              AS requests,
             COALESCE(SUM(input_tokens), 0)        AS input_tokens,
             COALESCE(SUM(output_tokens), 0)       AS output_tokens,
-            COALESCE(SUM(total_tokens), 0)        AS total_tokens,
+            {_TOKENS_TOTAL_EXPR}                  AS total_tokens,
             COALESCE(SUM(cached_tokens), 0)       AS cached_tokens,
             COALESCE(SUM(reasoning_tokens), 0)    AS reasoning_tokens,
             COALESCE(SUM(failed), 0)              AS failed,
@@ -329,11 +339,15 @@ def query_timeseries(
 
     - ``top_n=None`` (default): returns a single ``"__all__"`` series (legacy).
     - ``top_n > 0``: returns ``{"__all__": [...], model1: [...], ...}`` where
-      the additional per-model series are for the *top_n* models ranked by
-      ``SUM(total_tokens)`` within the window.  ``__all__`` is always computed
-      over the **full** unfiltered population, not restricted to top-N models.
-      If fewer than *top_n* distinct models exist in the window, only the
-      available ones are included (no padding).
+      the additional per-model series are for the *top_n* models ranked by the
+      active *metric* within the window (``metric="requests"`` ranks by request
+      count; ``metric="tokens"`` ranks by ``input_tokens + output_tokens``).
+      Ties are broken lexicographically by model name so the selection is
+      deterministic.  ``__all__`` is always computed over the **full**
+      unfiltered population, not restricted to top-N models.  If fewer than
+      *top_n* distinct models exist in the window, only the available ones are
+      included (no padding).  Cost ranking is metric-specific and handled by
+      the caller, not here.
     - ``top_n <= 0``: treated as ``top_n=None`` (no decomposition).
 
     When *models* is set explicitly, *top_n* is ignored and one series per
@@ -345,9 +359,9 @@ def query_timeseries(
     modifier = tz_sql_modifier(tz_offset_minutes)
     labels = _bucket_labels(start, end, bucket, conn, tz_offset_minutes)
 
-    # "tokens" and "cost" both emit total_tokens; cost computation is
-    # deferred to the caller which applies per-model pricing.
-    agg_expr = "COUNT(*)" if metric == "requests" else "COALESCE(SUM(total_tokens), 0)"
+    # "tokens" and "cost" both emit the input+output token total; cost
+    # computation is deferred to the caller which applies per-model pricing.
+    agg_expr = "COUNT(*)" if metric == "requests" else _TOKENS_TOTAL_EXPR
 
     where, params = _range_where(start, end, conn)
     kfrag, kparams = _api_keys_where(api_keys)
@@ -377,15 +391,16 @@ def query_timeseries(
             return TimeseriesResult(buckets=labels, series={"__all__": all_values})
 
         # top_n > 0: additionally compute per-model series for the top-N models
-        # ranked by SUM(total_tokens) within the window (always by tokens,
-        # regardless of metric).
+        # ranked by the active metric within the window (COUNT(*) for requests,
+        # input+output tokens otherwise — same expression as agg_expr).  Ties
+        # are broken lexicographically by model name for determinism.
         top_rows = conn.execute(
             f"""
-            SELECT model, COALESCE(SUM(total_tokens), 0) AS toks
+            SELECT model, {agg_expr} AS rank_val
             FROM requests
             {where}{kfrag}
             GROUP BY model
-            ORDER BY toks DESC
+            ORDER BY rank_val DESC, model ASC
             LIMIT ?
             """,
             [*params, *kparams, effective_top_n],
@@ -527,7 +542,7 @@ def query_api_stats(
             COUNT(*)                           AS requests,
             COALESCE(SUM(input_tokens), 0)     AS input_tokens,
             COALESCE(SUM(output_tokens), 0)    AS output_tokens,
-            COALESCE(SUM(total_tokens), 0)     AS total_tokens,
+            {_TOKENS_TOTAL_EXPR}               AS total_tokens,
             COALESCE(SUM(failed), 0)           AS failed,
             COALESCE(AVG(latency_ms), 0.0)     AS avg_latency_ms
         FROM requests
@@ -572,7 +587,7 @@ def query_model_stats(
             COALESCE(SUM(output_tokens), 0)         AS output_tokens,
             COALESCE(SUM(cached_tokens), 0)         AS cached_tokens,
             COALESCE(SUM(reasoning_tokens), 0)      AS reasoning_tokens,
-            COALESCE(SUM(total_tokens), 0)          AS total_tokens,
+            {_TOKENS_TOTAL_EXPR}                    AS total_tokens,
             COALESCE(SUM(failed), 0)                AS failed,
             COALESCE(AVG(latency_ms), 0.0)          AS avg_latency_ms
         FROM requests
@@ -615,7 +630,7 @@ def query_credential_stats(
         SELECT
             source,
             COUNT(*)                           AS requests,
-            COALESCE(SUM(total_tokens), 0)     AS total_tokens,
+            {_TOKENS_TOTAL_EXPR}               AS total_tokens,
             COALESCE(SUM(failed), 0)           AS failed
         FROM requests
         {where}{mfrag}{kfrag}

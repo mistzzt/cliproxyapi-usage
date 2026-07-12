@@ -24,6 +24,9 @@ const MODEL_PALETTE = [
 /** Reserved color for the aggregate '__all__' series. */
 export const ALL_MODEL_COLOR = '#f59e0b'; // amber — warm, visually distinct from palette
 
+/** Reserved neutral color for the derived 'Other' series in model breakdowns. */
+export const OTHER_MODEL_COLOR = '#94a3b8'; // slate gray — reads as a residual bucket
+
 /**
  * Returns a deterministic color for a model name using djb2 hash + palette lookup.
  * Stable across renders and metric tab switches.

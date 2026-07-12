@@ -43,7 +43,7 @@ export default function CredentialStatsCard({ rows, loading }: CredentialStatsCa
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
 
   return (
-    <Card title="Credential Stats">
+    <Card title="Provider Credential Statistics">
       <div className={styles.body}>
         {loading ? (
           <div className={styles.center}>

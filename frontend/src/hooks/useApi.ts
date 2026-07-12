@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useReducer, useCallback } from 'react';
 
 export interface ApiState<T> {
   data: T | null;
@@ -6,32 +6,54 @@ export interface ApiState<T> {
   error: string | null;
 }
 
+type Action<T> =
+  | { type: 'start' }
+  | { type: 'success'; data: T }
+  | { type: 'error'; error: string };
+
+function reducer<T>(state: ApiState<T>, action: Action<T>): ApiState<T> {
+  switch (action.type) {
+    case 'start':
+      // Keep prior data visible during a reload so the UI doesn't flash empty.
+      return { data: state.data, loading: true, error: state.error };
+    case 'success':
+      return { data: action.data, loading: false, error: null };
+    case 'error':
+      return { data: state.data, loading: false, error: action.error };
+  }
+}
+
+/**
+ * Fetch-on-mount / fetch-on-deps helper.
+ *
+ * State transitions go through a reducer so the effect body never calls a
+ * `useState` setter directly (which would trip react-hooks/set-state-in-effect
+ * and can cause cascading renders). Dispatching a single `start` action is a
+ * batched transition, and the terminal `success`/`error` dispatches happen in
+ * async callbacks after the fetch settles.
+ */
 export function useApi<T>(
   fetcher: () => Promise<T>,
   deps: readonly unknown[],
 ): ApiState<T> & { reload: () => void } {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [bump, setBump] = useState(0);
+  const [state, dispatch] = useReducer(reducer<T>, {
+    data: null,
+    loading: true,
+    error: null,
+  });
+  const [bump, forceReload] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    dispatch({ type: 'start' });
     fetcher()
       .then((d) => {
-        if (!cancelled) {
-          setData(d);
-          setError(null);
-        }
+        if (!cancelled) dispatch({ type: 'success', data: d });
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
+          dispatch({ type: 'error', error: e instanceof Error ? e.message : String(e) });
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -39,6 +61,6 @@ export function useApi<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, bump]);
 
-  const reload = useCallback(() => setBump((b) => b + 1), []);
-  return { data, loading, error, reload };
+  const reload = useCallback(() => forceReload(), []);
+  return { data: state.data, loading: state.loading, error: state.error, reload };
 }

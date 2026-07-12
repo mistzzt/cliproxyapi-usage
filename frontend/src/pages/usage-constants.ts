@@ -1,8 +1,13 @@
-/** Maximum number of chart lines the selector allows selecting at once. */
-export const CHART_MAX_LINES = 9;
+/**
+ * The explorer draws at most seven named series. This is satisfied two ways:
+ * an explicit model selection of up to seven models, or automatic
+ * decomposition into the top six models plus a derived `Other` series (also
+ * seven). There is no separate cap for the two paths.
+ */
+export const MAX_EXPLORER_SERIES = 7;
 
 /**
- * `top_n` value passed to the timeseries API when in "all models" mode.
- * One slot is reserved for the `__all__` aggregate series.
+ * Explicit model selection is capped at the named-series limit (used as the
+ * `maxSelection` for the Models filter in the sidebar).
  */
-export const CHART_TOP_N = CHART_MAX_LINES - 1; // 8
+export const MODEL_SELECTION_MAX = MAX_EXPLORER_SERIES;

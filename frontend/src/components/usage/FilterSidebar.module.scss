@@ -115,6 +115,19 @@
   color: var(--color-text-muted);
 }
 
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: $space-2;
+}
+
+.sectionCount {
+  font-size: 0.6875rem;
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
 // ── Range chips ──────────────────────────────────────────────────────────────
 
 .chipRow {
