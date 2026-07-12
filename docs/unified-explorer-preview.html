@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage Dashboard — Unified Explorer Preview</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --ink-1: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --warning: #b97f00;
+    --warning-bg: rgba(250,178,25,0.14);
+    --accent: #2a78d6;
+    --hover-wash: rgba(11,11,11,0.045);
+    --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300;
+    --s5: #4a3aa7; --s6: #e34948; --s7: #e87ba4; --s8: #eb6834;
+    --other: #898781;
+  }
+  [data-theme="dark"] {
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --ink-1: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --warning: #fab219;
+    --warning-bg: rgba(250,178,25,0.12);
+    --accent: #3987e5;
+    --hover-wash: rgba(255,255,255,0.06);
+    --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300;
+    --s5: #9085e9; --s6: #e66767; --s7: #d55181; --s8: #d95926;
+    --other: #898781;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink-1);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .appbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .appbar h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .appbar .spacer { flex: 1; }
+  .proto-note {
+    font-size: 12px; color: var(--muted);
+  }
+  button, .btn {
+    font: inherit; color: var(--ink-2); background: transparent;
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { background: var(--hover-wash); }
+  .layout {
+    display: grid; grid-template-columns: 264px 1fr; gap: 16px;
+    padding: 16px 20px; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; }
+  }
+  .sidebar {
+    position: sticky; top: 16px; align-self: start;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; color: var(--ink-1); }
+  .card h2 .sub { font-weight: 400; color: var(--muted); }
+  .side-section + .side-section { margin-top: 14px; }
+  .side-label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+  .preset-list { display: flex; flex-direction: column; }
+  .preset-list button {
+    display: flex; align-items: center; gap: 8px; border: none;
+    text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--ink-2);
+  }
+  .preset-list button .check { width: 16px; font-weight: 700; color: var(--ink-1); }
+  .preset-list button[aria-pressed="true"] { color: var(--ink-1); font-weight: 600; }
+  .check-list { display: flex; flex-direction: column; gap: 2px; max-height: 178px; overflow-y: auto; }
+  .check-list label {
+    display: flex; align-items: center; gap: 8px; padding: 3px 6px;
+    border-radius: 6px; cursor: pointer; color: var(--ink-2); font-size: 13px;
+  }
+  .check-list label:hover { background: var(--hover-wash); }
+  .check-list input { accent-color: var(--accent); }
+  .search {
+    width: 100%; font: inherit; color: var(--ink-1);
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; margin-bottom: 6px;
+  }
+  .count-note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .content { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  /* Stat cards */
+  .stat-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat .label { font-size: 12px; color: var(--ink-2); }
+  .stat .value { font-size: 24px; font-weight: 600; }
+  .stat .spark { margin-top: 6px; }
+  .stat .spark svg { display: block; width: 100%; height: 28px; }
+  .warn-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--warning); background: var(--warning-bg);
+    border-radius: 5px; padding: 1px 7px; margin-top: 4px; width: fit-content;
+  }
+
+  /* Explorer */
+  .explorer-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  .tabs { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .tabs button {
+    border: none; border-radius: 0; padding: 6px 14px; font-weight: 500;
+  }
+  .tabs button + button { border-left: 1px solid var(--border); }
+  .tabs button[aria-selected="true"] { background: var(--hover-wash); color: var(--ink-1); font-weight: 600; }
+  .seg { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .seg .opts { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg .opts button { border: none; border-radius: 0; padding: 3px 10px; font-size: 12px; }
+  .seg .opts button + button { border-left: 1px solid var(--border); }
+  .seg .opts button[aria-pressed="true"] { background: var(--hover-wash); color: var(--ink-1); font-weight: 600; }
+  .seg .opts button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .toolbar-note { font-size: 12px; color: var(--muted); }
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; }
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18); padding: 8px 10px; font-size: 12px;
+    min-width: 150px;
+  }
+  .tooltip .tt-title { color: var(--muted); margin-bottom: 5px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 7px; padding: 1px 0; }
+  .tooltip .tt-key { width: 12px; height: 3px; border-radius: 2px; flex: none; }
+  .tooltip .tt-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tooltip .tt-name { color: var(--ink-2); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 10px; }
+  .legend button {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
+  }
+  .legend button .key { width: 14px; height: 3px; border-radius: 2px; }
+  .legend button .key.rect { height: 9px; border-radius: 2px; }
+  .legend button[aria-pressed="false"] { opacity: 0.42; }
+  .chart-summary { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .zoom-hint { font-size: 11px; color: var(--muted); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 6px 10px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--muted); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--grid); }
+  tbody td { border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--hover-wash); }
+  .table-scroll { overflow-x: auto; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .health-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .health-row .stat .value { font-size: 20px; }
+  .cost-warn { color: var(--warning); }
+  .empty-note { color: var(--muted); padding: 28px 0; text-align: center; }
+</style>
+</head>
+<body data-palette="#2a78d6,#1baf7a,#eda100,#008300,#4a3aa7,#e34948,#e87ba4,#eb6834">
+
+<header class="appbar">
+  <h1>CLIProxyAPI Usage</h1>
+  <span class="proto-note">static design preview · synthetic data</span>
+  <span class="spacer"></span>
+  <button id="theme-toggle" aria-label="Toggle color theme">Theme: auto</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="card">
+      <div class="side-section">
+        <div class="side-label">Time range</div>
+        <div class="preset-list" id="range-list" role="group" aria-label="Time range"></div>
+      </div>
+      <div class="side-section">
+        <div class="side-label">Models</div>
+        <input class="search" id="model-search" type="search" placeholder="Search models" aria-label="Search models">
+        <div class="check-list" id="model-list"></div>
+        <div class="count-note" id="model-count"></div>
+      </div>
+      <div class="side-section">
+        <div class="side-label">Users (API keys)</div>
+        <input class="search" id="user-search" type="search" placeholder="Search API keys" aria-label="Search API keys">
+        <div class="check-list" id="user-list"></div>
+        <div class="count-note" id="user-count"></div>
+      </div>
+      <div class="side-section">
+        <button style="width:100%" id="refresh-btn">Refresh</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="stat-row" id="stat-row"></div>
+
+    <section class="card" aria-label="Usage explorer">
+      <div class="explorer-head">
+        <div class="tabs" role="tablist" aria-label="Explorer metric" id="metric-tabs"></div>
+        <div class="seg" id="breakdown-seg">
+          <span>Breakdown</span><div class="opts" role="group" aria-label="Breakdown"></div>
+        </div>
+        <div class="seg" id="gran-seg">
+          <span>Granularity</span><div class="opts" role="group" aria-label="Granularity"></div>
+        </div>
+        <div class="seg" id="display-seg">
+          <span>Display</span><div class="opts" role="group" aria-label="Display mode"></div>
+        </div>
+        <span class="spacer" style="flex:1"></span>
+        <button id="zoom-reset" hidden>Reset zoom</button>
+      </div>
+      <div class="toolbar-note" id="explorer-note" hidden></div>
+      <div class="chart-wrap" id="chart-wrap">
+        <div class="tooltip" id="tooltip"></div>
+      </div>
+      <div class="legend" id="legend" role="group" aria-label="Chart series"></div>
+      <p class="chart-summary" id="chart-summary"></p>
+      <p class="zoom-hint">Drag horizontally on the chart to zoom into a sub-range. Zoom is a view change only; it never refetches or alters the global filters.</p>
+    </section>
+
+    <section class="card">
+      <h2>User statistics <span class="sub">· rows are API keys</span></h2>
+      <div class="table-scroll"><table id="user-table">
+        <thead><tr>
+          <th>User (API key)</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th>
+          <th>Total tokens</th><th>Cost</th><th>Failed</th><th>Avg latency</th>
+        </tr></thead><tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Model statistics</h2>
+      <div class="table-scroll"><table id="model-table">
+        <thead><tr>
+          <th>Model</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th>
+          <th>Reasoning</th><th>Total tokens</th><th>Cost</th><th>Failed</th><th>Avg latency</th>
+        </tr></thead><tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Provider credential statistics <span class="sub">· upstream accounts, not users</span></h2>
+      <div class="table-scroll"><table id="cred-table">
+        <thead><tr>
+          <th>Provider credential (source)</th><th>Requests</th><th>Total tokens</th><th>Cost</th><th>Failed</th>
+        </tr></thead><tbody></tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Service health</h2>
+      <div class="health-row" id="health-row"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ---------------------------------------------------------------- theme */
+const themeBtn = document.getElementById('theme-toggle');
+const mq = matchMedia('(prefers-color-scheme: dark)');
+let themePref = 'auto';
+function applyTheme() {
+  const dark = themePref === 'dark' || (themePref === 'auto' && mq.matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  themeBtn.textContent = 'Theme: ' + themePref;
+  render();
+}
+themeBtn.addEventListener('click', () => {
+  themePref = themePref === 'auto' ? 'light' : themePref === 'light' ? 'dark' : 'auto';
+  applyTheme();
+});
+mq.addEventListener('change', () => { if (themePref === 'auto') applyTheme(); });
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/* ----------------------------------------------------------- synthetic data */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(20260712);
+
+/* slot: fixed categorical slot per model — color follows the entity. */
+const MODELS = [
+  { name: 'claude-sonnet-5',      slot: 1, scale: 1.00, latency:  9500, pricing: { inp: 3.00,  out: 15.0, cache: 0.30  } },
+  { name: 'claude-opus-4-8',      slot: 2, scale: 0.42, latency: 14000, pricing: { inp: 15.0,  out: 75.0, cache: 1.50  } },
+  { name: 'gpt-5.2',              slot: 3, scale: 0.66, latency: 11000, pricing: { inp: 1.25,  out: 10.0, cache: 0.125 } },
+  { name: 'gemini-3-pro',         slot: 4, scale: 0.50, latency:  8000, pricing: { inp: 1.25,  out: 5.00, cache: 0.31  } },
+  { name: 'claude-haiku-4-5',     slot: 5, scale: 0.78, latency:  2600, pricing: { inp: 1.00,  out: 5.00, cache: 0.10  } },
+  { name: 'deepseek-v4',          slot: 6, scale: 0.30, latency:  6200, pricing: { inp: 0.28,  out: 1.10, cache: 0.028 } },
+  { name: 'kimi-k3',              slot: 7, scale: 0.22, latency:  5800, pricing: { inp: 0.60,  out: 2.50, cache: 0.06  } },
+  { name: 'local/qwen4-72b',      slot: 8, scale: 0.36, latency:  3400, pricing: null },
+];
+const USERS = [
+  { key: 'sk-c…9f3a', weights: [0.42, 0.55, 0.10, 0.15, 0.30, 0.05, 0.05, 0.05] },
+  { key: 'sk-p…41be', weights: [0.30, 0.25, 0.55, 0.20, 0.20, 0.10, 0.05, 0.10] },
+  { key: 'sk-a…77c2', weights: [0.18, 0.15, 0.25, 0.55, 0.15, 0.75, 0.30, 0.05] },
+  { key: 'sk-t…d008', weights: [0.10, 0.05, 0.10, 0.10, 0.35, 0.10, 0.60, 0.80] },
+];
+const SOURCES = [
+  { name: 'cla***@team-inbox.dev',  models: [0, 1, 4] },
+  { name: 'cod***@team-inbox.dev',  models: [2] },
+  { name: 'ver***-svc-gateway',     models: [3, 5, 6, 7] },
+];
+
+const HOURS = 168; /* 7 days of hourly cells */
+const END = new Date('2026-07-12T16:00:00');
+const hourStart = i => new Date(END.getTime() - (HOURS - i) * 3600e3);
+
+/* cells[h][m][u] = {req, inp, out, cac, rea, fail} */
+const cells = [];
+for (let h = 0; h < HOURS; h++) {
+  const t = hourStart(h);
+  const hr = t.getHours();
+  const diurnal = 0.25 + 0.75 * Math.exp(-((hr - 14) ** 2) / 40);
+  const weekend = (t.getDay() === 0 || t.getDay() === 6) ? 0.45 : 1;
+  const spike = (h === 118 || h === 119) ? 3.2 : 1;
+  const perModel = [];
+  for (let m = 0; m < MODELS.length; m++) {
+    const perUser = [];
+    for (let u = 0; u < USERS.length; u++) {
+      const base = 26 * MODELS[m].scale * USERS[u].weights[m] * diurnal * weekend * spike;
+      const req = Math.max(0, Math.round(base * (0.55 + rng() * 0.9)));
+      const inp = Math.round(req * (600 + rng() * 2600));
+      const out = Math.round(req * (250 + rng() * 1300));
+      const cac = Math.round(inp * rng() * 1.4);
+      const rea = Math.round(out * rng() * 0.5);
+      const fail = rng() < 0.25 ? Math.round(req * 0.03 * rng()) : 0;
+      perUser.push({ req, inp, out, cac, rea, fail });
+    }
+    perModel.push(perUser);
+  }
+  cells.push(perModel);
+}
+
+/* ----------------------------------------------------------------- state */
+const RANGES = [
+  { id: '7h',  label: 'Last 7 hours',  hours: 7 },
+  { id: '24h', label: 'Last 24 hours', hours: 24 },
+  { id: '7d',  label: 'Last 7 days',   hours: HOURS },
+  { id: 'all', label: 'All time',      hours: HOURS },
+];
+const SERIES_LIMIT = 7;      /* one limit: ≤7 named series drawn */
+const AUTO_TOP = 6;          /* auto decomposition: 6 models + Other */
+
+const state = {
+  range: '24h',
+  models: 'all',             /* 'all' | Set of model indices (≤7) */
+  users: 'all',              /* 'all' | Set of user indices */
+  metric: 'requests',        /* requests | tokens | cost */
+  breakdown: 'total',        /* total | model | token_type */
+  gran: 'auto',              /* auto | hour | day */
+  display: 'line',           /* line | stacked */
+  zoom: null,                /* [i0, i1] bucket indices or null */
+  hidden: new Set(),         /* legend-toggled series names */
+};
+
+function activeModelIdx() {
+  return state.models === 'all' ? MODELS.map((_, i) => i) : [...state.models];
+}
+function activeUserIdx() {
+  return state.users === 'all' ? USERS.map((_, i) => i) : [...state.users];
+}
+
+/* ------------------------------------------------------------ aggregation */
+function rangeHourIdx() {
+  const n = RANGES.find(r => r.id === state.range).hours;
+  return { from: HOURS - n, to: HOURS };
+}
+function effectiveBucket() {
+  const span = RANGES.find(r => r.id === state.range).hours;
+  if (state.gran === 'day') return 'day';
+  if (state.gran === 'hour') return span > 48 ? 'day' : 'hour';
+  return span <= 48 ? 'hour' : 'day';
+}
+/* buckets: [{label, hours:[hIdx…]}] */
+function buildBuckets() {
+  const { from, to } = rangeHourIdx();
+  const bucket = effectiveBucket();
+  const out = [];
+  if (bucket === 'hour') {
+    for (let h = from; h < to; h++) out.push({ label: hourStart(h), hours: [h] });
+  } else {
+    let cur = null;
+    for (let h = from; h < to; h++) {
+      const d = hourStart(h);
+      const key = d.toISOString().slice(0, 10);
+      if (!cur || cur.key !== key) { cur = { key, label: d, hours: [] }; out.push(cur); }
+      cur.hours.push(h);
+    }
+  }
+  return out;
+}
+function sumCell(hours, mIdx, uIdx) {
+  const acc = { req: 0, inp: 0, out: 0, cac: 0, rea: 0, fail: 0 };
+  for (const h of hours) for (const m of mIdx) for (const u of uIdx) {
+    const c = cells[h][m][u];
+    acc.req += c.req; acc.inp += c.inp; acc.out += c.out;
+    acc.cac += c.cac; acc.rea += c.rea; acc.fail += c.fail;
+  }
+  return acc;
+}
+function cellCost(c, m) {
+  const p = MODELS[m].pricing;
+  if (!p) return 0;
+  return c.inp / 1e6 * p.inp + c.out / 1e6 * p.out + c.cac / 1e6 * p.cache;
+}
+/* Token totals count input + output only (cached excluded) — per design doc. */
+function metricOf(c, mIdxForCost) {
+  if (state.metric === 'requests') return c.req;
+  if (state.metric === 'tokens') return c.inp + c.out;
+  return mIdxForCost.reduce((s, m) => s, 0); /* cost handled per-model below */
+}
+
+/* ------------------------------------------------------------- explorer */
+function normalizeCombo() {
+  if (state.metric !== 'tokens' && state.breakdown === 'token_type') state.breakdown = 'total';
+  if (state.breakdown === 'token_type') state.display = 'stacked';
+  if (state.breakdown === 'total') state.display = 'line';
+}
+const SLOT_VAR = s => `--s${s}`;
+function seriesColor(slot) { return cssVar(SLOT_VAR(slot)); }
+
+function buildSeries(buckets) {
+  const users = activeUserIdx();
+  const models = activeModelIdx();
+
+  const perModelVals = m => buckets.map(b => {
+    const c = sumCell(b.hours, [m], users);
+    if (state.metric === 'requests') return c.req;
+    if (state.metric === 'tokens') return c.inp + c.out;
+    return cellCost(c, m);
+  });
+  const totalVals = () => {
+    const per = models.map(m => perModelVals(m));
+    return buckets.map((_, i) => per.reduce((s, v) => s + v[i], 0));
+  };
+
+  if (state.breakdown === 'token_type') {
+    const types = [
+      { name: 'Input',     key: 'inp', slot: 1 },
+      { name: 'Output',    key: 'out', slot: 2 },
+      { name: 'Cached',    key: 'cac', slot: 3 },
+      { name: 'Reasoning', key: 'rea', slot: 5 },
+    ];
+    return types.map(t => ({
+      name: t.name, color: seriesColor(t.slot),
+      values: buckets.map(b => sumCell(b.hours, models, users)[t.key]),
+    }));
+  }
+
+  if (state.breakdown === 'total') {
+    return [{ name: 'Total', color: seriesColor(1), values: totalVals() }];
+  }
+
+  /* model breakdown */
+  if (state.models !== 'all') {
+    return models.map(m => ({
+      name: MODELS[m].name, color: seriesColor(MODELS[m].slot), values: perModelVals(m),
+    }));
+  }
+  /* all-models: top-6 by the ACTIVE metric (+ Other from aggregate). For
+     cost, models without pricing are excluded from named series. */
+  let candidates = models;
+  if (state.metric === 'cost') candidates = models.filter(m => MODELS[m].pricing);
+  const ranked = candidates
+    .map(m => ({ m, v: perModelVals(m).reduce((s, x) => s + x, 0) }))
+    .sort((a, b) => b.v - a.v || MODELS[a.m].name.localeCompare(MODELS[b.m].name))
+    .slice(0, AUTO_TOP)
+    .map(r => r.m);
+  const named = ranked.map(m => ({
+    name: MODELS[m].name, color: seriesColor(MODELS[m].slot), values: perModelVals(m),
+  }));
+  const total = totalVals();
+  const other = buckets.map((_, i) =>
+    Math.max(0, total[i] - named.reduce((s, sr) => s + sr.values[i], 0)));
+  const eps = state.metric === 'cost' ? 0.001 : 0;
+  if (other.some(v => v > eps)) {
+    named.push({
+      name: 'Other', color: cssVar('--other'), values: other,
+      warn: state.metric === 'cost' ? 'Other includes usage without pricing' : null,
+    });
+  }
+  return named;
+}
+
+/* ------------------------------------------------------------ formatting */
+const fmtInt = new Intl.NumberFormat('en-US');
+function compact(v) {
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return String(Math.round(v));
+}
+function fmtMetric(v) {
+  if (state.metric === 'cost') return '$' + v.toFixed(2);
+  return compact(v);
+}
+function fmtBucketLabel(d, bucket) {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  if (bucket === 'hour') return `${mm}-${dd} ${String(d.getHours()).padStart(2, '0')}:00`;
+  return `${mm}-${dd}`;
+}
+function niceTicks(max) {
+  if (max <= 0) return [0, 1];
+  const raw = max / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(k => k * pow).find(s => s >= raw);
+  const ticks = [];
+  for (let v = 0; v <= max + 1e-9; v += step) ticks.push(v);
+  if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + step);
+  return ticks;
+}
+
+/* ------------------------------------------------------------- rendering */
+const W = 920, H = 300, M = { t: 14, r: 12, b: 30, l: 52 };
+const plotW = W - M.l - M.r, plotH = H - M.t - M.b;
+let currentBuckets = [], currentSeries = [], currentBucketKind = 'hour';
+
+function renderExplorer() {
+  normalizeCombo();
+  const allBuckets = buildBuckets();
+  const bucket = effectiveBucket();
+  let buckets = allBuckets;
+  if (state.zoom) {
+    const [a, b] = state.zoom;
+    buckets = allBuckets.slice(a, b + 1);
+    if (buckets.length < 2) buckets = allBuckets;
+  }
+  let series = buildSeries(buckets);
+  currentBuckets = buckets; currentSeries = series; currentBucketKind = bucket;
+
+  /* controls */
+  renderTabs();
+  renderSeg('breakdown-seg', [
+    { id: 'total', label: 'Total' },
+    { id: 'model', label: 'Model' },
+    { id: 'token_type', label: 'Token type', disabled: state.metric !== 'tokens' },
+  ], state.breakdown, v => { state.breakdown = v; state.zoom = null; state.hidden.clear(); render(); });
+  renderSeg('gran-seg', [
+    { id: 'auto', label: 'Auto' }, { id: 'hour', label: 'Hour' }, { id: 'day', label: 'Day' },
+  ], state.gran, v => { state.gran = v; state.zoom = null; render(); });
+
+  const displaySeg = document.getElementById('display-seg');
+  if (state.breakdown === 'model') {
+    displaySeg.style.display = '';
+    renderSeg('display-seg', [
+      { id: 'line', label: 'Line' }, { id: 'stacked', label: 'Stacked' },
+    ], state.display, v => { state.display = v; render(); });
+  } else {
+    displaySeg.style.display = 'none';
+  }
+
+  const note = document.getElementById('explorer-note');
+  const spanTooWide = state.gran === 'hour' &&
+    RANGES.find(r => r.id === state.range).hours > 48;
+  if (spanTooWide) {
+    note.hidden = false;
+    note.textContent = 'Range too wide for hourly buckets — showing Day granularity.';
+  } else { note.hidden = true; }
+
+  document.getElementById('zoom-reset').hidden = !state.zoom;
+
+  /* chart */
+  const wrap = document.getElementById('chart-wrap');
+  wrap.querySelectorAll('svg').forEach(s => s.remove());
+  const visible = series.filter(s => !state.hidden.has(s.name));
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', chartSummaryText(visible, bucket));
+
+  const surface = cssVar('--surface-1'), gridC = cssVar('--grid'),
+        baseC = cssVar('--baseline'), tickC = cssVar('--muted');
+
+  const stacked = state.display === 'stacked' || state.breakdown === 'token_type';
+  const maxVal = stacked
+    ? Math.max(1e-9, ...buckets.map((_, i) => visible.reduce((s, sr) => s + sr.values[i], 0)))
+    : Math.max(1e-9, ...visible.flatMap(s => s.values));
+  const ticks = niceTicks(maxVal);
+  const yMax = ticks[ticks.length - 1];
+  const x = i => M.l + (buckets.length === 1 ? plotW / 2 : (i / (buckets.length - 1)) * plotW);
+  const bandW = plotW / Math.max(1, buckets.length);
+  const xBand = i => M.l + i * bandW + bandW / 2;
+  const y = v => M.t + plotH - (v / yMax) * plotH;
+
+  let g = '';
+  for (const tv of ticks) {
+    g += `<line x1="${M.l}" x2="${W - M.r}" y1="${y(tv)}" y2="${y(tv)}" stroke="${tv === 0 ? baseC : gridC}" stroke-width="1"/>`;
+    g += `<text x="${M.l - 8}" y="${y(tv) + 4}" text-anchor="end" font-size="11" fill="${tickC}" style="font-variant-numeric:tabular-nums">${state.metric === 'cost' ? '$' + (yMax >= 10 ? Math.round(tv) : tv.toFixed(2)) : compact(tv)}</text>`;
+  }
+  const every = Math.max(1, Math.ceil(buckets.length / 8));
+  buckets.forEach((b, i) => {
+    if (i % every !== 0) return;
+    const xx = stacked ? xBand(i) : x(i);
+    g += `<text x="${xx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${tickC}">${fmtBucketLabel(b.label, bucket)}</text>`;
+  });
+
+  if (visible.length === 0 || maxVal <= 1e-9) {
+    g += `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" font-size="13" fill="${tickC}">No data for the selected filters</text>`;
+  } else if (stacked) {
+    const gap = 2, barW = Math.min(24, Math.max(3, bandW * 0.6));
+    buckets.forEach((_, i) => {
+      let acc = 0;
+      for (const sr of visible) {
+        const v = sr.values[i]; if (v <= 0) continue;
+        const y1 = y(acc + v), y0 = y(acc);
+        const hpx = Math.max(0, y0 - y1 - gap);
+        if (hpx > 0.5) {
+          const first = acc === 0;
+          g += `<rect x="${xBand(i) - barW / 2}" y="${y1 + (first ? 0 : 0)}" width="${barW}" height="${hpx}" rx="2" fill="${sr.color}"/>`;
+        }
+        acc += v;
+      }
+    });
+  } else {
+    for (const sr of visible) {
+      const pts = sr.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+      g += `<polyline points="${pts}" fill="none" stroke="${sr.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const li = sr.values.length - 1;
+      g += `<circle cx="${x(li)}" cy="${y(sr.values[li])}" r="4" fill="${sr.color}" stroke="${surface}" stroke-width="2"/>`;
+    }
+  }
+  g += `<line id="crosshair" x1="0" x2="0" y1="${M.t}" y2="${M.t + plotH}" stroke="${baseC}" stroke-width="1" visibility="hidden"/>`;
+  g += `<rect id="zoom-sel" x="0" y="${M.t}" width="0" height="${plotH}" fill="${cssVar('--accent')}" opacity="0.12" visibility="hidden"/>`;
+  svg.innerHTML = g;
+  wrap.appendChild(svg);
+  attachChartEvents(svg, buckets, visible, stacked, x, xBand, bucket);
+
+  renderLegend(series);
+  document.getElementById('chart-summary').textContent = chartSummaryText(visible, bucket);
+}
+
+function chartSummaryText(visible, bucket) {
+  const r = RANGES.find(r => r.id === state.range).label.toLowerCase();
+  const total = visible.reduce((s, sr) => s + sr.values.reduce((a, b) => a + b, 0), 0);
+  const names = visible.map(s => s.name).join(', ') || 'none';
+  const zoomTxt = state.zoom ? ' (zoomed to a sub-range)' : '';
+  return `${state.metric[0].toUpperCase() + state.metric.slice(1)} over ${r}, ${bucket} buckets${zoomTxt}. ` +
+    `Total ${fmtMetric(total)}. Series: ${names}.`;
+}
+
+function renderTabs() {
+  const el = document.getElementById('metric-tabs');
+  el.textContent = '';
+  for (const m of ['requests', 'tokens', 'cost']) {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(state.metric === m));
+    b.textContent = m[0].toUpperCase() + m.slice(1);
+    b.addEventListener('click', () => {
+      state.metric = m; state.zoom = null; state.hidden.clear();
+      normalizeCombo(); render();
+    });
+    el.appendChild(b);
+  }
+}
+function renderSeg(id, opts, active, onPick) {
+  const box = document.querySelector(`#${id} .opts`);
+  box.textContent = '';
+  for (const o of opts) {
+    const b = document.createElement('button');
+    b.textContent = o.label;
+    b.setAttribute('aria-pressed', String(active === o.id));
+    if (o.disabled) b.disabled = true;
+    b.addEventListener('click', () => onPick(o.id));
+    box.appendChild(b);
+  }
+}
+function renderLegend(series) {
+  const el = document.getElementById('legend');
+  el.textContent = '';
+  if (series.length < 2) return;
+  const stacked = state.display === 'stacked' || state.breakdown === 'token_type';
+  for (const sr of series) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-pressed', String(!state.hidden.has(sr.name)));
+    const key = document.createElement('span');
+    key.className = 'key' + (stacked ? ' rect' : '');
+    key.style.background = sr.color;
+    b.appendChild(key);
+    b.appendChild(document.createTextNode(sr.name));
+    if (sr.warn) {
+      const w = document.createElement('span');
+      w.textContent = ' ⚠';
+      w.title = sr.warn;
+      b.appendChild(w);
+    }
+    b.addEventListener('click', () => {
+      state.hidden.has(sr.name) ? state.hidden.delete(sr.name) : state.hidden.add(sr.name);
+      render();
+    });
+    el.appendChild(b);
+  }
+  const warn = series.find(s => s.warn);
+  if (warn) {
+    const chip = document.createElement('span');
+    chip.className = 'warn-chip';
+    chip.textContent = '⚠ ' + warn.warn;
+    el.appendChild(chip);
+  }
+}
+
+/* crosshair tooltip + drag zoom */
+function attachChartEvents(svg, buckets, visible, stacked, x, xBand, bucket) {
+  const wrap = document.getElementById('chart-wrap');
+  const tt = document.getElementById('tooltip');
+  const cross = svg.querySelector('#crosshair');
+  const sel = svg.querySelector('#zoom-sel');
+  let dragFrom = null;
+
+  const toChartX = ev => {
+    const r = svg.getBoundingClientRect();
+    return (ev.clientX - r.left) * (W / r.width);
+  };
+  const nearest = cx => {
+    let best = 0, bd = Infinity;
+    buckets.forEach((_, i) => {
+      const xx = stacked ? xBand(i) : x(i);
+      const d = Math.abs(xx - cx);
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  };
+
+  svg.addEventListener('pointermove', ev => {
+    const cx = toChartX(ev);
+    if (cx < M.l || cx > W - M.r || buckets.length === 0) { hide(); return; }
+    const i = nearest(cx);
+    const xx = stacked ? xBand(i) : x(i);
+    cross.setAttribute('x1', xx); cross.setAttribute('x2', xx);
+    cross.setAttribute('visibility', 'visible');
+    if (dragFrom !== null) {
+      const a = Math.min(dragFrom.px, xx), b = Math.max(dragFrom.px, xx);
+      sel.setAttribute('x', a); sel.setAttribute('width', b - a);
+      sel.setAttribute('visibility', 'visible');
+    }
+    /* tooltip lists every series at this X */
+    tt.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'tt-title';
+    title.textContent = fmtBucketLabel(buckets[i].label, bucket);
+    tt.appendChild(title);
+    for (const sr of visible) {
+      const row = document.createElement('div'); row.className = 'tt-row';
+      const key = document.createElement('span'); key.className = 'tt-key';
+      key.style.background = sr.color; row.appendChild(key);
+      const val = document.createElement('span'); val.className = 'tt-val';
+      val.textContent = fmtMetric(sr.values[i]); row.appendChild(val);
+      const nm = document.createElement('span'); nm.className = 'tt-name';
+      nm.textContent = sr.name; row.appendChild(nm);
+      tt.appendChild(row);
+    }
+    if (state.breakdown === 'token_type') {
+      const inp = visible.find(s => s.name === 'Input'), out = visible.find(s => s.name === 'Output');
+      if (inp && out) {
+        const row = document.createElement('div'); row.className = 'tt-row';
+        const nm = document.createElement('span'); nm.className = 'tt-name';
+        nm.textContent = 'Total tokens (input + output): ';
+        const val = document.createElement('span'); val.className = 'tt-val';
+        val.textContent = compact(inp.values[i] + out.values[i]);
+        row.appendChild(nm); row.appendChild(val); tt.appendChild(row);
+      }
+    }
+    const wr = wrap.getBoundingClientRect(), sr2 = svg.getBoundingClientRect();
+    const px = (xx / W) * sr2.width;
+    tt.style.display = 'block';
+    tt.style.left = Math.min(px + 14, wr.width - tt.offsetWidth - 6) + 'px';
+    tt.style.top = '18px';
+  });
+  const hide = () => {
+    tt.style.display = 'none';
+    cross.setAttribute('visibility', 'hidden');
+  };
+  svg.addEventListener('pointerleave', () => { hide(); dragFrom = null; sel.setAttribute('visibility', 'hidden'); });
+  svg.addEventListener('pointerdown', ev => {
+    const cx = toChartX(ev);
+    if (cx < M.l || cx > W - M.r) return;
+    dragFrom = { i: nearest(cx), px: stacked ? xBand(nearest(cx)) : x(nearest(cx)) };
+    svg.setPointerCapture(ev.pointerId);
+  });
+  svg.addEventListener('pointerup', ev => {
+    sel.setAttribute('visibility', 'hidden');
+    if (dragFrom === null) return;
+    const i2 = nearest(toChartX(ev));
+    const a = Math.min(dragFrom.i, i2), b = Math.max(dragFrom.i, i2);
+    dragFrom = null;
+    if (b - a >= 1) {
+      const base = state.zoom ? state.zoom[0] : 0;
+      state.zoom = [base + a, base + b];
+      render();
+    }
+  });
+}
+document.getElementById('zoom-reset').addEventListener('click', () => { state.zoom = null; render(); });
+
+/* ------------------------------------------------------------ stat cards */
+function renderStats() {
+  const buckets = buildBuckets();
+  const users = activeUserIdx(), models = activeModelIdx();
+  const tot = sumCell(buckets.flatMap(b => b.hours), models, users);
+  const tokens = tot.inp + tot.out; /* input + output only */
+  const minutes = buckets.flatMap(b => b.hours).length * 60;
+  let cost = 0, hasUnpriced = false;
+  const perB = { req: [], tok: [], cost: [] };
+  for (const b of buckets) {
+    let br = 0, bt = 0, bc = 0;
+    for (const m of models) {
+      const c = sumCell(b.hours, [m], users);
+      br += c.req; bt += c.inp + c.out;
+      if (MODELS[m].pricing) bc += cellCost(c, m); else if (c.req > 0) hasUnpriced = true;
+    }
+    perB.req.push(br); perB.tok.push(bt); perB.cost.push(bc);
+    cost += bc;
+  }
+  const cards = [
+    { label: 'Requests', value: fmtInt.format(tot.req), spark: perB.req },
+    { label: 'Tokens',   value: compact(tokens), spark: perB.tok },
+    { label: 'RPM',      value: (tot.req / minutes).toFixed(2), spark: perB.req },
+    { label: 'TPM',      value: compact(tokens / minutes), spark: perB.tok },
+    { label: 'Cost',     value: '$' + cost.toFixed(2), spark: perB.cost,
+      warn: hasUnpriced ? 'Partial pricing — some models have no pricing data' : null },
+  ];
+  const row = document.getElementById('stat-row');
+  row.textContent = '';
+  for (const c of cards) {
+    const el = document.createElement('div');
+    el.className = 'card stat';
+    const lb = document.createElement('div'); lb.className = 'label'; lb.textContent = c.label;
+    const vv = document.createElement('div'); vv.className = 'value'; vv.textContent = c.value;
+    el.appendChild(lb); el.appendChild(vv);
+    if (c.warn) {
+      const w = document.createElement('span'); w.className = 'warn-chip';
+      w.textContent = '⚠ partial pricing'; w.title = c.warn; el.appendChild(w);
+    }
+    const sp = document.createElement('div'); sp.className = 'spark';
+    sp.innerHTML = sparkSvg(c.spark);
+    el.appendChild(sp);
+    row.appendChild(el);
+  }
+}
+function sparkSvg(values) {
+  const w = 120, h = 28, max = Math.max(1e-9, ...values);
+  const pts = values.map((v, i) =>
+    `${(i / Math.max(1, values.length - 1)) * w},${h - 3 - (v / max) * (h - 6)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="${cssVar('--muted')}" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+/* ---------------------------------------------------------------- tables */
+function costCellText(cost, hasUnpriced) {
+  if (hasUnpriced) return { text: '—', cls: 'cost-warn', title: 'No pricing for one or more models in this row' };
+  return { text: '$' + cost.toFixed(2), cls: '', title: '' };
+}
+function renderTables() {
+  const hours = buildBuckets().flatMap(b => b.hours);
+  const users = activeUserIdx(), models = activeModelIdx();
+
+  /* user stats */
+  const ub = document.querySelector('#user-table tbody');
+  ub.textContent = '';
+  for (const u of users) {
+    const c = sumCell(hours, models, [u]);
+    if (c.req === 0) continue;
+    let cost = 0, unpriced = false;
+    for (const m of models) {
+      const cm = sumCell(hours, [m], [u]);
+      if (MODELS[m].pricing) cost += cellCost(cm, m); else if (cm.req > 0) unpriced = true;
+    }
+    const lat = Math.round(models.reduce((s, m) => s + MODELS[m].latency, 0) / models.length * (0.9 + (u * 0.07)));
+    addRow(ub, [
+      { text: USERS[u].key, cls: 'mono' },
+      fmtInt.format(c.req), compact(c.inp), compact(c.out), compact(c.inp + c.out),
+      costCellText(cost, unpriced),
+      fmtInt.format(c.fail), fmtInt.format(lat) + ' ms',
+    ]);
+  }
+
+  /* model stats */
+  const mb = document.querySelector('#model-table tbody');
+  mb.textContent = '';
+  for (const m of models) {
+    const c = sumCell(hours, [m], users);
+    if (c.req === 0) continue;
+    const priced = !!MODELS[m].pricing;
+    addRow(mb, [
+      { text: MODELS[m].name, cls: 'mono' },
+      fmtInt.format(c.req), compact(c.inp), compact(c.out), compact(c.cac), compact(c.rea),
+      compact(c.inp + c.out),
+      priced ? { text: '$' + cellCost(c, m).toFixed(2), cls: '', title: '' }
+             : { text: '—', cls: 'cost-warn', title: 'No pricing data for this model' },
+      fmtInt.format(c.fail), fmtInt.format(MODELS[m].latency) + ' ms',
+    ]);
+  }
+
+  /* credential stats */
+  const cb = document.querySelector('#cred-table tbody');
+  cb.textContent = '';
+  for (const s of SOURCES) {
+    const ms = s.models.filter(m => models.includes(m));
+    if (ms.length === 0) continue;
+    const c = sumCell(hours, ms, users);
+    if (c.req === 0) continue;
+    let cost = 0, unpriced = false;
+    for (const m of ms) {
+      const cm = sumCell(hours, [m], users);
+      if (MODELS[m].pricing) cost += cellCost(cm, m); else if (cm.req > 0) unpriced = true;
+    }
+    addRow(cb, [
+      { text: s.name, cls: 'mono' },
+      fmtInt.format(c.req), compact(c.inp + c.out),
+      costCellText(cost, unpriced), fmtInt.format(c.fail),
+    ]);
+  }
+
+  /* health */
+  const tot = sumCell(hours, models, users);
+  const rate = tot.req > 0 ? (tot.fail / tot.req * 100).toFixed(2) + '%' : '0%';
+  const meanLat = models.length
+    ? models.reduce((s, m) => s + MODELS[m].latency, 0) / models.length : 0;
+  const hr = document.getElementById('health-row');
+  hr.textContent = '';
+  const items = [
+    ['Total requests', fmtInt.format(tot.req)],
+    ['Failed', fmtInt.format(tot.fail)],
+    ['Failure rate', rate],
+    ['p50 latency', fmtInt.format(Math.round(meanLat * 0.82)) + ' ms'],
+    ['p95 latency', fmtInt.format(Math.round(meanLat * 2.1)) + ' ms'],
+    ['p99 latency', fmtInt.format(Math.round(meanLat * 3.4)) + ' ms'],
+  ];
+  for (const [label, value] of items) {
+    const el = document.createElement('div'); el.className = 'stat';
+    const lb = document.createElement('div'); lb.className = 'label'; lb.textContent = label;
+    const vv = document.createElement('div'); vv.className = 'value'; vv.textContent = value;
+    el.appendChild(lb); el.appendChild(vv); hr.appendChild(el);
+  }
+}
+function addRow(tbody, vals) {
+  const tr = document.createElement('tr');
+  for (const v of vals) {
+    const td = document.createElement('td');
+    if (typeof v === 'object') {
+      td.textContent = v.text;
+      if (v.cls) td.className = v.cls;
+      if (v.title) td.title = v.title;
+    } else td.textContent = v;
+    tr.appendChild(td);
+  }
+  tbody.appendChild(tr);
+}
+
+/* --------------------------------------------------------------- sidebar */
+function renderRangeList() {
+  const el = document.getElementById('range-list');
+  el.textContent = '';
+  for (const r of RANGES) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-pressed', String(state.range === r.id));
+    const chk = document.createElement('span'); chk.className = 'check';
+    chk.textContent = state.range === r.id ? '✓' : '';
+    b.appendChild(chk);
+    b.appendChild(document.createTextNode(r.label));
+    b.addEventListener('click', () => { state.range = r.id; state.zoom = null; render(); });
+    el.appendChild(b);
+  }
+}
+function renderCheckList(listId, countId, items, sel, onChange, limit, searchVal) {
+  const el = document.getElementById(listId);
+  el.textContent = '';
+  const allLabel = document.createElement('label');
+  const allCb = document.createElement('input');
+  allCb.type = 'checkbox';
+  allCb.checked = sel === 'all';
+  allCb.addEventListener('change', () => onChange('all'));
+  allLabel.appendChild(allCb);
+  allLabel.appendChild(document.createTextNode(listId === 'user-list' ? 'All users' : 'All models'));
+  el.appendChild(allLabel);
+  items.forEach((name, i) => {
+    if (searchVal && !name.toLowerCase().includes(searchVal)) return;
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    const on = sel !== 'all' && sel.has(i);
+    cb.checked = on;
+    if (!on && sel !== 'all' && limit && sel.size >= limit) cb.disabled = true;
+    cb.addEventListener('change', () => {
+      let next = sel === 'all' ? new Set() : new Set(sel);
+      next.has(i) ? next.delete(i) : next.add(i);
+      onChange(next.size === 0 ? 'all' : next);
+    });
+    label.appendChild(cb);
+    const sp = document.createElement('span');
+    sp.className = 'mono'; sp.textContent = name;
+    label.appendChild(sp);
+    el.appendChild(label);
+  });
+  const cnt = document.getElementById(countId);
+  cnt.textContent = sel === 'all'
+    ? `All selected (${items.length})`
+    : `${sel.size} of ${items.length} selected` + (limit ? ` · max ${limit}` : '');
+}
+let modelSearch = '', userSearch = '';
+document.getElementById('model-search').addEventListener('input', e => {
+  modelSearch = e.target.value.toLowerCase(); renderSidebar();
+});
+document.getElementById('user-search').addEventListener('input', e => {
+  userSearch = e.target.value.toLowerCase(); renderSidebar();
+});
+document.getElementById('refresh-btn').addEventListener('click', render);
+
+function renderSidebar() {
+  renderRangeList();
+  renderCheckList('model-list', 'model-count', MODELS.map(m => m.name), state.models,
+    v => { state.models = v; state.zoom = null; state.hidden.clear(); render(); },
+    SERIES_LIMIT, modelSearch);
+  renderCheckList('user-list', 'user-count', USERS.map(u => u.key), state.users,
+    v => { state.users = v; state.zoom = null; render(); }, null, userSearch);
+}
+
+/* ------------------------------------------------------------------ root */
+function render() {
+  renderSidebar();
+  renderStats();
+  renderExplorer();
+  renderTables();
+}
+applyTheme();
+</script>
+</body>
+</html>
