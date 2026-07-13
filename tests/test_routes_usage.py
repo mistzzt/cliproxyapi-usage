@@ -18,11 +18,13 @@ from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.pricing import (
     ModelPricing,
+    PricingResolution,
     TokenCounts,
     compute_cost,
     resolve,
 )
 from cliproxy_usage_server.redact import redact_key
+from cliproxy_usage_server.routes.usage import _rank_priced_models
 from cliproxy_usage_server.schemas import (
     HealthResponse,
     ModelsResponse,
@@ -121,10 +123,14 @@ def _rolling_window(hours: int) -> str:
 
 
 def test_overview_totals_match_seed(client_no_pricing) -> None:
-    """Totals in overview must equal the fixture-derived values."""
+    """Totals in overview must equal the fixture-derived values.
+
+    Token totals are input + output (the stored total_tokens column, which may
+    include cached/reasoning tokens, is never summed for a reported total).
+    """
     records = _load_records()
     expected_requests = len(records)
-    expected_tokens = sum(r.total_tokens for r in records)
+    expected_tokens = sum(r.input_tokens + r.output_tokens for r in records)
 
     resp = client_no_pricing.get("/api/overview")
     assert resp.status_code == 200, resp.text
@@ -1105,3 +1111,397 @@ def test_tz_offset_shifts_cost_day_bucket(tmp_path: pathlib.Path) -> None:
         # Cost must be non-zero and attached to the shifted local day.
         assert set(nonzero) == {"2026-04-30"}
         assert nonzero["2026-04-30"] == pytest.approx(1000 * 1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Unified explorer step 1: token totals = input + output, real cost sparkline,
+# metric-specific top-model ranking
+# ---------------------------------------------------------------------------
+
+
+def _seed_model_rows(
+    tmp_path: pathlib.Path,
+    rows: list[tuple[str, int, int]],
+) -> pathlib.Path:
+    """Seed a DB from ``(model, input_tokens, output_tokens)`` rows.
+
+    Each tuple becomes one request at a distinct timestamp inside the 01:30
+    UTC minute of 2026-04-23 (so ``_FIXTURE_DAY_WINDOW`` covers them).  The
+    stored ``total_tokens`` column is set to ``input + output + 7`` so tests
+    can prove reported token totals never read that column.
+    """
+    db_path = tmp_path / "usage.db"
+    conn = open_db(db_path)
+    for i, (model, inp, out) in enumerate(rows):
+        conn.execute(
+            "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+            "latency_ms, input_tokens, output_tokens, reasoning_tokens, "
+            "cached_tokens, total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"2026-04-23T01:30:00.{i:06d}Z",
+                "sk-test",
+                model,
+                "src-account@example.test",
+                "0",
+                100,
+                inp,
+                out,
+                0,
+                0,
+                inp + out + 7,
+                0,
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def test_token_totals_are_input_plus_output_across_endpoints(client_no_pricing) -> None:
+    """Overview, timeseries(tokens), and stat endpoints report input + output.
+
+    The stored total_tokens column includes reasoning tokens in the fixture, so
+    input+output differs from that column — making the behavior observable.
+    """
+    records = _load_records()
+    io_total = sum(r.input_tokens + r.output_tokens for r in records)
+    stored_total = sum(r.total_tokens for r in records)
+    # Observability guard: the fixture stores a total_tokens that is NOT the
+    # input+output sum, so a regression to SUM(total_tokens) would be caught.
+    assert stored_total != io_total
+
+    # Overview total.
+    overview = client_no_pricing.get(f"/api/overview?{_FIXTURE_DAY_WINDOW}")
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["totals"]["tokens"] == io_total
+
+    # Timeseries tokens metric: sum of __all__ across buckets == io_total.
+    ts = client_no_pricing.get(
+        f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=tokens"
+    )
+    assert ts.status_code == 200, ts.text
+    ts_body = TimeseriesResponse.model_validate(ts.json())
+    assert sum(ts_body.series["__all__"]) == pytest.approx(io_total)
+
+    # api-stats: per-key total_tokens == input+output for that key.
+    api_rows = client_no_pricing.get(f"/api/api-stats?{_FIXTURE_DAY_WINDOW}").json()
+    for row in api_rows:
+        key_recs = [r for r in records if redact_key(r.api_key) == row["api_key"]]
+        expected = sum(r.input_tokens + r.output_tokens for r in key_recs)
+        assert row["total_tokens"] == expected
+
+    # model-stats: per-model total_tokens == input+output for that model.
+    model_rows = client_no_pricing.get(f"/api/model-stats?{_FIXTURE_DAY_WINDOW}").json()
+    for row in model_rows:
+        m_recs = [r for r in records if r.model == row["model"]]
+        expected = sum(r.input_tokens + r.output_tokens for r in m_recs)
+        assert row["total_tokens"] == expected
+
+    # credential-stats: per-source total_tokens == input+output for that source.
+    cred_rows = client_no_pricing.get(
+        f"/api/credential-stats?{_FIXTURE_DAY_WINDOW}"
+    ).json()
+    for row in cred_rows:
+        s_recs = [r for r in records if r.source == row["source"]]
+        expected = sum(r.input_tokens + r.output_tokens for r in s_recs)
+        assert row["total_tokens"] == expected
+
+
+def test_overview_cost_sparkline_holds_real_per_bucket_cost(
+    seeded_db_path: pathlib.Path,
+) -> None:
+    """The overview cost sparkline equals independently computed per-bucket cost."""
+    records = _load_records()
+    pricing = _load_pricing_fixture()
+    cfg = ServerConfig(db_path=seeded_db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing)
+
+    with TestClient(app) as client:
+        resp = client.get(f"/api/overview?{_FIXTURE_DAY_WINDOW}")
+    assert resp.status_code == 200, resp.text
+    cost_points = resp.json()["sparklines"]["cost"]
+
+    # Overview uses hour buckets for a 24h window (bucket_for_span).
+    expected = _compute_expected_bucket_costs(records, pricing, "hour")
+    assert any(v > 0.0 for v in expected.values()), "fixture should have priced cost"
+
+    assert any(p["value"] > 0.0 for p in cost_points), "cost sparkline all zeros"
+    for point in cost_points:
+        want = expected.get(point["ts"], 0.0)
+        assert abs(point["value"] - want) < 1e-10, (
+            f"bucket {point['ts']}: expected {want}, got {point['value']}"
+        )
+
+
+def test_overview_cost_sparkline_numeric_zeros_without_pricing(
+    client_no_pricing,
+) -> None:
+    """With empty pricing the cost sparkline points are numeric zeros, not null."""
+    resp = client_no_pricing.get(f"/api/overview?{_FIXTURE_DAY_WINDOW}")
+    assert resp.status_code == 200, resp.text
+    cost_points = resp.json()["sparklines"]["cost"]
+    assert len(cost_points) > 0
+    for point in cost_points:
+        assert point["value"] == 0.0
+
+
+def test_timeseries_top_n_ranking_is_metric_specific(tmp_path: pathlib.Path) -> None:
+    """Requests ranks by count; tokens ranks by input+output (they can disagree)."""
+    # alpha: 5 requests, 10 tokens total.  beta: 1 request, 200 tokens total.
+    rows = [("alpha", 1, 1)] * 5 + [("beta", 100, 100)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        req = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=requests&top_n=1"
+        )
+        tok = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=tokens&top_n=1"
+        )
+    assert req.status_code == 200, req.text
+    assert tok.status_code == 200, tok.text
+    req_named = set(TimeseriesResponse.model_validate(req.json()).series) - {"__all__"}
+    tok_named = set(TimeseriesResponse.model_validate(tok.json()).series) - {"__all__"}
+    assert req_named == {"alpha"}, f"requests should rank alpha, got {req_named}"
+    assert tok_named == {"beta"}, f"tokens should rank beta, got {tok_named}"
+
+
+def test_timeseries_top_n_tie_break_is_lexicographic(tmp_path: pathlib.Path) -> None:
+    """Equal token totals resolve to the lexicographically smaller model name."""
+    # bbb and mmm each have 100 total tokens and one request — a deliberate tie.
+    rows = [("mmm", 50, 50), ("bbb", 50, 50)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=tokens&top_n=1"
+        )
+    assert resp.status_code == 200, resp.text
+    named = set(TimeseriesResponse.model_validate(resp.json()).series) - {"__all__"}
+    assert named == {"bbb"}, f"tie should pick lexicographic min, got {named}"
+
+
+def test_timeseries_cost_top_n_excludes_unpriced_models(tmp_path: pathlib.Path) -> None:
+    """Cost top-N names only models with resolved pricing; others fall into Other."""
+    rows = [("gpt-5", 100, 0), ("unpriced-model", 100, 0)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    pricing = {"gpt-5": ModelPricing(input_cost_per_token=1e-6)}
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing)
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost&top_n=5"
+        )
+    assert resp.status_code == 200, resp.text
+    body = TimeseriesResponse.model_validate(resp.json())
+    named = set(body.series) - {"__all__"}
+    assert named == {"gpt-5"}, f"unpriced model must be excluded, got {named}"
+    assert "__all__" in body.series
+    # __all__ rolls up over every model, so it flags the unpriced usage.
+    assert body.series_status["__all__"] == "partial_missing"
+    assert body.series_status["gpt-5"] == "live"
+
+
+def test_timeseries_cost_top_n_no_pricing_returns_all_only(
+    tmp_path: pathlib.Path,
+) -> None:
+    """When no model resolves pricing, cost top-N returns only the __all__ series."""
+    rows = [("gpt-5", 100, 0), ("other-model", 50, 0)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: {})
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost&top_n=5"
+        )
+    assert resp.status_code == 200, resp.text
+    body = TimeseriesResponse.model_validate(resp.json())
+    keys = set(body.series)
+    assert keys == {"__all__"}, f"expected only __all__, got {keys}"
+
+
+def test_timeseries_cost_top_n_tie_break_is_lexicographic(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Equal computed cost resolves to the lexicographically smaller model name."""
+    # aaa-model and zzz-model each cost 100 * 1e-6 — a deliberate tie.
+    rows = [("zzz-model", 100, 0), ("aaa-model", 100, 0)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    pricing = {
+        "zzz-model": ModelPricing(input_cost_per_token=1e-6),
+        "aaa-model": ModelPricing(input_cost_per_token=1e-6),
+    }
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing)
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost&top_n=1"
+        )
+    assert resp.status_code == 200, resp.text
+    named = set(TimeseriesResponse.model_validate(resp.json()).series) - {"__all__"}
+    assert named == {"aaa-model"}, f"tie should pick lexicographic min, got {named}"
+
+
+def test_timeseries_cost_top_n_ranks_by_cost_not_token_count(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Cost top-N ranks by computed cost, not token volume.
+
+    ``cheap`` has huge token volume at a tiny rate (total cost ~1e-6); ``pricey``
+    has tiny token volume at a high rate (total cost ~0.1).  Ranking by token
+    count would surface ``cheap``; ranking by cost must surface ``pricey``.
+    """
+    rows = [("cheap", 1_000_000, 0), ("pricey", 100, 0)]
+    db_path = _seed_model_rows(tmp_path, rows)
+    pricing = {
+        "cheap": ModelPricing(input_cost_per_token=1e-12),
+        "pricey": ModelPricing(input_cost_per_token=1e-3),
+    }
+    # Sanity: cheap has the larger token count but the smaller cost.
+    assert 1_000_000 > 100
+    assert 1_000_000 * 1e-12 < 100 * 1e-3
+    cfg = ServerConfig(db_path=db_path)  # pyright: ignore[reportCallIssue]
+    app = create_app(cfg, pricing_provider=lambda: pricing)
+
+    with TestClient(app) as client:
+        resp = client.get(
+            f"/api/timeseries?{_FIXTURE_DAY_WINDOW}&bucket=hour&metric=cost&top_n=1"
+        )
+    assert resp.status_code == 200, resp.text
+    named = set(TimeseriesResponse.model_validate(resp.json()).series) - {"__all__"}
+    assert named == {"pricey"}, f"cost top-N must rank by cost, got {named}"
+
+
+# ---------------------------------------------------------------------------
+# api_keys= filter propagation to per-group stat endpoints + health
+# ---------------------------------------------------------------------------
+
+
+def test_api_stats_api_keys_filter_restricts_rows(client_no_pricing) -> None:
+    """api_keys=<redacted> narrows api-stats to that key's rows only."""
+    records = _load_records()
+    redacted = redact_key(records[0].api_key)
+    matching = [r for r in records if redact_key(r.api_key) == redacted]
+
+    resp = client_no_pricing.get(f"/api/api-stats?api_keys={redacted}")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+
+    returned_api_keys = {row["api_key"] for row in rows}
+    assert returned_api_keys == {redacted}
+    assert sum(row["requests"] for row in rows) == len(matching)
+
+    base = client_no_pricing.get("/api/api-stats")
+    assert len(rows) <= len(base.json())
+
+
+def test_api_stats_api_keys_filter_unknown_yields_empty(client_no_pricing) -> None:
+    """An unknown redacted key yields no api-stats rows."""
+    resp = client_no_pricing.get("/api/api-stats?api_keys=does-not-exist")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+def test_model_stats_api_keys_filter_restricts_rows(client_no_pricing) -> None:
+    """api_keys=<redacted> narrows model-stats to models used by that key."""
+    records = _load_records()
+    redacted = redact_key(records[0].api_key)
+    matching = [r for r in records if redact_key(r.api_key) == redacted]
+
+    resp = client_no_pricing.get(f"/api/model-stats?api_keys={redacted}")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+
+    expected_models = {r.model for r in matching}
+    returned_models = {row["model"] for row in rows}
+    assert returned_models == expected_models
+    assert sum(row["requests"] for row in rows) == len(matching)
+
+    base = client_no_pricing.get("/api/model-stats")
+    assert len(rows) <= len(base.json())
+
+
+def test_model_stats_api_keys_filter_unknown_yields_empty(client_no_pricing) -> None:
+    """An unknown redacted key yields no model-stats rows."""
+    resp = client_no_pricing.get("/api/model-stats?api_keys=does-not-exist")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+def test_credential_stats_api_keys_filter_restricts_rows(client_no_pricing) -> None:
+    """api_keys=<redacted> narrows credential-stats to sources used by that key."""
+    from cliproxy_usage_server.redact import redact_source
+
+    records = _load_records()
+    redacted = redact_key(records[0].api_key)
+    matching = [r for r in records if redact_key(r.api_key) == redacted]
+
+    resp = client_no_pricing.get(f"/api/credential-stats?api_keys={redacted}")
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+
+    expected_sources = {redact_source(r.source) for r in matching}
+    returned_sources = {row["source"] for row in rows}
+    assert returned_sources == expected_sources
+    assert sum(row["requests"] for row in rows) == len(matching)
+
+    base = client_no_pricing.get("/api/credential-stats")
+    assert len(rows) <= len(base.json())
+
+
+def test_credential_stats_api_keys_filter_unknown_yields_empty(
+    client_no_pricing,
+) -> None:
+    """An unknown redacted key yields no credential-stats rows."""
+    resp = client_no_pricing.get("/api/credential-stats?api_keys=does-not-exist")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+def test_health_api_keys_filter_reduces_totals(client_no_pricing) -> None:
+    """api_keys=<redacted> reduces health total_requests to that key's rows."""
+    records = _load_records()
+    redacted = redact_key(records[0].api_key)
+    expected_total = sum(1 for r in records if redact_key(r.api_key) == redacted)
+
+    resp = client_no_pricing.get(f"/api/health?api_keys={redacted}")
+    assert resp.status_code == 200, resp.text
+    body = HealthResponse.model_validate(resp.json())
+    assert body.total_requests == expected_total
+
+    base = client_no_pricing.get("/api/health")
+    base_body = HealthResponse.model_validate(base.json())
+    assert body.total_requests <= base_body.total_requests
+
+
+def test_health_api_keys_filter_unknown_yields_zero(client_no_pricing) -> None:
+    """An unknown redacted key yields zero health totals."""
+    resp = client_no_pricing.get("/api/health?api_keys=does-not-exist")
+    assert resp.status_code == 200, resp.text
+    body = HealthResponse.model_validate(resp.json())
+    assert body.total_requests == 0
+    assert body.failed == 0
+    assert body.failed_rate == 0.0
+
+
+def test_rank_priced_models_tie_break_is_lexicographic() -> None:
+    """Unit-test the ranking seam: ties break lexicographically by name.
+
+    The input dict is built in reverse (non-lexicographic) order so a bare
+    ``-cost`` sort key (stable, insertion-order preserving) would return the
+    wrong model; only the ``(-cost, name)`` key yields ``aaa-model`` first.
+    """
+    model_total_cost = {"zzz-model": 0.5, "aaa-model": 0.5}
+    model_statuses: dict[str, list[PricingResolution]] = {
+        "zzz-model": ["live"],
+        "aaa-model": ["live"],
+    }
+    ranked = _rank_priced_models(model_total_cost, model_statuses, 1)
+    assert ranked == ["aaa-model"], f"tie should pick lexicographic min, got {ranked}"

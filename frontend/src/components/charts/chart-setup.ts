@@ -15,6 +15,7 @@ import {
   Legend,
   BarElement,
 } from 'chart.js';
+import zoomPlugin from 'chartjs-plugin-zoom';
 
 ChartJS.register(
   LineElement,
@@ -24,4 +25,5 @@ ChartJS.register(
   Tooltip,
   Legend,
   BarElement,
+  zoomPlugin,
 );

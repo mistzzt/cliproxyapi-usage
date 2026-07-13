@@ -35,7 +35,7 @@ export default function ApiDetailsCard({ rows, loading }: ApiDetailsCardProps) {
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
 
   return (
-    <Card title="API Details">
+    <Card title="User Statistics">
       <div className={styles.body}>
         {loading ? (
           <div className={styles.center}>
@@ -50,7 +50,7 @@ export default function ApiDetailsCard({ rows, loading }: ApiDetailsCardProps) {
                 <tr>
                   <th>
                     <button type="button" className={styles.sortBtn} onClick={() => handleSort('api_key')}>
-                      API Key{arrow(sort, 'api_key')}
+                      User (API key){arrow(sort, 'api_key')}
                     </button>
                   </th>
                   <th>

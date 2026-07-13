@@ -56,7 +56,9 @@ def test_totals_full_range(
     assert totals.requests == len(recs)
     assert totals.input_tokens == sum(r.input_tokens for r in recs)
     assert totals.output_tokens == sum(r.output_tokens for r in recs)
-    assert totals.total_tokens == sum(r.total_tokens for r in recs)
+    # Reported token total is input + output (never the stored total_tokens
+    # column, which may include cached/reasoning tokens).
+    assert totals.total_tokens == sum(r.input_tokens + r.output_tokens for r in recs)
     assert totals.cached_tokens == sum(r.cached_tokens for r in recs)
     assert totals.reasoning_tokens == sum(r.reasoning_tokens for r in recs)
     assert totals.failed == sum(1 for r in recs if r.failed)
@@ -475,18 +477,22 @@ def test_timeseries_top_n_keys_and_all_series(
 ) -> None:
     """top_n=2 with models=None returns __all__ + the 2 highest-token models.
 
-    The __all__ series must be the sum over ALL models (not just the top 2).
+    Token ranking and the __all__ series both use input + output tokens (not
+    the stored total_tokens column).  The __all__ series must be the sum over
+    ALL models (not just the top 2).
     """
     recs = _fixture_records(usage_export_json)
     conn = open_ro(seeded_db_path)
 
-    # Compute expected top-2 by total_tokens from fixture data.
+    # Compute expected top-2 by input+output tokens from fixture data.
+    # Ties break lexicographically by model name (mirrors the query's
+    # ORDER BY rank_val DESC, model ASC).
     from collections import defaultdict
 
     model_tokens: dict[str, int] = defaultdict(int)
     for r in recs:
-        model_tokens[r.model] += r.total_tokens
-    top2 = [m for m, _ in sorted(model_tokens.items(), key=lambda x: -x[1])[:2]]
+        model_tokens[r.model] += r.input_tokens + r.output_tokens
+    top2 = [m for m, _ in sorted(model_tokens.items(), key=lambda x: (-x[1], x[0]))[:2]]
 
     ts = query_timeseries(conn, _START, _END, "day", "tokens", models=None, top_n=2)
     conn.close()
@@ -505,7 +511,7 @@ def test_timeseries_top_n_keys_and_all_series(
     for r in recs:
         ts_dt = datetime.fromisoformat(r.timestamp).astimezone(UTC)
         bkt = ts_dt.strftime("%Y-%m-%d")
-        all_tokens_per_bucket[bkt] += r.total_tokens
+        all_tokens_per_bucket[bkt] += r.input_tokens + r.output_tokens
 
     for i, lbl in enumerate(ts.buckets):
         expected_all = all_tokens_per_bucket.get(lbl, 0.0)

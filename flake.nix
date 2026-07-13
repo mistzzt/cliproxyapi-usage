@@ -30,10 +30,10 @@
           outputHashMode = "recursive";
           outputHash =
             {
-              x86_64-linux = "sha256-tevVbcRq6X4nqge0jkHkmjKotWJ/4y6nyv0/NDYNkYY=";
+              x86_64-linux = "sha256-ANxNRAniXeAQ3b8iwZoLvzGe6hcmfvhLK7HoiLNAN1s=";
               aarch64-linux = pkgs.lib.fakeHash;
               x86_64-darwin = pkgs.lib.fakeHash;
-              aarch64-darwin = "sha256-ay+QLYZ2n6gk9l2KumUyjy8iPBS7IPh7Kt5bQO6cYoM=";
+              aarch64-darwin = pkgs.lib.fakeHash;
             }.${
               system
             } or (throw "unsupported system: ${system}");

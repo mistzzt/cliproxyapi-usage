@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { parseISO, format } from 'date-fns';
 import * as Popover from '@radix-ui/react-popover';
 import type { DateRange } from 'react-day-picker';
-import { CHART_MAX_LINES } from '@/pages/usage-constants';
+import { MODEL_SELECTION_MAX } from '@/pages/usage-constants';
 import type { RangeSpec } from '@/types/api';
 import {
   stepAnchor,
@@ -266,9 +266,14 @@ function MultiSelectSection({
 
   return (
     <div className={styles.section}>
-      <label className={styles.sectionLabel} htmlFor={`${id}-search`}>
-        {label}
-      </label>
+      <span className={styles.sectionHeader}>
+        <label className={styles.sectionLabel} htmlFor={`${id}-search`}>
+          {label}
+        </label>
+        {selectionCount > 0 && (
+          <span className={styles.sectionCount}>{selectionCount} selected</span>
+        )}
+      </span>
       <input
         id={`${id}-search`}
         type="search"
@@ -346,14 +351,14 @@ function SidebarBody({
         items={models}
         selected={selectedModels}
         onChange={onModelsChange}
-        maxSelection={CHART_MAX_LINES}
+        maxSelection={MODEL_SELECTION_MAX}
       />
 
       <MultiSelectSection
         id="filter-sidebar-api-keys"
-        label="API keys"
-        searchPlaceholder="Search API keys"
-        allLabel="All"
+        label="Users (API keys)"
+        searchPlaceholder="Search users"
+        allLabel="All users"
         items={apiKeys}
         selected={selectedApiKeys}
         onChange={onApiKeysChange}

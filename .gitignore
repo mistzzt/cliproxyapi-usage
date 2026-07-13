@@ -229,6 +229,7 @@ __marimo__/
 *.db
 test/
 pricing.json
+state
 
 # Usage webapp
 frontend/node_modules/

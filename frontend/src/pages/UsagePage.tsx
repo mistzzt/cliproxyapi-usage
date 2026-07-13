@@ -1,11 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
-import { CHART_TOP_N } from './usage-constants';
-import type { RangeSpec } from '@/types/api';
-import { resolveRange } from '@/utils/rangeResolver';
+import { useState, useMemo } from 'react';
+import type { Bucket, RangeSpec } from '@/types/api';
+import { resolveRange, formatCalendarLabel } from '@/utils/rangeResolver';
 import {
   getOverview,
-  getTimeseries,
-  getTokenBreakdown,
   getApiStats,
   getModelStats,
   getCredentialStats,
@@ -21,16 +18,22 @@ import AppHeader from '@/components/ui/AppHeader';
 import Button from '@/components/ui/Button';
 import FilterSidebar from '@/components/usage/FilterSidebar';
 import StatCards from '@/components/usage/StatCards';
-import UsageChart from '@/components/usage/UsageChart';
-import TokenBreakdownChart from '@/components/usage/TokenBreakdownChart';
-import CostTrendChart from '@/components/usage/CostTrendChart';
+import UsageExplorer from '@/components/usage/explorer/UsageExplorer';
+import {
+  DEFAULT_EXPLORER_STATE,
+  EXPLORER_STATE_KEY,
+  normalizeExplorerState,
+  parseExplorerState,
+  type ExplorerState,
+} from '@/components/usage/explorer/explorerState';
 import ApiDetailsCard from '@/components/usage/ApiDetailsCard';
 import ModelStatsCard from '@/components/usage/ModelStatsCard';
 import CredentialStatsCard from '@/components/usage/CredentialStatsCard';
 import ServiceHealthCard from '@/components/usage/ServiceHealthCard';
 import styles from './UsagePage.module.scss';
 
-function defaultPeriod(spec: RangeSpec): 'hour' | 'day' {
+/** Range-appropriate default bucket, used when explorer granularity is 'auto'. */
+function autoBucketFor(spec: RangeSpec): Bucket {
   switch (spec.kind) {
     case 'all':
       return 'day';
@@ -40,6 +43,20 @@ function defaultPeriod(spec: RangeSpec): 'hour' | 'day' {
       return spec.startDate === spec.endDate ? 'hour' : 'day';
     case 'rolling':
       return 'hour';
+  }
+}
+
+/** Short human label for the active range, for the explorer's text summary. */
+function rangeLabelFor(spec: RangeSpec): string {
+  switch (spec.kind) {
+    case 'rolling':
+      return spec.preset === '7h' ? 'the last 7 hours' : 'the last 24 hours';
+    case 'all':
+      return 'all time';
+    case 'calendar':
+      return formatCalendarLabel(spec.unit, spec.anchor);
+    case 'custom':
+      return `${spec.startDate} to ${spec.endDate}`;
   }
 }
 
@@ -61,16 +78,27 @@ export default function UsagePage() {
     'usage.sidebar.collapsed.v1',
     false,
   );
+  const [explorerRaw, setExplorerRaw] = useLocalStorage<ExplorerState>(
+    EXPLORER_STATE_KEY,
+    DEFAULT_EXPLORER_STATE,
+  );
+  const explorerState = useMemo(() => parseExplorerState(explorerRaw), [explorerRaw]);
+  const setExplorerState = (next: ExplorerState) =>
+    setExplorerRaw(normalizeExplorerState(next));
 
   // Session state
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [period, setPeriod] = useState<'hour' | 'day'>(() => defaultPeriod(range));
   // `now` is recomputed once per load/refresh, then held stable so the resolved
   // window doesn't drift on unrelated re-renders.
   const [now, setNow] = useState<Date>(() => new Date());
+  // Bumped on Refresh so the explorer refetches even for fixed (calendar/custom)
+  // ranges whose resolved window does not change with `now`.
+  const [refreshToken, setRefreshToken] = useState(0);
 
   // Resolve the selection into concrete instants + tz offset for the API.
   const resolved = useMemo(() => resolveRange(range, now), [range, now]);
+  const autoBucket = useMemo(() => autoBucketFor(range), [range]);
+  const rangeLabel = useMemo(() => rangeLabelFor(range), [range]);
 
   // Media queries
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -96,7 +124,7 @@ export default function UsagePage() {
     [modelsParam, apiKeysParam],
   );
 
-  // --- Data hooks ---
+  // --- Data hooks (explorer fetches its own active dataset) ---
   const overview = useApi(
     () => getOverview({ range: resolved, ...filterArgs }),
     [resolved, filterArgs],
@@ -104,45 +132,6 @@ export default function UsagePage() {
   const models = useApi(() => getModels(), []);
   const apiKeys = useApi(() => getApiKeys(), []);
   const pricing = useApi(() => getPricing(), []);
-
-  const timeseriesRequests = useApi(
-    () =>
-      getTimeseries({
-        range: resolved,
-        bucket: period,
-        metric: 'requests',
-        ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
-        ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
-      }),
-    [resolved, period, isAllModels, selectedModels, apiKeysParam],
-  );
-  const timeseriesTokens = useApi(
-    () =>
-      getTimeseries({
-        range: resolved,
-        bucket: period,
-        metric: 'tokens',
-        ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
-        ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
-      }),
-    [resolved, period, isAllModels, selectedModels, apiKeysParam],
-  );
-  const timeseriesCost = useApi(
-    () =>
-      getTimeseries({
-        range: resolved,
-        bucket: period,
-        metric: 'cost',
-        ...(isAllModels ? { top_n: CHART_TOP_N } : { models: selectedModels }),
-        ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
-      }),
-    [resolved, period, isAllModels, selectedModels, apiKeysParam],
-  );
-
-  const tokenBreakdown = useApi(
-    () => getTokenBreakdown({ range: resolved, bucket: period, ...filterArgs }),
-    [resolved, period, filterArgs],
-  );
 
   const apiStats = useApi(
     () => getApiStats({ range: resolved, ...filterArgs }),
@@ -158,37 +147,17 @@ export default function UsagePage() {
   );
   const health = useApi(() => getHealth({ range: resolved, ...filterArgs }), [resolved, filterArgs]);
 
-  // Honor the server's effective bucket: wide windows auto-coarsen hour -> day,
-  // so reflect the actual bucket in the period toggle. Key off the response
-  // object identity (which changes on every fetch) rather than the bucket value,
-  // so a coarsen hour -> day is picked up even when the previous response was
-  // already day-bucketed. useApi keeps the prior data during reload, so this only
-  // fires once fresh data arrives, never on the in-flight toggle itself.
-  const requestsData = timeseriesRequests.data;
-  useEffect(() => {
-    const effectiveBucket = requestsData?.bucket;
-    if (effectiveBucket && effectiveBucket !== period) {
-      setPeriod(effectiveBucket);
-    }
-    // Only react to new server responses; including `period` would revert
-    // the user's toggle before the refetch resolves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestsData]);
-
   // Derived hasPricing
   const hasPricing = pricing.data !== null && Object.keys(pricing.data.pricing).length > 0;
 
-  // Refresh all
+  // Refresh all (preserves filters and explorer state).
   function handleRefresh() {
     setNow(new Date());
+    setRefreshToken((t) => t + 1);
     overview.reload();
     models.reload();
     apiKeys.reload();
     pricing.reload();
-    timeseriesRequests.reload();
-    timeseriesTokens.reload();
-    timeseriesCost.reload();
-    tokenBreakdown.reload();
     apiStats.reload();
     modelStats.reload();
     credentialStats.reload();
@@ -201,24 +170,12 @@ export default function UsagePage() {
     // miss recent records until the user hits Refresh.
     setNow(new Date());
     setRange(next);
-    setPeriod(defaultPeriod(next));
   }
 
-  const allHooks = [
-    overview,
-    models,
-    apiKeys,
-    pricing,
-    timeseriesRequests,
-    timeseriesTokens,
-    timeseriesCost,
-    tokenBreakdown,
-    apiStats,
-    modelStats,
-    credentialStats,
-    health,
-  ];
-  const errors = allHooks.map((h) => h.error).filter((e): e is string => e !== null);
+  // Page-level error banner excludes the explorer, which surfaces its own
+  // fetch errors inside its card without hiding the summary/tables.
+  const pageHooks = [overview, models, apiKeys, pricing, apiStats, modelStats, credentialStats, health];
+  const errors = pageHooks.map((h) => h.error).filter((e): e is string => e !== null);
 
   return (
     <div className={styles.page}>
@@ -260,34 +217,18 @@ export default function UsagePage() {
           <div className={styles.stack}>
             <StatCards overview={overview.data} loading={overview.loading} />
 
-            <UsageChart
-              title="Requests"
-              data={timeseriesRequests.data}
-              loading={timeseriesRequests.loading}
-              period={period}
-              onPeriodChange={setPeriod}
-              isMobile={isMobile}
-            />
-
-            <UsageChart
-              title="Tokens"
-              data={timeseriesTokens.data}
-              loading={timeseriesTokens.loading}
-              period={period}
-              onPeriodChange={setPeriod}
-              isMobile={isMobile}
-            />
-
-            <TokenBreakdownChart
-              data={tokenBreakdown.data}
-              loading={tokenBreakdown.loading}
-              isMobile={isMobile}
-            />
-
-            <CostTrendChart
-              data={timeseriesCost.data}
-              loading={timeseriesCost.loading}
+            <UsageExplorer
+              state={explorerState}
+              onStateChange={setExplorerState}
+              range={resolved}
+              autoBucket={autoBucket}
+              isAllModels={isAllModels}
+              selectedModels={selectedModels}
+              {...(apiKeysParam ? { apiKeys: apiKeysParam } : {})}
               hasPricing={hasPricing}
+              isMobile={isMobile}
+              rangeLabel={rangeLabel}
+              refreshToken={refreshToken}
             />
 
             <ApiDetailsCard

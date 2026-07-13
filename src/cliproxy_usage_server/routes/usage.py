@@ -420,6 +420,24 @@ def _cost_by_credential(
     return result
 
 
+def _rank_priced_models(
+    model_total_cost: Mapping[str, float],
+    model_statuses: Mapping[str, list[PricingResolution]],
+    top_n: int,
+) -> list[str]:
+    """Rank models with resolved pricing by cost desc, then name asc; take top-N.
+
+    Only models with at least one "live" pricing status are eligible (unpriced
+    models fall into the frontend's Other via ``__all__``).  Ties on total cost
+    break lexicographically by model name, independent of input ordering.
+    """
+    priced_models = [
+        mdl for mdl in model_total_cost if "live" in model_statuses.get(mdl, [])
+    ]
+    priced_models.sort(key=lambda m: (-model_total_cost[m], m))
+    return priced_models[:top_n]
+
+
 def build_router(db_path: Path) -> APIRouter:
     """Build the usage API router.
 
@@ -543,9 +561,35 @@ def build_router(db_path: Path) -> APIRouter:
             SparklinePoint(ts=lbl, value=v / minutes_per_bucket)
             for lbl, v in zip(tok_labels, tok_vals, strict=True)
         ]
-        # cost sparkline: overview returns 0.0 per bucket;
-        # use /api/timeseries?metric=cost for real per-bucket cost data.
-        cost_points = [SparklinePoint(ts=lbl, value=0.0) for lbl in req_labels]
+        # cost sparkline: real per-bucket cost using the same pricing
+        # resolution and input/output/cached token split as the
+        # metric=cost timeseries path, over the overview's bucket choice.
+        # With an empty pricing map every cell resolves to 0.0, so the points
+        # are numeric zeros (the total's cost_status still signals "missing").
+        # Empty pricing map: every cell would resolve to 0.0, so skip the
+        # grouped table scan and emit the provably-zero points directly (same
+        # short-circuit as _compute_totals_cost / _cost_by_api_key).
+        if not pricing:
+            cost_points = [SparklinePoint(ts=lbl, value=0.0) for lbl in req_labels]
+        else:
+            cost_bfmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%d"
+            cost_cells, _cost_statuses = _query_bucket_model_costs(
+                conn,
+                start,
+                end,
+                cost_bfmt,
+                pricing,
+                models=models_list,
+                api_keys=raw_keys,
+                tz_offset_minutes=tz_offset_minutes,
+            )
+            cost_by_bucket: dict[str, float] = {}
+            for (bkt, _mdl), cost_val in cost_cells.items():
+                cost_by_bucket[bkt] = cost_by_bucket.get(bkt, 0.0) + cost_val
+            cost_points = [
+                SparklinePoint(ts=lbl, value=cost_by_bucket.get(lbl, 0.0))
+                for lbl in req_labels
+            ]
 
         sparklines = Sparklines(
             requests=req_points,
@@ -600,6 +644,8 @@ def build_router(db_path: Path) -> APIRouter:
 
             if is_all_mode:
                 # Need dense bucket labels — fetch them via a tokens query.
+                # (Labels are metric-independent; top_n is not passed because
+                # cost ranking below decides which models to surface.)
                 ts = query_timeseries(
                     conn,
                     start,
@@ -607,15 +653,10 @@ def build_router(db_path: Path) -> APIRouter:
                     eff_bucket,
                     "tokens",
                     models_list,
-                    top_n,
                     api_keys=raw_keys,
                     tz_offset_minutes=tz_offset_minutes,
                 )
                 labels = ts.buckets
-                # Determine which per-model series to include in the output.
-                # For top_n mode, ts.series has __all__ + top-N model keys.
-                # For plain all-mode (top_n=None), ts.series has only __all__.
-                output_model_keys = [k for k in ts.series if k != "__all__"]
 
                 # Run the cost breakdown over ALL models (no model restriction)
                 # so __all__ sums across every model.
@@ -629,6 +670,26 @@ def build_router(db_path: Path) -> APIRouter:
                     api_keys=raw_keys,
                     tz_offset_minutes=tz_offset_minutes,
                 )
+
+                # Metric-specific top-model ranking for cost: rank by total
+                # computed cost, considering only models whose pricing
+                # resolves.  Unpriced models are excluded from the named
+                # series (they fall into the frontend's Other via __all__).
+                # Ties are broken lexicographically by model name.  When no
+                # model has pricing, no named series are emitted and only
+                # __all__ is returned (pricing-unavailable state).
+                effective_top_n = top_n if (top_n is not None and top_n > 0) else None
+                if effective_top_n is None:
+                    output_model_keys: list[str] = []
+                else:
+                    model_total_cost: dict[str, float] = {}
+                    for (_bkt, mdl), cost_val in cell_costs.items():
+                        model_total_cost[mdl] = (
+                            model_total_cost.get(mdl, 0.0) + cost_val
+                        )
+                    output_model_keys = _rank_priced_models(
+                        model_total_cost, model_statuses, effective_top_n
+                    )
 
                 # Build __all__ series: sum all models per bucket.
                 all_cost: dict[str, float] = {}
