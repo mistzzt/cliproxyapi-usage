@@ -19,7 +19,7 @@ function normalizeBasePath(value: string | undefined): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
-const rawConfig = window.__CLIPROXY_USAGE_CONFIG__ ?? {};
+const rawConfig = typeof window === 'undefined' ? {} : (window.__CLIPROXY_USAGE_CONFIG__ ?? {});
 const basePath = normalizeBasePath(rawConfig.basePath);
 const apiBase = rawConfig.apiBase ?? (basePath === '/' ? '/api' : `${basePath}/api`);
 const title = rawConfig.title ?? DEFAULT_TITLE;

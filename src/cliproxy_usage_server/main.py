@@ -93,6 +93,14 @@ def _quota_fallback(path: str) -> JSONResponse:
     )
 
 
+@_quota_disabled.post("/quota/{path:path}")
+def _quota_post_fallback(path: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": _QUOTA_DISABLED_DETAIL},
+    )
+
+
 def _prefixed(base_path: str, path: str) -> str:
     if base_path == "/":
         return path

@@ -1,6 +1,8 @@
 """Tests for quota response DTOs."""
 
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -198,3 +200,11 @@ class TestProviderQuotaExtraDefault:
             windows=[],
         )
         assert quota.extra == {}
+
+
+def test_shared_manual_reset_response_fixture_validates() -> None:
+    fixture = Path(__file__).parent / "fixtures" / "quota-response-manual-resets.json"
+    response = QuotaResponse.model_validate(json.loads(fixture.read_text()))
+    assert response.quota is not None
+    assert response.quota.manual_resets is not None
+    assert response.quota.manual_resets.available_count == 2

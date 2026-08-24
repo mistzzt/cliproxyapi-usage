@@ -23,3 +23,12 @@ class Provider(Protocol):
     ) -> ProviderQuota:
         """Parse the upstream OAuth response into a ProviderQuota."""
         ...
+
+
+@runtime_checkable
+class ResetProvider(Protocol):
+    """Optional capability for providers that can consume a manual reset."""
+
+    def build_reset_api_call_payload(
+        self, auth_name: str, *, account_id: str | None
+    ) -> dict[str, object]: ...

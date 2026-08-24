@@ -25,6 +25,36 @@
   gap: $space-4;
 }
 
+.manualReset {
+  margin-top: $space-4;
+  padding-top: $space-4;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.resetHeader,
+.confirmation,
+.confirmActions {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+}
+
+.resetHeader,
+.confirmation {
+  justify-content: space-between;
+}
+
+.successMessage {
+  margin-top: $space-2;
+  color: var(--color-success);
+}
+
+.resetError {
+  margin-top: $space-2;
+  color: var(--color-error);
+}
+
 .errorBanner {
   display: flex;
   align-items: center;

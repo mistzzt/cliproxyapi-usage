@@ -217,6 +217,14 @@ class QuotaWindow(BaseModel):
     resets_at: datetime | None
 
 
+class ManualResetSummary(BaseModel):
+    """Manual quota resets available for an account."""
+
+    model_config = ConfigDict(frozen=True)
+
+    available_count: int = Field(ge=0)
+
+
 class ProviderQuota(BaseModel):
     """Quota information for a single provider."""
 
@@ -226,6 +234,7 @@ class ProviderQuota(BaseModel):
     auth_name: str
     plan_type: str | None
     windows: list[QuotaWindow]
+    manual_resets: ManualResetSummary | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -22,3 +22,7 @@ class QuotaUpstreamError(QuotaModuleError):
 
 class QuotaSchemaError(QuotaModuleError):
     """Raised when a provider parser cannot decode the upstream OAuth response."""
+
+
+class QuotaCapabilityError(QuotaModuleError):
+    """Raised when a registered provider does not support an operation."""

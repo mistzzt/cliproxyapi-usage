@@ -8,6 +8,7 @@ client is built internally with the given timeout.
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,6 +25,44 @@ class AuthFileEntry:
     auth_index: str | None = None
     label: str | None = None
     email: str | None = None
+    chatgpt_account_id: str | None = None
+
+
+def _decode_id_token(value: object) -> Mapping[str, object] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    parts = value.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+    except ValueError, json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def _chatgpt_account_id(entry: Mapping[str, object]) -> str | None:
+    candidates = [entry.get("id_token")]
+    for container_name in ("metadata", "attributes"):
+        container = entry.get(container_name)
+        if isinstance(container, dict):
+            candidates.append(container.get("id_token"))
+    for candidate in candidates:
+        token = _decode_id_token(candidate)
+        if token is None:
+            continue
+        auth_claim = token.get("https://api.openai.com/auth")
+        values = [token]
+        if isinstance(auth_claim, dict):
+            values.insert(0, auth_claim)
+        for value in values:
+            account_id = value.get("chatgpt_account_id")
+            if isinstance(account_id, str) and account_id:
+                return account_id
+    return None
 
 
 @dataclass(frozen=True)
@@ -81,6 +120,7 @@ class CliProxyClient:
                 auth_index=entry.get("auth_index"),
                 label=entry.get("label"),
                 email=entry.get("email"),
+                chatgpt_account_id=_chatgpt_account_id(entry),
             )
             for entry in data["files"]
         ]

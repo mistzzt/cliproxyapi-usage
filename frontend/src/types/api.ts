@@ -147,11 +147,16 @@ export interface QuotaWindow {
   resets_at: string | null; // ISO-8601
 }
 
+export interface ManualResetSummary {
+  available_count: number;
+}
+
 export interface ProviderQuota {
   provider: QuotaProvider;
   auth_name: string;
   plan_type: string | null;
   windows: QuotaWindow[];
+  manual_resets: ManualResetSummary | null;
   extra: Record<string, unknown>;
 }
 

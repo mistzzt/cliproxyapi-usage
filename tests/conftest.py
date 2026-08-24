@@ -61,3 +61,9 @@ def claude_api_call_fixture() -> dict:  # type: ignore[type-arg]
 def codex_api_call_fixture() -> dict:  # type: ignore[type-arg]
     """Raw /v0/management/api-call envelope for Codex's /wham/usage."""
     return json.loads((_FIXTURES / "codex-api-call.json").read_text())
+
+
+@pytest.fixture
+def codex_weekly_only_api_call_fixture() -> dict:  # type: ignore[type-arg]
+    """Current Codex payload with weekly windows in primary positions."""
+    return json.loads((_FIXTURES / "codex-weekly-only-api-call.json").read_text())

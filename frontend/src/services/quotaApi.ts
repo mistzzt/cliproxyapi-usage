@@ -26,3 +26,13 @@ export function fetchQuotaAccounts(): Promise<QuotaAccountsResponse> {
 export function fetchQuota(provider: QuotaProvider, authName: string): Promise<QuotaResponse> {
   return quotaRequest<QuotaResponse>(apiPath(`/quota/${provider}/${encodeURIComponent(authName)}`));
 }
+
+export async function resetQuota(provider: QuotaProvider, authName: string): Promise<void> {
+  const resp = await fetch(
+    apiPath(`/quota/${provider}/${encodeURIComponent(authName)}/reset`),
+    { method: 'POST' },
+  );
+  if (!resp.ok) {
+    throw new QuotaFetchError(resp.status, (await resp.text()) || resp.statusText);
+  }
+}

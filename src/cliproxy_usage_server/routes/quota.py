@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 
-from cliproxy_usage_server.quota.errors import QuotaConfigError, QuotaUpstreamError
+from cliproxy_usage_server.quota.errors import (
+    QuotaCapabilityError,
+    QuotaConfigError,
+    QuotaUpstreamError,
+)
 from cliproxy_usage_server.quota.service import QuotaService
 from cliproxy_usage_server.schemas import QuotaAccountsResponse, QuotaResponse
 
@@ -38,5 +42,24 @@ def build_router(service: QuotaService) -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except QuotaUpstreamError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @r.post(
+        "/quota/{provider}/{auth_name}/reset",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def reset_quota_endpoint(provider: str, auth_name: str) -> Response:
+        """Consume one provider-supported manual quota reset."""
+        try:
+            await service.reset_quota(provider, auth_name)
+        except QuotaConfigError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except QuotaCapabilityError as exc:
+            raise HTTPException(status_code=405, detail=str(exc)) from exc
+        except QuotaUpstreamError as exc:
+            detail = str(exc)
+            if exc.upstream_status is not None:
+                detail = f"{detail} (upstream status {exc.upstream_status})"
+            raise HTTPException(status_code=502, detail=detail) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return r
