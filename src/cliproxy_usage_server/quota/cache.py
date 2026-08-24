@@ -31,6 +31,7 @@ class TtlCache[K, V]:
         self._lock: asyncio.Lock = asyncio.Lock()
         self._store: dict[K, _Entry[V]] = {}
         self._in_flight: dict[K, asyncio.Future[V]] = {}
+        self._generations: dict[K, int] = {}
 
     async def get_or_fetch(
         self,
@@ -46,9 +47,11 @@ class TtlCache[K, V]:
         """
         is_leader = False
         fut: asyncio.Future[V]
+        generation: int
 
         async with self._lock:
             entry = self._store.get(key)
+            generation = self._generations.get(key, 0)
             now = self._clock()
             if entry is not None and entry.stale_at > now:
                 return entry.value
@@ -71,7 +74,8 @@ class TtlCache[K, V]:
             value = await fetch()
         except BaseException as exc:
             async with self._lock:
-                self._in_flight.pop(key, None)
+                if self._in_flight.get(key) is fut:
+                    self._in_flight.pop(key, None)
             if not fut.done():
                 fut.set_exception(exc)
                 # Suppress "Future exception was never retrieved" when there
@@ -82,8 +86,10 @@ class TtlCache[K, V]:
             raise
 
         async with self._lock:
-            self._store[key] = _Entry(value=value, stale_at=self._clock() + ttl)
-            self._in_flight.pop(key, None)
+            if self._generations.get(key, 0) == generation:
+                self._store[key] = _Entry(value=value, stale_at=self._clock() + ttl)
+            if self._in_flight.get(key) is fut:
+                self._in_flight.pop(key, None)
 
         fut.set_result(value)
         return value
@@ -91,3 +97,5 @@ class TtlCache[K, V]:
     def invalidate(self, key: K) -> None:
         """Remove *key* from the cache so the next call re-fetches."""
         self._store.pop(key, None)
+        self._in_flight.pop(key, None)
+        self._generations[key] = self._generations.get(key, 0) + 1

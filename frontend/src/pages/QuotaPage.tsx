@@ -11,7 +11,17 @@ const PROVIDERS: { id: QuotaProvider; label: string }[] = [
 ];
 
 export default function QuotaPage() {
-  const { accounts, slots, loadAccounts, loadQuota, slotKey } = useQuotaStore();
+  const {
+    accounts,
+    slots,
+    resets,
+    loadAccounts,
+    loadQuota,
+    slotKey,
+    requestResetConfirmation,
+    cancelReset,
+    submitReset,
+  } = useQuotaStore();
 
   useEffect(() => {
     void loadAccounts().then(() => {
@@ -84,7 +94,11 @@ export default function QuotaPage() {
                         key={key}
                         account={acct}
                         slot={slot}
+                        reset={resets[key] ?? { status: 'idle' }}
                         onRefresh={() => handleRefresh(acct.provider, acct.auth_name)}
+                        onRequestReset={() => requestResetConfirmation({ provider: acct.provider, authName: acct.auth_name })}
+                        onCancelReset={() => cancelReset({ provider: acct.provider, authName: acct.auth_name })}
+                        onConfirmReset={() => { void submitReset({ provider: acct.provider, authName: acct.auth_name }); }}
                       />
                     );
                   })}

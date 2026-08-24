@@ -11,7 +11,11 @@ from typing import Any
 import pytest
 
 from cliproxy_usage_server.quota.client import ApiCallResponse, AuthFileEntry
-from cliproxy_usage_server.quota.errors import QuotaConfigError, QuotaUpstreamError
+from cliproxy_usage_server.quota.errors import (
+    QuotaCapabilityError,
+    QuotaConfigError,
+    QuotaUpstreamError,
+)
 from cliproxy_usage_server.quota.providers import PROVIDERS
 from cliproxy_usage_server.quota.service import QuotaService
 
@@ -289,5 +293,200 @@ def test_get_quota_unknown_auth_name_raises() -> None:
 
         with pytest.raises(QuotaConfigError):
             await service.get_quota("claude", "unknown.json")
+
+    asyncio.run(run())
+
+
+class _SequenceClient:
+    def __init__(
+        self, auth_files: list[AuthFileEntry], responses: list[ApiCallResponse]
+    ) -> None:
+        self.auth_files = auth_files
+        self.responses = responses
+        self.payloads: list[Mapping[str, object]] = []
+
+    async def list_auth_files(self) -> list[AuthFileEntry]:
+        return self.auth_files
+
+    async def api_call(self, payload: Mapping[str, object]) -> ApiCallResponse:
+        self.payloads.append(payload)
+        return self.responses.pop(0)
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _codex_usage(used_percent: int) -> ApiCallResponse:
+    return ApiCallResponse(
+        status_code=200,
+        header={},
+        body={
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": used_percent,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1777410854,
+                }
+            }
+        },
+    )
+
+
+def test_reset_quota_uses_capability_and_invalidates_success_cache() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [
+                AuthFileEntry(
+                    name="codex.json",
+                    type="codex",
+                    auth_index="auth-opaque",
+                    chatgpt_account_id="acct-1",
+                )
+            ],
+            [_codex_usage(70), ApiCallResponse(204, {}, None), _codex_usage(0)],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        first = await service.get_quota("codex", "codex.json")
+        await service.reset_quota("codex", "codex.json")
+        fresh = await service.get_quota("codex", "codex.json")
+
+        assert first.quota is not None and first.quota.windows[0].used_percent == 70
+        assert fresh.quota is not None and fresh.quota.windows[0].used_percent == 0
+        reset_payload = client.payloads[1]
+        assert reset_payload["authIndex"] == "auth-opaque"
+        headers = reset_payload["header"]
+        assert isinstance(headers, dict)
+        assert headers["Chatgpt-Account-Id"] == "acct-1"
+
+    asyncio.run(run())
+
+
+def test_failed_reset_preserves_cached_quota() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="codex.json", type="codex")],
+            [_codex_usage(70), ApiCallResponse(409, {}, {"error": "no credits"})],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        first = await service.get_quota("codex", "codex.json")
+        with pytest.raises(QuotaUpstreamError) as exc_info:
+            await service.reset_quota("codex", "codex.json")
+        cached = await service.get_quota("codex", "codex.json")
+
+        assert exc_info.value.upstream_status == 409
+        assert cached is first
+        assert len(client.payloads) == 2
+
+    asyncio.run(run())
+
+
+def test_successful_reset_invalidates_cached_error() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="codex.json", type="codex")],
+            [
+                ApiCallResponse(500, {}, {"error": "old failure"}),
+                ApiCallResponse(204, {}, None),
+                _codex_usage(0),
+            ],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        failed = await service.get_quota("codex", "codex.json")
+        await service.reset_quota("codex", "codex.json")
+        fresh = await service.get_quota("codex", "codex.json")
+
+        assert failed.error is not None
+        assert fresh.quota is not None
+        assert len(client.payloads) == 3
+
+    asyncio.run(run())
+
+
+def test_reset_rejects_provider_without_capability() -> None:
+    async def run() -> None:
+        client = FakeCliProxyClient(
+            auth_files=[AuthFileEntry(name="claude.json", type="claude")]
+        )
+        service = _make_service(client)
+        with pytest.raises(QuotaCapabilityError):
+            await service.reset_quota("claude", "claude.json")
+
+    asyncio.run(run())
+
+
+def test_reset_dispatch_is_capability_based_for_non_codex_provider() -> None:
+    class ResetCapableProvider:
+        provider_id = "custom"
+        auth_type = "custom"
+
+        def build_api_call_payload(self, auth_name: str) -> dict[str, object]:
+            return {"authIndex": auth_name}
+
+        def build_reset_api_call_payload(
+            self, auth_name: str, *, account_id: str | None
+        ) -> dict[str, object]:
+            return {"authIndex": auth_name, "operation": "custom-reset"}
+
+        def parse(
+            self, upstream_body: object, upstream_status: int, *, auth_name: str
+        ) -> Any:
+            raise AssertionError("not used")
+
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="custom.json", type="custom")],
+            [ApiCallResponse(204, {}, None)],
+        )
+        service = QuotaService(
+            client,  # type: ignore[arg-type]
+            {"custom": ResetCapableProvider()},  # type: ignore[dict-item]
+            success_ttl=300,
+        )
+        await service.reset_quota("custom", "custom.json")
+        assert client.payloads == [
+            {"authIndex": "custom.json", "operation": "custom-reset"}
+        ]
+
+    asyncio.run(run())
+
+
+def test_reset_prevents_in_flight_quota_fetch_from_repopulating_cache() -> None:
+    class InFlightClient:
+        def __init__(self) -> None:
+            self.first_started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.usage_calls = 0
+
+        async def list_auth_files(self) -> list[AuthFileEntry]:
+            return [AuthFileEntry(name="codex.json", type="codex")]
+
+        async def api_call(self, payload: Mapping[str, object]) -> ApiCallResponse:
+            if payload.get("method") == "POST":
+                return ApiCallResponse(204, {}, None)
+            self.usage_calls += 1
+            if self.usage_calls == 1:
+                self.first_started.set()
+                await self.release_first.wait()
+                return _codex_usage(90)
+            return _codex_usage(0)
+
+        async def aclose(self) -> None:
+            pass
+
+    async def run() -> None:
+        client = InFlightClient()
+        service = _make_service(client)  # type: ignore[arg-type]
+        old_fetch = asyncio.create_task(service.get_quota("codex", "codex.json"))
+        await client.first_started.wait()
+        await service.reset_quota("codex", "codex.json")
+        fresh = await service.get_quota("codex", "codex.json")
+        client.release_first.set()
+        old = await old_fetch
+        cached = await service.get_quota("codex", "codex.json")
+
+        assert old.quota is not None and old.quota.windows[0].used_percent == 90
+        assert fresh.quota is not None and fresh.quota.windows[0].used_percent == 0
+        assert cached.quota is not None and cached.quota.windows[0].used_percent == 0
+        assert client.usage_calls == 2
 
     asyncio.run(run())

@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cliproxy_usage_server.quota.errors import QuotaConfigError, QuotaUpstreamError
+from cliproxy_usage_server.quota.errors import (
+    QuotaCapabilityError,
+    QuotaConfigError,
+    QuotaUpstreamError,
+)
 from cliproxy_usage_server.routes.quota import build_router
 from cliproxy_usage_server.schemas import (
     QuotaAccount,
@@ -62,10 +66,13 @@ class _FakeService:
         accounts: list[QuotaAccount] | None = None,
         quota_response: QuotaResponse | None = None,
         raise_on_get_quota: Exception | None = None,
+        raise_on_reset: Exception | None = None,
     ) -> None:
         self._accounts = accounts or []
         self._quota_response = quota_response
         self._raise_on_get_quota = raise_on_get_quota
+        self._raise_on_reset = raise_on_reset
+        self.reset_calls: list[tuple[str, str]] = []
 
     async def list_accounts(self) -> list[QuotaAccount]:
         return self._accounts
@@ -75,6 +82,11 @@ class _FakeService:
             raise self._raise_on_get_quota
         assert self._quota_response is not None
         return self._quota_response
+
+    async def reset_quota(self, provider_id: str, auth_name: str) -> None:
+        self.reset_calls.append((provider_id, auth_name))
+        if self._raise_on_reset is not None:
+            raise self._raise_on_reset
 
 
 def _make_client(service: _FakeService) -> TestClient:
@@ -170,3 +182,34 @@ def test_path_params_rejected_with_bad_provider() -> None:
     resp = client.get("/api/quota/gemini/foo")
 
     assert resp.status_code == 404
+
+
+def test_reset_endpoint_returns_204_and_dispatches_path_parameters() -> None:
+    service = _FakeService()
+    client = _make_client(service)
+    response = client.post("/api/quota/codex/codex.json/reset")
+    assert response.status_code == 204
+    assert service.reset_calls == [("codex", "codex.json")]
+
+
+def test_reset_endpoint_maps_unsupported_provider_to_405() -> None:
+    service = _FakeService(
+        raise_on_reset=QuotaCapabilityError("manual reset unsupported")
+    )
+    response = _make_client(service).post("/api/quota/claude/claude.json/reset")
+    assert response.status_code == 405
+
+
+def test_reset_endpoint_maps_unknown_account_to_404() -> None:
+    service = _FakeService(raise_on_reset=QuotaConfigError("unknown account"))
+    response = _make_client(service).post("/api/quota/codex/missing.json/reset")
+    assert response.status_code == 404
+
+
+def test_reset_endpoint_maps_upstream_status_to_502_detail() -> None:
+    service = _FakeService(
+        raise_on_reset=QuotaUpstreamError("consume failed", upstream_status=409)
+    )
+    response = _make_client(service).post("/api/quota/codex/codex.json/reset")
+    assert response.status_code == 502
+    assert "409" in response.json()["detail"]

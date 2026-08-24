@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from typing import Any
 
@@ -53,6 +54,32 @@ def test_list_auth_files_passes_bearer_and_decodes_entries() -> None:
         assert len(result) == 2
         assert result[0] == AuthFileEntry(name="claude.json", type="claude")
         assert result[1] == AuthFileEntry(name="misc.json", type="gemini")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("location", ["root", "metadata", "attributes"])
+def test_list_auth_files_resolves_chatgpt_account_id(location: str) -> None:
+    claims = {"https://api.openai.com/auth": {"chatgpt_account_id": "acct-123"}}
+    encoded = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    token = f"header.{encoded}.signature"
+    entry: dict[str, object] = {"name": "codex.json", "type": "codex"}
+    if location == "root":
+        entry["id_token"] = token
+    else:
+        entry[location] = {"id_token": claims}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"files": [entry]})
+
+    async def run() -> None:
+        client = CliProxyClient(
+            base_url=_BASE_URL,
+            management_key=_KEY,
+            http_client=_make_async_client(handler),
+        )
+        result = await client.list_auth_files()
+        assert result[0].chatgpt_account_id == "acct-123"
 
     asyncio.run(run())
 

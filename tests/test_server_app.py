@@ -301,6 +301,10 @@ def test_quota_routes_return_503_when_unconfigured(
         assert resp2.status_code == 503
         assert resp2.json() == {"detail": _EXPECTED_DETAIL}
 
+        reset = client.post("/api/quota/codex/anything/reset")
+        assert reset.status_code == 503
+        assert reset.json() == {"detail": _EXPECTED_DETAIL}
+
 
 def test_quota_disabled_route_uses_configured_base_path(
     monkeypatch: pytest.MonkeyPatch,

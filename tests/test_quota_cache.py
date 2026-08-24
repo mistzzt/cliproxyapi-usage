@@ -254,3 +254,33 @@ def test_invalidate_clears_entry() -> None:
         assert call_count == 2
 
     asyncio.run(run())
+
+
+def test_invalidate_detaches_in_flight_fetch_and_blocks_stale_publish() -> None:
+    from cliproxy_usage_server.quota.cache import TtlCache
+
+    async def run() -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = 0
+
+        async def fetch() -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_started.set()
+                await release_first.wait()
+                return "stale"
+            return "fresh"
+
+        cache: TtlCache[str, str] = TtlCache()
+        old_task = asyncio.create_task(cache.get_or_fetch("k", fetch, ttl=60))
+        await first_started.wait()
+        cache.invalidate("k")
+        assert await cache.get_or_fetch("k", fetch, ttl=60) == "fresh"
+        release_first.set()
+        assert await old_task == "stale"
+        assert await cache.get_or_fetch("k", fetch, ttl=60) == "fresh"
+        assert calls == 2
+
+    asyncio.run(run())

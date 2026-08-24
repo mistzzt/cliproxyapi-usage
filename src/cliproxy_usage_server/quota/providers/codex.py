@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import ClassVar, Literal
+from uuid import uuid4
 
 from cliproxy_usage_server.quota.errors import QuotaSchemaError
-from cliproxy_usage_server.schemas import ProviderQuota, QuotaWindow
+from cliproxy_usage_server.schemas import ManualResetSummary, ProviderQuota, QuotaWindow
 
 _USER_AGENT = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+_FIVE_HOURS = 18_000
+_WEEK = 604_800
+
+
+def _window_label(limit_name: str | None, duration: object) -> str:
+    if duration == _FIVE_HOURS:
+        return f"{limit_name} 5-hour limit" if limit_name else "5-hour limit"
+    if duration == _WEEK:
+        return f"{limit_name} Weekly limit" if limit_name else "Weekly limit"
+    return f"{limit_name} limit" if limit_name else "Account limit"
 
 
 def _window_from_raw(
@@ -38,7 +50,7 @@ def _append_window_from_rate_limit(
     windows: list[QuotaWindow],
     *,
     window_id: str,
-    label: str,
+    limit_name: str | None,
     rate_limit: dict[object, object],
     key: str,
 ) -> None:
@@ -49,7 +61,7 @@ def _append_window_from_rate_limit(
     windows.append(
         _window_from_raw(
             window_id,
-            label,
+            _window_label(limit_name, raw_window.get("limit_window_seconds")),
             raw_window.get("used_percent"),
             raw_window.get("reset_at"),
         )
@@ -71,6 +83,26 @@ class CodexProvider:
                 "Authorization": "Bearer $TOKEN$",
                 "User-Agent": _USER_AGENT,
             },
+        }
+
+    def build_reset_api_call_payload(
+        self, auth_name: str, *, account_id: str | None
+    ) -> dict[str, object]:
+        headers = {
+            "Authorization": "Bearer $TOKEN$",
+            "Content-Type": "application/json",
+            "User-Agent": _USER_AGENT,
+        }
+        if account_id is not None:
+            headers["Chatgpt-Account-Id"] = account_id
+        return {
+            "authIndex": auth_name,
+            "method": "POST",
+            "url": "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume",
+            "header": headers,
+            "data": json.dumps(
+                {"redeem_request_id": str(uuid4())}, separators=(",", ":")
+            ),
         }
 
     def parse(
@@ -100,14 +132,14 @@ class CodexProvider:
             _append_window_from_rate_limit(
                 windows,
                 window_id="primary",
-                label="Primary 5h Window",
+                limit_name=None,
                 rate_limit=rate_limit,
                 key="primary_window",
             )
             _append_window_from_rate_limit(
                 windows,
                 window_id="secondary",
-                label="Secondary 7d Window",
+                limit_name=None,
                 rate_limit=rate_limit,
                 key="secondary_window",
             )
@@ -126,7 +158,9 @@ class CodexProvider:
                     windows.append(
                         _window_from_raw(
                             f"additional:{limit_name}",
-                            limit_name,
+                            _window_label(
+                                limit_name, entry.get("limit_window_seconds")
+                            ),
                             entry.get("used_percent"),
                             entry.get("reset_at"),
                         )
@@ -138,22 +172,34 @@ class CodexProvider:
                     _append_window_from_rate_limit(
                         windows,
                         window_id=f"additional:{limit_name}:primary",
-                        label=f"{limit_name} Primary 5h Window",
+                        limit_name=limit_name,
                         rate_limit=additional_rate_limit,
                         key="primary_window",
                     )
                     _append_window_from_rate_limit(
                         windows,
                         window_id=f"additional:{limit_name}:secondary",
-                        label=f"{limit_name} Secondary 7d Window",
+                        limit_name=limit_name,
                         rate_limit=additional_rate_limit,
                         key="secondary_window",
                     )
+
+        manual_resets = None
+        raw_reset_credits = upstream_body.get("rate_limit_reset_credits")
+        if isinstance(raw_reset_credits, dict):
+            available_count = raw_reset_credits.get("available_count")
+            if (
+                isinstance(available_count, int)
+                and not isinstance(available_count, bool)
+                and available_count >= 0
+            ):
+                manual_resets = ManualResetSummary(available_count=available_count)
 
         return ProviderQuota(
             provider="codex",
             auth_name=auth_name,
             plan_type=plan_type_str,
             windows=windows,
+            manual_resets=manual_resets,
             extra=extra,
         )

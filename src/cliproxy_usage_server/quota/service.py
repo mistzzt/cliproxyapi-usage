@@ -34,11 +34,12 @@ from cliproxy_usage_server.quota.client import (
     AuthFileEntry,
 )
 from cliproxy_usage_server.quota.errors import (
+    QuotaCapabilityError,
     QuotaConfigError,
     QuotaSchemaError,
     QuotaUpstreamError,
 )
-from cliproxy_usage_server.quota.providers.base import Provider
+from cliproxy_usage_server.quota.providers.base import Provider, ResetProvider
 from cliproxy_usage_server.schemas import (
     QuotaAccount,
     QuotaError,
@@ -120,6 +121,7 @@ class QuotaService:
 
         # Error cache: key → (response, wall-clock expiry)
         self._error_cache: dict[str, tuple[QuotaResponse, datetime]] = {}
+        self._cache_generations: dict[str, int] = {}
 
         # Accounts cache: simple (list | None, expiry) pair
         self._accounts_cache: tuple[list[QuotaAccount], datetime] | None = None
@@ -178,6 +180,7 @@ class QuotaService:
         entry = await self._resolve_auth_entry(provider_id, auth_name)
 
         cache_key = f"{provider_id}::{auth_name}"
+        generation = self._cache_generations.get(cache_key, 0)
 
         # 1. Check error cache first (errors have a shorter TTL).
         now = self._clock()
@@ -206,8 +209,42 @@ class QuotaService:
                 fetched_at=fetched_at,
                 stale_at=stale_at,
             )
-            self._error_cache[cache_key] = (error_resp, stale_at)
+            if self._cache_generations.get(cache_key, 0) == generation:
+                self._error_cache[cache_key] = (error_resp, stale_at)
             return error_resp
+
+    async def reset_quota(self, provider_id: str, auth_name: str) -> None:
+        """Consume one manual reset for an account and invalidate its caches."""
+        provider = self._providers.get(provider_id)
+        if provider is None:
+            raise QuotaConfigError(
+                f"Unknown provider '{provider_id}'. "
+                f"Known providers: {sorted(self._providers)}"
+            )
+        entry = await self._resolve_auth_entry(provider_id, auth_name)
+        if not isinstance(provider, ResetProvider):
+            raise QuotaCapabilityError(
+                f"Provider '{provider_id}' does not support manual quota resets"
+            )
+
+        auth_ref = entry.auth_index or entry.name
+        response = await self._client.api_call(
+            provider.build_reset_api_call_payload(
+                auth_ref, account_id=entry.chatgpt_account_id
+            )
+        )
+        if not 200 <= response.status_code < 300:
+            raise QuotaUpstreamError(
+                f"Reset endpoint returned HTTP {response.status_code}",
+                upstream_status=response.status_code,
+            )
+
+        cache_key = f"{provider_id}::{auth_name}"
+        self._cache_generations[cache_key] = (
+            self._cache_generations.get(cache_key, 0) + 1
+        )
+        self._quota_cache.invalidate(cache_key)
+        self._error_cache.pop(cache_key, None)
 
     async def aclose(self) -> None:
         """Close the underlying client."""
