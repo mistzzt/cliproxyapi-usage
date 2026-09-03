@@ -27,6 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_requests_source    ON requests(source);
 CREATE INDEX IF NOT EXISTS idx_requests_model     ON requests(model);
 CREATE INDEX IF NOT EXISTS idx_requests_api_key   ON requests(api_key);
 CREATE INDEX IF NOT EXISTS idx_requests_source_ts ON requests(source, timestamp);
+CREATE INDEX IF NOT EXISTS idx_requests_ts_utc    ON requests(datetime(timestamp));
 """
 
 _INSERT = """

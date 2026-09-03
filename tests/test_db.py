@@ -45,8 +45,8 @@ def test_open_db_creates_requests_table(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_open_db_creates_four_indexes(tmp_path: Path) -> None:
-    """open_db creates exactly the 4 named indexes (excluding SQLite internal ones)."""
+def test_open_db_creates_five_indexes(tmp_path: Path) -> None:
+    """open_db creates exactly the 5 named indexes (excluding SQLite internal ones)."""
     conn = open_db(tmp_path / "usage.db")
     rows = conn.execute(
         "SELECT name FROM sqlite_master "
@@ -59,6 +59,7 @@ def test_open_db_creates_four_indexes(tmp_path: Path) -> None:
         "idx_requests_model",
         "idx_requests_api_key",
         "idx_requests_source_ts",
+        "idx_requests_ts_utc",
     }
     assert index_names == expected
     conn.close()

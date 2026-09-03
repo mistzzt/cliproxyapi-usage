@@ -13,6 +13,7 @@ from conftest import usage_export_queue_elements
 from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_collect.schemas import RequestRecord
 from cliproxy_usage_server.aggregate import (
+    _range_where,
     query_api_stats,
     query_credential_stats,
     query_distinct_models,
@@ -580,3 +581,17 @@ def test_timeseries_top_n_fewer_models_than_n(
 
     # All models should appear (not padded to 999)
     assert set(ts.series.keys()) == {"__all__"} | all_models
+
+
+def test_range_where_uses_ts_utc_index(seeded_db_path: Path) -> None:
+    """The range predicate is served by idx_requests_ts_utc, not a table scan."""
+    conn = open_ro(seeded_db_path)
+    clause, params = _range_where(_START, _END, conn)
+    plan = conn.execute(
+        f"EXPLAIN QUERY PLAN SELECT COUNT(*) FROM requests {clause}", params
+    ).fetchall()
+    conn.close()
+
+    plan_text = " ".join(str(row[3]) for row in plan)
+    assert "idx_requests_ts_utc" in plan_text
+    assert "SCAN requests" not in plan_text
