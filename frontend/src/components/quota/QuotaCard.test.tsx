@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderQuota, QuotaAccount } from '@/types/api';
 import type { ResetActionState } from '@/stores/quotaResetState';
+import { formatAbsolute } from '@/utils/time';
 import QuotaCard from './QuotaCard';
 
 const account: QuotaAccount = { provider: 'claude', auth_name: 'other.json', display_name: null };
@@ -32,7 +33,7 @@ describe('QuotaCard manual reset capability', () => {
   test('renders count and action from a non-Codex response capability', () => {
     const markup = render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 2 }, extra: {},
+      manual_resets: { available_count: 2, credits: [], credits_error: null }, extra: {},
     });
     expect(markup).toContain('Manual resets: 2');
     expect(markup).toContain('Reset quota');
@@ -41,23 +42,73 @@ describe('QuotaCard manual reset capability', () => {
   test('shows zero without an action', () => {
     const markup = render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 0 }, extra: {},
+      manual_resets: { available_count: 0, credits: [], credits_error: null }, extra: {},
     });
     expect(markup).toContain('Manual resets: 0');
     expect(markup).not.toContain('Reset quota');
     expect(render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 0 }, extra: {},
+      manual_resets: { available_count: 0, credits: [], credits_error: null }, extra: {},
     }, { status: 'confirming' })).not.toContain('Consume one manual reset?');
   });
 
   test('renders confirmation and account-local feedback states', () => {
     const quota: ProviderQuota = {
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 1 }, extra: {},
+      manual_resets: { available_count: 1, credits: [], credits_error: null }, extra: {},
     };
     expect(render(quota, { status: 'confirming' })).toContain('Consume one manual reset?');
     expect(render(quota, { status: 'loading' })).toContain('disabled');
     expect(render(quota, { status: 'error', message: 'No reset credit' })).toContain('No reset credit');
+  });
+});
+
+describe('QuotaCard manual reset credits', () => {
+  const base: ProviderQuota = {
+    provider: 'codex', auth_name: 'codex.json', plan_type: 'pro', windows: [],
+    manual_resets: { available_count: 2, credits: [], credits_error: null }, extra: {},
+  };
+  const credits = [
+    { id: 'a', granted_at: '2026-04-01T00:00:00Z', expires_at: '2026-06-01T00:00:00Z' },
+    { id: 'b', granted_at: null, expires_at: '2026-06-15T00:00:00Z' },
+  ];
+
+  test('renders one expiry row per credit with absolute and relative time', () => {
+    const markup = render({ ...base, manual_resets: { available_count: 2, credits, credits_error: null } });
+    expect(markup).toContain('Reset 1');
+    expect(markup).toContain('Reset 2');
+    expect(markup).toContain(formatAbsolute('2026-06-01T00:00:00Z'));
+    expect(markup).toContain(formatAbsolute('2026-06-15T00:00:00Z'));
+    expect(markup).toMatch(/\((in .+|.+ ago|just now)\)/);
+    expect(markup).not.toContain('Expiry unavailable');
+  });
+
+  test('shows the error text when credits are unavailable', () => {
+    const markup = render({
+      ...base, manual_resets: { available_count: 2, credits: [], credits_error: 'HTTP 500' },
+    });
+    expect(markup).toContain('Manual resets: 2');
+    expect(markup).toContain('Expiry unavailable: HTTP 500');
+    expect(markup).not.toContain('Reset 1');
+  });
+
+  test('renders nothing extra for zero count without credits or error', () => {
+    const markup = render({
+      ...base, manual_resets: { available_count: 0, credits: [], credits_error: null },
+    });
+    expect(markup).toContain('Manual resets: 0');
+    expect(markup).not.toContain('Reset 1');
+    expect(markup).not.toContain('Expiry unavailable');
+  });
+
+  test('confirmation names the earliest-expiring credit', () => {
+    const shuffled = [credits[1]!, credits[0]!];
+    const markup = render(
+      { ...base, manual_resets: { available_count: 2, credits: shuffled, credits_error: null } },
+      { status: 'confirming' },
+    );
+    expect(markup).toContain(
+      `This spends the credit expiring ${formatAbsolute('2026-06-01T00:00:00Z')}.`,
+    );
   });
 });

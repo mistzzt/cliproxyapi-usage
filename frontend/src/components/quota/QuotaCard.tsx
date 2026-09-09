@@ -1,7 +1,12 @@
 import type { ProviderQuota, QuotaAccount, QuotaProvider } from '@/types/api';
 import type { QuotaSlotState } from '@/stores/quotaStore';
-import { canStartReset, manualResetCount, type ResetActionState } from '@/stores/quotaResetState';
-import { formatRelative } from '@/utils/time';
+import {
+  canStartReset,
+  manualResetCount,
+  nextExpiringCredit,
+  type ResetActionState,
+} from '@/stores/quotaResetState';
+import { formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import QuotaWindowBar from './QuotaWindowBar';
@@ -110,10 +115,38 @@ export default function QuotaCard({
     );
   }
 
+  function renderCredits(quota: ProviderQuota) {
+    const credits = quota.manual_resets?.credits ?? [];
+    const error = quota.manual_resets?.credits_error ?? null;
+    if (credits.length > 0) {
+      return (
+        <ul className={styles.creditList}>
+          {credits.map((credit, index) => (
+            <li key={credit.id || index} className={styles.creditRow}>
+              <span>Reset {index + 1}</span>
+              <span className={styles.creditExpiry}>
+                expires {formatAbsolute(credit.expires_at)} ({formatRelative(credit.expires_at)})
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    if (error !== null) {
+      return <div className={styles.creditError}>Expiry unavailable: {error}</div>;
+    }
+    return null;
+  }
+
   function renderReset(quota: ProviderQuota) {
     const count = manualResetCount(quota);
     if (count === null) return null;
     const running = reset.status === 'loading';
+    const spending = nextExpiringCredit(quota);
+    const prompt =
+      spending === null
+        ? 'Consume one manual reset?'
+        : `Consume one manual reset? This spends the credit expiring ${formatAbsolute(spending.expires_at)}.`;
     return (
       <div className={styles.manualReset}>
         <div className={styles.resetHeader}>
@@ -124,9 +157,10 @@ export default function QuotaCard({
             </Button>
           )}
         </div>
+        {renderCredits(quota)}
         {reset.status === 'confirming' && canStartReset(quota) && (
           <div className={styles.confirmation}>
-            <span>Consume one manual reset?</span>
+            <span>{prompt}</span>
             <div className={styles.confirmActions}>
               <Button variant="secondary" onClick={onCancelReset}>Cancel</Button>
               <Button onClick={onConfirmReset}>Consume reset</Button>

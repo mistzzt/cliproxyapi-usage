@@ -147,8 +147,17 @@ export interface QuotaWindow {
   resets_at: string | null; // ISO-8601
 }
 
+export interface ManualResetCredit {
+  id: string;
+  granted_at: string | null; // ISO-8601
+  expires_at: string; // ISO-8601
+}
+
 export interface ManualResetSummary {
   available_count: number;
+  /** Sorted by expires_at ascending; empty when per-credit detail is unavailable. */
+  credits: ManualResetCredit[];
+  credits_error: string | null;
 }
 
 export interface ProviderQuota {

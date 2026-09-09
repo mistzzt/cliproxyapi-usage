@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal, Protocol, runtime_checkable
 
-from cliproxy_usage_server.schemas import ProviderQuota
+from cliproxy_usage_server.schemas import ManualResetCredit, ProviderQuota
 
 
 @runtime_checkable
@@ -32,3 +33,24 @@ class ResetProvider(Protocol):
     def build_reset_api_call_payload(
         self, auth_name: str, *, account_id: str | None
     ) -> dict[str, object]: ...
+
+
+@dataclass(frozen=True)
+class ResetCredits:
+    """Per-credit detail from a provider's reset-credits endpoint."""
+
+    available_count: int | None
+    credits: list[ManualResetCredit] = field(default_factory=list)
+
+
+@runtime_checkable
+class ResetCreditsProvider(Protocol):
+    """Optional capability for providers that expose per-credit reset expiry."""
+
+    def build_reset_credits_api_call_payload(
+        self, auth_name: str, *, account_id: str | None
+    ) -> dict[str, object]: ...
+
+    def parse_reset_credits(self, upstream_body: object) -> ResetCredits:
+        """Parse the reset-credits body; raises QuotaSchemaError when malformed."""
+        ...

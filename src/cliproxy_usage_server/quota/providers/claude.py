@@ -17,11 +17,15 @@ _WINDOW_LABELS: dict[str, str] = {
     "seven_day_sonnet": "Seven Day (Sonnet)",
     "seven_day_cowork": "Seven Day (Cowork)",
     "seven_day_omelette": "Seven Day (Omelette)",
-    "iguana_necktie": "Iguana Necktie",
     "omelette_promotional": "Omelette Promotional",
 }
 
 _EXTRA_KEYS = {"extra_usage"}
+# Legacy top-level key that Anthropic used for the Fable window before limits[].
+_LEGACY_FABLE_KEY = "iguana_necktie"
+_FABLE_WINDOW_ID = "seven_day_fable"
+_FABLE_LABEL = "7-day Fable 5"
+_FABLE_NAMES = {"fable", "fable 5"}
 
 
 def _key_to_label(key: str) -> str:
@@ -60,6 +64,56 @@ def _parse_window(key: str, value: dict[str, object]) -> QuotaWindow:
     )
 
 
+def _fable_limit_window(limit: object) -> QuotaWindow | None:
+    """Convert one limits[] entry into the Fable window; None if it doesn't qualify."""
+    if not isinstance(limit, dict) or limit.get("kind") != "weekly_scoped":
+        return None
+    scope = limit.get("scope")
+    model = scope.get("model") if isinstance(scope, dict) else None
+    name = model.get("display_name") if isinstance(model, dict) else None
+    if not isinstance(name, str) or name.strip().lower() not in _FABLE_NAMES:
+        return None
+    percent = limit.get("percent")
+    if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+        return None
+    resets_at_raw = limit.get("resets_at")
+    resets_at: datetime | None = None
+    if resets_at_raw is not None:
+        try:
+            resets_at = datetime.fromisoformat(str(resets_at_raw))
+        except ValueError:
+            return None
+    return QuotaWindow(
+        id=_FABLE_WINDOW_ID,
+        label=_FABLE_LABEL,
+        used_percent=float(percent),
+        resets_at=resets_at,
+    )
+
+
+def _fable_window(upstream_body: dict[object, object]) -> QuotaWindow | None:
+    """Prefer the active limits[] Fable entry, then the first one, then legacy key."""
+    limits = upstream_body.get("limits")
+    if isinstance(limits, list):
+        candidates = [
+            (window, limit.get("is_active") is True)
+            for limit in limits
+            if isinstance(limit, dict)
+            and (window := _fable_limit_window(limit)) is not None
+        ]
+        active = next((w for w, is_active in candidates if is_active), None)
+        if active is not None:
+            return active
+        if candidates:
+            return candidates[0][0]
+
+    legacy = upstream_body.get(_LEGACY_FABLE_KEY)
+    if _is_window_shape(legacy):
+        window = _parse_window(_FABLE_WINDOW_ID, legacy)  # type: ignore[arg-type]
+        return window.model_copy(update={"label": _FABLE_LABEL})
+    return None
+
+
 class ClaudeProvider:
     """Quota provider for the Anthropic Claude API."""
 
@@ -95,13 +149,17 @@ class ClaudeProvider:
                 extra[key] = value
                 continue
 
-            # Skip null values (provider signals "not applicable")
-            if value is None:
+            # Fable is handled separately (limits[] first, legacy key as fallback).
+            if key in (_LEGACY_FABLE_KEY, "limits") or value is None:
                 continue
 
             # Accept any dict whose shape matches a window
             if _is_window_shape(value):
                 windows.append(_parse_window(key, value))  # type: ignore[arg-type]
+
+        fable = _fable_window(upstream_body)
+        if fable is not None:
+            windows.append(fable)
 
         return ProviderQuota(
             provider="claude",

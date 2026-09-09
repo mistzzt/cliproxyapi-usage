@@ -62,9 +62,7 @@ def test_openai_cached_exceeds_input_clamps() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    "provider", ["anthropic", "gemini", "openrouter", None]
-)
+@pytest.mark.parametrize("provider", ["anthropic", "gemini", "openrouter", None])
 def test_non_openai_providers_passthrough(provider: str | None) -> None:
     """Non-OpenAI providers keep cached_tokens in cache_read and input untouched."""
     out = split_tokens_for_cost(
