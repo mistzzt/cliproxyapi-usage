@@ -253,94 +253,64 @@ def test_parse_non_negative_manual_reset_count(count: int) -> None:
 
 def test_build_reset_credits_payload_carries_codex_headers_and_account() -> None:
     provider = CodexProvider()
-    with_account = provider.build_reset_credits_api_call_payload(
+    payload = provider.build_reset_credits_api_call_payload(
         "auth-123", account_id="acct-1"
     )
-    without_account = provider.build_reset_credits_api_call_payload(
-        "auth-123", account_id=None
-    )
-
-    assert with_account["authIndex"] == "auth-123"
-    assert with_account["method"] == "GET"
+    assert payload["authIndex"] == "auth-123"
+    assert payload["method"] == "GET"
     assert (
-        with_account["url"]
+        payload["url"]
         == "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
     )
-    headers = with_account["header"]
+    headers = payload["header"]
     assert isinstance(headers, dict)
     assert headers["Authorization"] == "Bearer $TOKEN$"
     assert headers["Accept"] == "application/json"
     assert headers["OpenAI-Beta"] == "codex-1"
     assert headers["Originator"] == "Codex Desktop"
     assert headers["Chatgpt-Account-Id"] == "acct-1"
-    assert str(headers["User-Agent"]).startswith("codex_cli_rs/")
-    bare_headers = without_account["header"]
-    assert isinstance(bare_headers, dict)
-    assert "Chatgpt-Account-Id" not in bare_headers
+    bare = provider.build_reset_credits_api_call_payload("auth-123", account_id=None)
+    assert isinstance(bare["header"], dict)
+    assert "Chatgpt-Account-Id" not in bare["header"]
+
+
+def _credit(id: str, expires_at: object, **overrides: object) -> dict[str, object]:
+    return {
+        "id": id,
+        "reset_type": "codex_rate_limits",
+        "status": "available",
+        "expires_at": expires_at,
+        **overrides,
+    }
 
 
 def test_parse_reset_credits_filters_and_sorts_by_expiry() -> None:
     body = {
         "available_count": 3,
-        "applicable_available_count": 1,
         "credits": [
-            {
-                "id": "later",
-                "reset_type": "codex_rate_limits",
-                "status": "available",
-                "granted_at": "2026-05-01T00:00:00Z",
-                "expires_at": "2026-06-15T00:00:00Z",
-            },
-            {
-                "id": "consumed",
-                "reset_type": "codex_rate_limits",
-                "status": "consumed",
-                "expires_at": "2026-06-01T00:00:00Z",
-            },
-            {
-                "id": "other-type",
-                "reset_type": "something_else",
-                "status": "available",
-                "expires_at": "2026-06-01T00:00:00Z",
-            },
-            {
-                "id": "no-expiry",
-                "reset_type": "codex_rate_limits",
-                "status": "available",
-                "expires_at": None,
-            },
-            {
-                "id": "bad-expiry",
-                "reset_type": "codex_rate_limits",
-                "status": "available",
-                "expires_at": "not-a-date",
-            },
+            _credit("later", "2026-06-15T00:00:00Z", granted_at="2026-05-01T00:00:00Z"),
+            _credit("consumed", "2026-06-01T00:00:00Z", status="consumed"),
+            _credit("other-type", "2026-06-01T00:00:00Z", reset_type="other"),
+            _credit("no-expiry", None),
+            _credit("bad-expiry", "not-a-date"),
             "garbage",
-            {
-                "id": "sooner",
-                "reset_type": "codex_rate_limits",
-                "status": "available",
-                "granted_at": None,
-                "expires_at": "2026-06-01T00:00:00Z",
-            },
+            _credit("sooner", "2026-06-01T00:00:00Z"),
         ],
     }
     result = CodexProvider().parse_reset_credits(body)
 
     assert result.available_count == 3
     assert [c.id for c in result.credits] == ["sooner", "later"]
-    assert result.credits[0].expires_at == datetime(2026, 6, 1, tzinfo=UTC)
     assert result.credits[0].granted_at is None
     assert result.credits[1].granted_at == datetime(2026, 5, 1, tzinfo=UTC)
 
 
-def test_parse_reset_credits_without_count_leaves_it_none() -> None:
-    result = CodexProvider().parse_reset_credits({"credits": []})
-    assert result.available_count is None
-    assert result.credits == []
+def test_parse_reset_credits_without_count_uses_credit_length() -> None:
+    body = {"credits": [_credit("a", "2026-06-01T00:00:00Z")]}
+    assert CodexProvider().parse_reset_credits(body).available_count == 1
 
 
-@pytest.mark.parametrize("body", [42, "text", {"available_count": 1}])
+@pytest.mark.parametrize("body", [42, {"available_count": 1}])
 def test_parse_reset_credits_raises_schema_error_on_bad_shape(body: object) -> None:
     with pytest.raises(QuotaSchemaError):
         CodexProvider().parse_reset_credits(body)

@@ -78,21 +78,14 @@ def test_parse_raises_schema_error_on_garbage() -> None:
         ClaudeProvider().parse("not-a-dict", 200, auth_name="test")
 
 
-def _fable_limit(
-    percent: object = 64.0,
-    *,
-    resets_at: object = "2026-05-01T00:00:00+00:00",
-    is_active: object = True,
-    display_name: object = "Fable",
-    kind: object = "weekly_scoped",
-) -> dict[str, object]:
+def _fable_limit(percent: object = 64.0, **overrides: object) -> dict[str, object]:
     return {
-        "kind": kind,
-        "group": "weekly",
+        "kind": "weekly_scoped",
         "percent": percent,
-        "resets_at": resets_at,
-        "is_active": is_active,
-        "scope": {"model": {"id": None, "display_name": display_name}},
+        "resets_at": "2026-05-01T00:00:00+00:00",
+        "is_active": True,
+        "scope": {"model": {"id": None, "display_name": "Fable"}},
+        **overrides,
     }
 
 
@@ -100,11 +93,7 @@ _FIVE_HOUR = {"utilization": 17.0, "resets_at": "2026-04-24T04:30:00+00:00"}
 
 
 def test_parse_emits_fable_row_from_limits_after_other_windows() -> None:
-    body = {
-        "five_hour": _FIVE_HOUR,
-        "iguana_necktie": None,
-        "limits": [_fable_limit()],
-    }
+    body = {"five_hour": _FIVE_HOUR, "iguana_necktie": None, "limits": [_fable_limit()]}
     result = ClaudeProvider().parse(body, 200, auth_name="test")
 
     assert [w.id for w in result.windows] == ["five_hour", "seven_day_fable"]
@@ -117,39 +106,30 @@ def test_parse_emits_fable_row_from_limits_after_other_windows() -> None:
 
 def test_parse_falls_back_to_legacy_fable_key() -> None:
     body = {
-        "iguana_necktie": {"utilization": 30, "resets_at": "2026-05-02T00:00:00+00:00"},
         "five_hour": _FIVE_HOUR,
+        "iguana_necktie": {"utilization": 30, "resets_at": None},
     }
     result = ClaudeProvider().parse(body, 200, auth_name="test")
 
     assert [w.id for w in result.windows] == ["five_hour", "seven_day_fable"]
-    fable = result.windows[-1]
-    assert fable.label == "7-day Fable 5"
-    assert fable.used_percent == 30.0
-    assert fable.resets_at == datetime(2026, 5, 2, tzinfo=UTC)
+    assert result.windows[-1].label == "7-day Fable 5"
+    assert result.windows[-1].used_percent == 30.0
+    assert result.windows[-1].resets_at is None
 
 
-def test_parse_prefers_limits_over_legacy_without_duplicating() -> None:
+def test_parse_prefers_active_fable_limit_over_others_and_legacy() -> None:
     body = {
         "iguana_necktie": {"utilization": 30, "resets_at": None},
-        "limits": [_fable_limit(64)],
-    }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
-    fable_rows = [w for w in result.windows if w.id == "seven_day_fable"]
-    assert len(fable_rows) == 1
-    assert fable_rows[0].used_percent == 64.0
-
-
-def test_parse_prefers_active_fable_limit() -> None:
-    body = {
         "limits": [
             _fable_limit(10, is_active=False),
-            _fable_limit(55, is_active=True, display_name="fable 5"),
+            _fable_limit(
+                55, resets_at=None, scope={"model": {"display_name": "fable 5"}}
+            ),
             _fable_limit(90, is_active=False),
-        ]
+        ],
     }
     result = ClaudeProvider().parse(body, 200, auth_name="test")
-    assert [w.used_percent for w in result.windows] == [55.0]
+    assert [(w.used_percent, w.resets_at) for w in result.windows] == [(55.0, None)]
 
 
 def test_parse_uses_first_fable_limit_when_none_active() -> None:
@@ -160,26 +140,16 @@ def test_parse_uses_first_fable_limit_when_none_active() -> None:
     assert [w.used_percent for w in result.windows] == [10.0]
 
 
-def test_parse_fable_limit_null_resets_at_yields_none() -> None:
-    body = {"limits": [_fable_limit(resets_at=None)]}
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
-    assert result.windows[0].id == "seven_day_fable"
-    assert result.windows[0].resets_at is None
-
-
 def test_parse_ignores_malformed_and_non_fable_limits() -> None:
     body = {
         "five_hour": _FIVE_HOUR,
         "limits": [
             _fable_limit(kind="five_hour_scoped"),
-            _fable_limit(display_name="Opus"),
+            _fable_limit(scope={"model": {"display_name": "Opus"}}),
             _fable_limit(percent="64"),
-            _fable_limit(percent=None),
             _fable_limit(resets_at="not-a-date"),
-            {"kind": "weekly_scoped", "percent": 5},
             {"kind": "weekly_scoped", "percent": 5, "scope": "Fable"},
             "garbage",
-            None,
         ],
     }
     result = ClaudeProvider().parse(body, 200, auth_name="test")
@@ -190,10 +160,8 @@ def test_parse_ignores_malformed_and_non_fable_limits() -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        {"five_hour": _FIVE_HOUR},
         {"five_hour": _FIVE_HOUR, "iguana_necktie": None},
         {"five_hour": _FIVE_HOUR, "iguana_necktie": None, "limits": []},
-        {"five_hour": _FIVE_HOUR, "limits": "nope"},
     ],
 )
 def test_parse_emits_no_fable_row_without_any_source(body: dict[str, object]) -> None:

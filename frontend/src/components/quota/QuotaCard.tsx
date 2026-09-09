@@ -1,11 +1,6 @@
 import type { ProviderQuota, QuotaAccount, QuotaProvider } from '@/types/api';
 import type { QuotaSlotState } from '@/stores/quotaStore';
-import {
-  canStartReset,
-  manualResetCount,
-  nextExpiringCredit,
-  type ResetActionState,
-} from '@/stores/quotaResetState';
+import { canStartReset, manualResetCount, type ResetActionState } from '@/stores/quotaResetState';
 import { formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -115,16 +110,15 @@ export default function QuotaCard({
     );
   }
 
-  function renderCredits(quota: ProviderQuota) {
-    const credits = quota.manual_resets?.credits ?? [];
-    const error = quota.manual_resets?.credits_error ?? null;
-    if (credits.length > 0) {
+  function renderCredits({ manual_resets }: ProviderQuota) {
+    if (manual_resets === null) return null;
+    if (manual_resets.credits.length > 0) {
       return (
         <ul className={styles.creditList}>
-          {credits.map((credit, index) => (
+          {manual_resets.credits.map((credit, index) => (
             <li key={credit.id || index} className={styles.creditRow}>
               <span>Reset {index + 1}</span>
-              <span className={styles.creditExpiry}>
+              <span>
                 expires {formatAbsolute(credit.expires_at)} ({formatRelative(credit.expires_at)})
               </span>
             </li>
@@ -132,8 +126,8 @@ export default function QuotaCard({
         </ul>
       );
     }
-    if (error !== null) {
-      return <div className={styles.creditError}>Expiry unavailable: {error}</div>;
+    if (manual_resets.credits_error !== null) {
+      return <div className={styles.creditError}>Expiry unavailable: {manual_resets.credits_error}</div>;
     }
     return null;
   }
@@ -142,11 +136,11 @@ export default function QuotaCard({
     const count = manualResetCount(quota);
     if (count === null) return null;
     const running = reset.status === 'loading';
-    const spending = nextExpiringCredit(quota);
-    const prompt =
-      spending === null
-        ? 'Consume one manual reset?'
-        : `Consume one manual reset? This spends the credit expiring ${formatAbsolute(spending.expires_at)}.`;
+    // Credits arrive sorted by expiry, so the first one is the credit a reset spends.
+    const spending = quota.manual_resets?.credits[0];
+    const prompt = spending
+      ? `Consume one manual reset? This spends the credit expiring ${formatAbsolute(spending.expires_at)}.`
+      : 'Consume one manual reset?';
     return (
       <div className={styles.manualReset}>
         <div className={styles.resetHeader}>

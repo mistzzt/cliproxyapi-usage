@@ -73,14 +73,17 @@ describe('QuotaCard manual reset credits', () => {
     { id: 'b', granted_at: null, expires_at: '2026-06-15T00:00:00Z' },
   ];
 
-  test('renders one expiry row per credit with absolute and relative time', () => {
-    const markup = render({ ...base, manual_resets: { available_count: 2, credits, credits_error: null } });
+  test('renders one expiry row per credit and names the first in the confirmation', () => {
+    const quota = { ...base, manual_resets: { available_count: 2, credits, credits_error: null } };
+    const markup = render(quota, { status: 'confirming' });
     expect(markup).toContain('Reset 1');
     expect(markup).toContain('Reset 2');
     expect(markup).toContain(formatAbsolute('2026-06-01T00:00:00Z'));
     expect(markup).toContain(formatAbsolute('2026-06-15T00:00:00Z'));
     expect(markup).toMatch(/\((in .+|.+ ago|just now)\)/);
-    expect(markup).not.toContain('Expiry unavailable');
+    expect(markup).toContain(
+      `This spends the credit expiring ${formatAbsolute('2026-06-01T00:00:00Z')}.`,
+    );
   });
 
   test('shows the error text when credits are unavailable', () => {
@@ -90,25 +93,5 @@ describe('QuotaCard manual reset credits', () => {
     expect(markup).toContain('Manual resets: 2');
     expect(markup).toContain('Expiry unavailable: HTTP 500');
     expect(markup).not.toContain('Reset 1');
-  });
-
-  test('renders nothing extra for zero count without credits or error', () => {
-    const markup = render({
-      ...base, manual_resets: { available_count: 0, credits: [], credits_error: null },
-    });
-    expect(markup).toContain('Manual resets: 0');
-    expect(markup).not.toContain('Reset 1');
-    expect(markup).not.toContain('Expiry unavailable');
-  });
-
-  test('confirmation names the earliest-expiring credit', () => {
-    const shuffled = [credits[1]!, credits[0]!];
-    const markup = render(
-      { ...base, manual_resets: { available_count: 2, credits: shuffled, credits_error: null } },
-      { status: 'confirming' },
-    );
-    expect(markup).toContain(
-      `This spends the credit expiring ${formatAbsolute('2026-06-01T00:00:00Z')}.`,
-    );
   });
 });

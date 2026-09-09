@@ -8,7 +8,6 @@ from typing import ClassVar, Literal
 from uuid import uuid4
 
 from cliproxy_usage_server.quota.errors import QuotaSchemaError
-from cliproxy_usage_server.quota.providers.base import ResetCredits
 from cliproxy_usage_server.schemas import (
     ManualResetCredit,
     ManualResetSummary,
@@ -39,26 +38,21 @@ def _parse_instant(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value)
+        return datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _parse_credit(entry: object) -> ManualResetCredit | None:
-    """Return a credit only for available codex_rate_limits entries with an expiry."""
-    if not isinstance(entry, dict):
-        return None
-    if entry.get("reset_type") != "codex_rate_limits":
+    if not isinstance(entry, dict) or entry.get("reset_type") != "codex_rate_limits":
         return None
     if entry.get("status") != "available":
         return None
     expires_at = _parse_instant(entry.get("expires_at"))
     if expires_at is None:
         return None
-    raw_id = entry.get("id")
     return ManualResetCredit(
-        id=str(raw_id) if raw_id is not None else "",
+        id=str(entry.get("id", "")),
         granted_at=_parse_instant(entry.get("granted_at")),
         expires_at=expires_at,
     )
@@ -163,20 +157,17 @@ class CodexProvider:
             "header": headers,
         }
 
-    def parse_reset_credits(self, upstream_body: object) -> ResetCredits:
-        if not isinstance(upstream_body, dict):
-            raise QuotaSchemaError(
-                "Expected a dict for Codex reset-credits body, "
-                f"got {type(upstream_body).__name__}"
-            )
-        raw_credits = upstream_body.get("credits")
-        if not isinstance(raw_credits, list):
+    def parse_reset_credits(self, upstream_body: object) -> ManualResetSummary:
+        raw_credits = (
+            upstream_body.get("credits") if isinstance(upstream_body, dict) else None
+        )
+        if not isinstance(upstream_body, dict) or not isinstance(raw_credits, list):
             raise QuotaSchemaError("Codex reset-credits body has no 'credits' list")
         credits = [c for c in map(_parse_credit, raw_credits) if c is not None]
         credits.sort(key=lambda c: c.expires_at)
-        return ResetCredits(
-            available_count=_non_negative_int(upstream_body.get("available_count")),
-            credits=credits,
+        count = _non_negative_int(upstream_body.get("available_count"))
+        return ManualResetSummary(
+            available_count=len(credits) if count is None else count, credits=credits
         )
 
     def parse(
