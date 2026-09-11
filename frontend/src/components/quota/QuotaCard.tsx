@@ -1,7 +1,7 @@
 import type { ProviderQuota, QuotaAccount, QuotaProvider } from '@/types/api';
 import type { QuotaSlotState } from '@/stores/quotaStore';
 import { canStartReset, manualResetCount, type ResetActionState } from '@/stores/quotaResetState';
-import { formatRelative } from '@/utils/time';
+import { expiresSoon, formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import QuotaWindowBar from './QuotaWindowBar';
@@ -110,23 +110,79 @@ export default function QuotaCard({
     );
   }
 
+  function renderCredits({ manual_resets }: ProviderQuota, confirming: boolean) {
+    if (manual_resets === null) return null;
+    const { credits } = manual_resets;
+    if (credits.length > 0) {
+      return (
+        <ol className={styles.creditList} aria-label="Manual reset credits">
+          {credits.map((credit, index) => {
+            const soon = expiresSoon(credit.expires_at);
+            // Credits arrive sorted by expiry, so the first row is the credit a reset spends.
+            const spending = confirming && index === 0;
+            const rowClass = [
+              styles.creditRow,
+              soon && styles.creditSoon,
+              spending && styles.creditSpending,
+            ]
+              .filter(Boolean)
+              .join(' ');
+            return (
+              <li
+                key={credit.id || index}
+                className={rowClass}
+                data-soon={soon || undefined}
+                data-spending={spending || undefined}
+              >
+                <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
+                  {index + 1}
+                </span>
+                <span className={styles.creditAbsolute}>
+                  <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
+                  {soon && <span className={styles.creditSoonTag}>expiring</span>}
+                </span>
+                <span className={styles.creditRelative}>{formatRelative(credit.expires_at)}</span>
+              </li>
+            );
+          })}
+        </ol>
+      );
+    }
+    if (manual_resets.credits_error !== null) {
+      return <div className={styles.creditError}>Expiry unavailable: {manual_resets.credits_error}</div>;
+    }
+    return null;
+  }
+
   function renderReset(quota: ProviderQuota) {
     const count = manualResetCount(quota);
     if (count === null) return null;
     const running = reset.status === 'loading';
+    const confirming = reset.status === 'confirming' && canStartReset(quota);
+    const hasCredits = (quota.manual_resets?.credits.length ?? 0) > 0;
+    const prompt = hasCredits ? 'Consume reset 1?' : 'Consume one manual reset?';
     return (
       <div className={styles.manualReset}>
         <div className={styles.resetHeader}>
-          <span>Manual resets: {count}</span>
+          <span className={styles.resetTitle}>
+            Manual resets
+            <span
+              className={count > 0 ? styles.countBadge : `${styles.countBadge} ${styles.countZero}`}
+              data-testid="manual-reset-count"
+            >
+              {count}
+            </span>
+          </span>
           {canStartReset(quota) && reset.status !== 'confirming' && (
             <Button variant="secondary" onClick={onRequestReset} disabled={running}>
               Reset quota
             </Button>
           )}
         </div>
-        {reset.status === 'confirming' && canStartReset(quota) && (
+        {renderCredits(quota, confirming)}
+        {confirming && (
           <div className={styles.confirmation}>
-            <span>Consume one manual reset?</span>
+            <span>{prompt}</span>
             <div className={styles.confirmActions}>
               <Button variant="secondary" onClick={onCancelReset}>Cancel</Button>
               <Button onClick={onConfirmReset}>Consume reset</Button>

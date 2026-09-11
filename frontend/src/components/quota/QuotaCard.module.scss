@@ -45,6 +45,119 @@
   justify-content: space-between;
 }
 
+.confirmation {
+  margin-top: $space-3;
+}
+
+.resetTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: $space-2;
+  font-weight: 500;
+}
+
+.countBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.countZero {
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.creditList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: $space-2 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.creditRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: $space-3;
+  margin: 0 (-$space-2);
+  padding: 3px $space-2;
+  border-radius: $radius-sm;
+}
+
+.creditSpending {
+  background: var(--color-accent-hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.creditSoon {
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+
+  .creditOrdinal {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+  }
+
+  .creditRelative {
+    color: var(--color-warning);
+    font-weight: 600;
+  }
+}
+
+.creditOrdinal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.creditAbsolute {
+  display: inline-flex;
+  align-items: baseline;
+  gap: $space-1;
+  min-width: 0;
+}
+
+.creditSoonTag {
+  color: var(--color-warning);
+  font-size: 11px;
+}
+
+.creditDate {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.creditRelative {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.creditError {
+  margin: $space-2 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .successMessage {
   margin-top: $space-2;
   color: var(--color-success);

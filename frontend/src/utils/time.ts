@@ -30,3 +30,17 @@ export function formatRelative(iso: string): string {
 
   return isFuture ? `in ${label}` : `${label} ago`;
 }
+
+/** Formats an ISO-8601 timestamp as an absolute local date and time, e.g. "May 1, 2026, 2:00 AM". */
+export function formatAbsolute(iso: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(iso),
+  );
+}
+
+const SOON_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** True when `iso` falls within the next 14 days (or is already past). */
+export function expiresSoon(iso: string, now: number = Date.now()): boolean {
+  return new Date(iso).getTime() - now < SOON_THRESHOLD_MS;
+}

@@ -217,12 +217,25 @@ class QuotaWindow(BaseModel):
     resets_at: datetime | None
 
 
+class ManualResetCredit(BaseModel):
+    """One manual reset credit and when it stops being usable."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    granted_at: datetime | None
+    expires_at: datetime
+
+
 class ManualResetSummary(BaseModel):
     """Manual quota resets available for an account."""
 
     model_config = ConfigDict(frozen=True)
 
     available_count: int = Field(ge=0)
+    # Sorted by expires_at ascending; empty when per-credit detail is unavailable.
+    credits: list[ManualResetCredit] = Field(default_factory=list)
+    credits_error: str | None = None
 
 
 class ProviderQuota(BaseModel):

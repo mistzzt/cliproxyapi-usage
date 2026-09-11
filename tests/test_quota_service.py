@@ -332,6 +332,26 @@ def _codex_usage(used_percent: int) -> ApiCallResponse:
     )
 
 
+_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+_CREDITS_FAILURE = ApiCallResponse(500, {}, {"error": "boom"})
+
+
+def _codex_credits(*expires_at: str) -> ApiCallResponse:
+    credits = [
+        {"reset_type": "codex_rate_limits", "status": "available", "expires_at": value}
+        for value in expires_at
+    ]
+    return ApiCallResponse(200, {}, {"credits": credits})
+
+
+def _codex_usage_with_resets(count: int) -> ApiCallResponse:
+    usage = _codex_usage(10)
+    assert isinstance(usage.body, dict)
+    return ApiCallResponse(
+        200, {}, {**usage.body, "rate_limit_reset_credits": {"available_count": count}}
+    )
+
+
 def test_reset_quota_uses_capability_and_invalidates_success_cache() -> None:
     async def run() -> None:
         client = _SequenceClient(
@@ -343,7 +363,13 @@ def test_reset_quota_uses_capability_and_invalidates_success_cache() -> None:
                     chatgpt_account_id="acct-1",
                 )
             ],
-            [_codex_usage(70), ApiCallResponse(204, {}, None), _codex_usage(0)],
+            [
+                _codex_usage(70),
+                _CREDITS_FAILURE,
+                ApiCallResponse(204, {}, None),
+                _codex_usage(0),
+                _CREDITS_FAILURE,
+            ],
         )
         service = _make_service(client)  # type: ignore[arg-type]
         first = await service.get_quota("codex", "codex.json")
@@ -352,7 +378,7 @@ def test_reset_quota_uses_capability_and_invalidates_success_cache() -> None:
 
         assert first.quota is not None and first.quota.windows[0].used_percent == 70
         assert fresh.quota is not None and fresh.quota.windows[0].used_percent == 0
-        reset_payload = client.payloads[1]
+        reset_payload = client.payloads[2]
         assert reset_payload["authIndex"] == "auth-opaque"
         headers = reset_payload["header"]
         assert isinstance(headers, dict)
@@ -365,7 +391,11 @@ def test_failed_reset_preserves_cached_quota() -> None:
     async def run() -> None:
         client = _SequenceClient(
             [AuthFileEntry(name="codex.json", type="codex")],
-            [_codex_usage(70), ApiCallResponse(409, {}, {"error": "no credits"})],
+            [
+                _codex_usage(70),
+                _CREDITS_FAILURE,
+                ApiCallResponse(409, {}, {"error": "no credits"}),
+            ],
         )
         service = _make_service(client)  # type: ignore[arg-type]
         first = await service.get_quota("codex", "codex.json")
@@ -375,7 +405,7 @@ def test_failed_reset_preserves_cached_quota() -> None:
 
         assert exc_info.value.upstream_status == 409
         assert cached is first
-        assert len(client.payloads) == 2
+        assert len(client.payloads) == 3
 
     asyncio.run(run())
 
@@ -388,6 +418,7 @@ def test_successful_reset_invalidates_cached_error() -> None:
                 ApiCallResponse(500, {}, {"error": "old failure"}),
                 ApiCallResponse(204, {}, None),
                 _codex_usage(0),
+                _CREDITS_FAILURE,
             ],
         )
         service = _make_service(client)  # type: ignore[arg-type]
@@ -397,7 +428,7 @@ def test_successful_reset_invalidates_cached_error() -> None:
 
         assert failed.error is not None
         assert fresh.quota is not None
-        assert len(client.payloads) == 3
+        assert len(client.payloads) == 4
 
     asyncio.run(run())
 
@@ -463,6 +494,8 @@ def test_reset_prevents_in_flight_quota_fetch_from_repopulating_cache() -> None:
         async def api_call(self, payload: Mapping[str, object]) -> ApiCallResponse:
             if payload.get("method") == "POST":
                 return ApiCallResponse(204, {}, None)
+            if payload.get("url") == _CREDITS_URL:
+                return _CREDITS_FAILURE
             self.usage_calls += 1
             if self.usage_calls == 1:
                 self.first_started.set()
@@ -488,5 +521,92 @@ def test_reset_prevents_in_flight_quota_fetch_from_repopulating_cache() -> None:
         assert fresh.quota is not None and fresh.quota.windows[0].used_percent == 0
         assert cached.quota is not None and cached.quota.windows[0].used_percent == 0
         assert client.usage_calls == 2
+
+    asyncio.run(run())
+
+
+def test_codex_credits_are_merged_into_manual_resets() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [
+                AuthFileEntry(
+                    name="codex.json",
+                    type="codex",
+                    auth_index="auth-opaque",
+                    chatgpt_account_id="acct-1",
+                )
+            ],
+            [
+                _codex_usage_with_resets(2),
+                _codex_credits("2026-06-15T00:00:00Z", "2026-06-01T00:00:00Z"),
+            ],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        result = await service.get_quota("codex", "codex.json")
+
+        assert result.quota is not None and result.quota.manual_resets is not None
+        resets = result.quota.manual_resets
+        assert resets.available_count == 2
+        assert resets.credits_error is None
+        assert [c.expires_at.isoformat() for c in resets.credits] == [
+            "2026-06-01T00:00:00+00:00",
+            "2026-06-15T00:00:00+00:00",
+        ]
+        credits_payload = client.payloads[1]
+        assert credits_payload["url"] == _CREDITS_URL
+        assert credits_payload["authIndex"] == "auth-opaque"
+        headers = credits_payload["header"]
+        assert isinstance(headers, dict)
+        assert headers["Chatgpt-Account-Id"] == "acct-1"
+
+    asyncio.run(run())
+
+
+def test_codex_credits_failure_keeps_usage_count_and_sets_error() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="codex.json", type="codex")],
+            [_codex_usage_with_resets(2), _CREDITS_FAILURE],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        result = await service.get_quota("codex", "codex.json")
+
+        assert result.error is None
+        assert result.quota is not None and result.quota.manual_resets is not None
+        resets = result.quota.manual_resets
+        assert resets.available_count == 2
+        assert resets.credits == []
+        assert resets.credits_error == "Reset credits endpoint returned HTTP 500"
+        assert result.stale_at == _NOW + timedelta(seconds=_SUCCESS_TTL)
+
+    asyncio.run(run())
+
+
+def test_codex_credits_supply_count_when_usage_payload_has_none() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="codex.json", type="codex")],
+            [_codex_usage(10), _codex_credits("2026-06-01T00:00:00Z")],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        result = await service.get_quota("codex", "codex.json")
+
+        assert result.quota is not None and result.quota.manual_resets is not None
+        assert result.quota.manual_resets.available_count == 1
+
+    asyncio.run(run())
+
+
+def test_codex_without_any_reset_count_keeps_manual_resets_none() -> None:
+    async def run() -> None:
+        client = _SequenceClient(
+            [AuthFileEntry(name="codex.json", type="codex")],
+            [_codex_usage(10), _CREDITS_FAILURE],
+        )
+        service = _make_service(client)  # type: ignore[arg-type]
+        result = await service.get_quota("codex", "codex.json")
+
+        assert result.quota is not None
+        assert result.quota.manual_resets is None
 
     asyncio.run(run())

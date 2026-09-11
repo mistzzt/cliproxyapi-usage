@@ -39,8 +39,13 @@ from cliproxy_usage_server.quota.errors import (
     QuotaSchemaError,
     QuotaUpstreamError,
 )
-from cliproxy_usage_server.quota.providers.base import Provider, ResetProvider
+from cliproxy_usage_server.quota.providers.base import (
+    Provider,
+    ResetCreditsProvider,
+    ResetProvider,
+)
 from cliproxy_usage_server.schemas import (
+    ProviderQuota,
     QuotaAccount,
     QuotaError,
     QuotaResponse,
@@ -299,6 +304,8 @@ class QuotaService:
             api_response.status_code,
             auth_name=auth_name,
         )
+        if isinstance(provider, ResetCreditsProvider):
+            quota = await self._attach_reset_credits(provider, quota, entry)
 
         fetched_at = self._clock()
         stale_at = fetched_at + timedelta(seconds=self._success_ttl)
@@ -308,6 +315,31 @@ class QuotaService:
             fetched_at=fetched_at,
             stale_at=stale_at,
         )
+
+    async def _attach_reset_credits(
+        self, provider: ResetCreditsProvider, quota: ProviderQuota, entry: AuthFileEntry
+    ) -> ProviderQuota:
+        """Merge credit expiries into manual_resets; failure only sets credits_error."""
+        payload = provider.build_reset_credits_api_call_payload(
+            entry.auth_index or entry.name, account_id=entry.chatgpt_account_id
+        )
+        try:
+            response = await self._client.api_call(payload)
+            if not 200 <= response.status_code < 300:
+                raise QuotaUpstreamError(
+                    f"Reset credits endpoint returned HTTP {response.status_code}"
+                )
+            summary = provider.parse_reset_credits(response.body)
+        except (QuotaUpstreamError, QuotaSchemaError) as exc:
+            if quota.manual_resets is None:
+                return quota
+            summary = quota.manual_resets.model_copy(update={"credits_error": str(exc)})
+        else:
+            if quota.manual_resets is not None:
+                summary = summary.model_copy(
+                    update={"available_count": quota.manual_resets.available_count}
+                )
+        return quota.model_copy(update={"manual_resets": summary})
 
     def _exc_to_quota_error(
         self, exc: QuotaUpstreamError | QuotaSchemaError | _OAuthError

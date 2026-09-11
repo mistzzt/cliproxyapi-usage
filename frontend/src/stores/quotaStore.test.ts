@@ -21,7 +21,7 @@ describe('quota reset actions', () => {
               auth_name: 'codex.json',
               plan_type: 'pro',
               windows: [],
-              manual_resets: { available_count: 1 },
+              manual_resets: { available_count: 1, credits: [], credits_error: null },
               extra: {},
             },
             error: null,
@@ -69,7 +69,7 @@ describe('quota reset actions', () => {
         auth_name: 'codex.json',
         plan_type: 'pro',
         windows: [],
-        manual_resets: { available_count: 1 },
+        manual_resets: { available_count: 1, credits: [], credits_error: null },
         extra: {},
       },
       error: null,
@@ -99,7 +99,7 @@ describe('quota reset actions', () => {
         auth_name: 'codex.json',
         plan_type: 'pro',
         windows: [{ id: 'weekly', label: 'Weekly limit', used_percent: usedPercent, resets_at: null }],
-        manual_resets: { available_count: 1 },
+        manual_resets: { available_count: 1, credits: [], credits_error: null },
         extra: {},
       },
       error: null,
@@ -141,7 +141,7 @@ describe('quota reset actions', () => {
         auth_name: 'codex.json',
         plan_type: 'pro',
         windows: [],
-        manual_resets: { available_count: 1 },
+        manual_resets: { available_count: 1, credits: [], credits_error: null },
         extra: {},
       },
       error: null,
@@ -153,7 +153,7 @@ describe('quota reset actions', () => {
     });
     globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({
       ...response,
-      quota: { ...response.quota, manual_resets: { available_count: 0 } },
+      quota: { ...response.quota, manual_resets: { available_count: 0, credits: [], credits_error: null } },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))) as unknown as typeof fetch;
 
     useQuotaStore.getState().requestResetConfirmation(key);

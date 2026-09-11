@@ -208,3 +208,8 @@ def test_shared_manual_reset_response_fixture_validates() -> None:
     assert response.quota is not None
     assert response.quota.manual_resets is not None
     assert response.quota.manual_resets.available_count == 2
+    assert [c.id for c in response.quota.manual_resets.credits] == [
+        "credit-a",
+        "credit-b",
+    ]
+    assert response.quota.manual_resets.credits_error is None

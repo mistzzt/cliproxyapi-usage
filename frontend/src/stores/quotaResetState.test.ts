@@ -9,6 +9,7 @@ describe('quota reset state', () => {
     ).json();
     expect(manualResetCount(response.quota)).toBe(2);
     expect(canStartReset(response.quota)).toBe(true);
+    expect(response.quota?.manual_resets?.credits.map((c) => c.id)).toEqual(['credit-a', 'credit-b']);
   });
 
   test('zero remains visible but is not actionable', () => {
@@ -17,7 +18,7 @@ describe('quota reset state', () => {
       auth_name: 'test',
       plan_type: null,
       windows: [],
-      manual_resets: { available_count: 0 },
+      manual_resets: { available_count: 0, credits: [], credits_error: null },
       extra: {},
     };
     expect(manualResetCount(quota)).toBe(0);
