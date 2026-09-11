@@ -87,19 +87,7 @@ describe('QuotaCard manual reset credits', () => {
     );
   });
 
-  test('marks the earliest credit as next only when more than one is listed', () => {
-    const two = render({ ...base, manual_resets: { available_count: 2, credits, credits_error: null } });
-    expect(two.match(/>next</g)?.length).toBe(1);
-    expect(two).toMatch(/<li[^>]*data-next="true"[^>]*><span[^>]*aria-label="Reset 1"/);
-
-    const one = render({
-      ...base, manual_resets: { available_count: 1, credits: credits.slice(0, 1), credits_error: null },
-    });
-    expect(one).not.toContain('>next<');
-    expect(one).not.toContain('data-next');
-  });
-
-  test('flags credits expiring within a week', () => {
+  test('flags credits expiring within two weeks', () => {
     const soon = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString();
     const far = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
     const markup = render({

@@ -114,27 +114,17 @@ export default function QuotaCard({
     if (manual_resets === null) return null;
     const { credits } = manual_resets;
     if (credits.length > 0) {
-      // Credits arrive sorted by expiry, so the first one is the credit a reset spends.
-      const markNext = credits.length > 1;
       return (
         <ol className={styles.creditList} aria-label="Manual reset credits">
           {credits.map((credit, index) => {
-            const next = markNext && index === 0;
             const soon = expiresSoon(credit.expires_at);
             const relClass = soon ? `${styles.creditRelative} ${styles.creditSoon}` : styles.creditRelative;
             return (
-              <li
-                key={credit.id || index}
-                className={next ? `${styles.creditRow} ${styles.creditNext}` : styles.creditRow}
-                data-next={next || undefined}
-              >
+              <li key={credit.id || index} className={styles.creditRow}>
                 <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
                   {index + 1}
                 </span>
-                <span className={styles.creditAbsolute}>
-                  <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
-                  {next && <span className={styles.creditNextTag}>next</span>}
-                </span>
+                <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
                 <span className={relClass} data-soon={soon || undefined}>
                   {formatRelative(credit.expires_at)}
                 </span>

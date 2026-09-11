@@ -38,9 +38,9 @@ export function formatAbsolute(iso: string): string {
   );
 }
 
-const SOON_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const SOON_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000;
 
-/** True when `iso` falls within the next 7 days (or is already past). */
+/** True when `iso` falls within the next 14 days (or is already past). */
 export function expiresSoon(iso: string, now: number = Date.now()): boolean {
   return new Date(iso).getTime() - now < SOON_THRESHOLD_MS;
 }

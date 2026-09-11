@@ -91,13 +91,7 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   column-gap: $space-3;
-  margin: 0 (-$space-2);
-  padding: 3px $space-2;
-  border-radius: $radius-sm;
-}
-
-.creditNext {
-  background: var(--color-accent-hover);
+  padding: 3px 0;
 }
 
 .creditOrdinal {
@@ -113,29 +107,9 @@
   font-weight: 600;
 }
 
-.creditNext .creditOrdinal {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.creditAbsolute {
-  display: inline-flex;
-  align-items: baseline;
-  gap: $space-2;
-  min-width: 0;
-}
-
 .creditDate {
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
-}
-
-.creditNextTag {
-  color: var(--color-accent);
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .creditRelative {
