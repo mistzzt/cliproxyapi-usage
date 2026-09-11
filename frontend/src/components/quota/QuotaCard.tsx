@@ -118,16 +118,17 @@ export default function QuotaCard({
         <ol className={styles.creditList} aria-label="Manual reset credits">
           {credits.map((credit, index) => {
             const soon = expiresSoon(credit.expires_at);
-            const relClass = soon ? `${styles.creditRelative} ${styles.creditSoon}` : styles.creditRelative;
             return (
-              <li key={credit.id || index} className={styles.creditRow}>
+              <li
+                key={credit.id || index}
+                className={soon ? `${styles.creditRow} ${styles.creditSoon}` : styles.creditRow}
+                data-soon={soon || undefined}
+              >
                 <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
                   {index + 1}
                 </span>
                 <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
-                <span className={relClass} data-soon={soon || undefined}>
-                  {formatRelative(credit.expires_at)}
-                </span>
+                <span className={styles.creditRelative}>{formatRelative(credit.expires_at)}</span>
               </li>
             );
           })}

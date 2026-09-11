@@ -91,7 +91,23 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   column-gap: $space-3;
-  padding: 3px 0;
+  margin: 0 (-$space-2);
+  padding: 3px $space-2;
+  border-radius: $radius-sm;
+}
+
+.creditSoon {
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+
+  .creditOrdinal {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+  }
+
+  .creditRelative {
+    color: var(--color-warning);
+    font-weight: 600;
+  }
 }
 
 .creditOrdinal {
@@ -117,11 +133,6 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
-}
-
-.creditSoon {
-  color: var(--color-warning);
-  font-weight: 600;
 }
 
 .creditError {
