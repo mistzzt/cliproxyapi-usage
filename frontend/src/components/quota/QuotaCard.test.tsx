@@ -99,6 +99,7 @@ describe('QuotaCard manual reset credits', () => {
       },
     });
     expect(markup.match(/data-soon="true"/g)?.length).toBe(1);
+    expect(markup.match(/>expiring</g)?.length).toBe(1);
   });
 
   test('shows the error text when credits are unavailable', () => {

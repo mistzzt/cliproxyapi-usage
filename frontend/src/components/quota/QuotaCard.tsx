@@ -127,7 +127,10 @@ export default function QuotaCard({
                 <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
                   {index + 1}
                 </span>
-                <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
+                <span className={styles.creditAbsolute}>
+                  <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
+                  {soon && <span className={styles.creditSoonTag}>expiring</span>}
+                </span>
                 <span className={styles.creditRelative}>{formatRelative(credit.expires_at)}</span>
               </li>
             );
