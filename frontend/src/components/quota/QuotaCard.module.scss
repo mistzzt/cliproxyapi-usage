@@ -126,16 +126,13 @@
 .creditAbsolute {
   display: inline-flex;
   align-items: baseline;
-  gap: $space-2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .creditSoonTag {
   color: var(--color-warning);
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11px;
 }
 
 .creditDate {
