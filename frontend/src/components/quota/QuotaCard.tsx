@@ -1,7 +1,7 @@
 import type { ProviderQuota, QuotaAccount, QuotaProvider } from '@/types/api';
 import type { QuotaSlotState } from '@/stores/quotaStore';
 import { canStartReset, manualResetCount, type ResetActionState } from '@/stores/quotaResetState';
-import { formatAbsolute, formatRelative } from '@/utils/time';
+import { expiresSoon, formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import QuotaWindowBar from './QuotaWindowBar';
@@ -112,18 +112,36 @@ export default function QuotaCard({
 
   function renderCredits({ manual_resets }: ProviderQuota) {
     if (manual_resets === null) return null;
-    if (manual_resets.credits.length > 0) {
+    const { credits } = manual_resets;
+    if (credits.length > 0) {
+      // Credits arrive sorted by expiry, so the first one is the credit a reset spends.
+      const markNext = credits.length > 1;
       return (
-        <ul className={styles.creditList}>
-          {manual_resets.credits.map((credit, index) => (
-            <li key={credit.id || index} className={styles.creditRow}>
-              <span>Reset {index + 1}</span>
-              <span>
-                expires {formatAbsolute(credit.expires_at)} ({formatRelative(credit.expires_at)})
-              </span>
-            </li>
-          ))}
-        </ul>
+        <ol className={styles.creditList} aria-label="Manual reset credits">
+          {credits.map((credit, index) => {
+            const next = markNext && index === 0;
+            const soon = expiresSoon(credit.expires_at);
+            const relClass = soon ? `${styles.creditRelative} ${styles.creditSoon}` : styles.creditRelative;
+            return (
+              <li
+                key={credit.id || index}
+                className={next ? `${styles.creditRow} ${styles.creditNext}` : styles.creditRow}
+                data-next={next || undefined}
+              >
+                <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
+                  {index + 1}
+                </span>
+                <span className={styles.creditAbsolute}>
+                  <span className={styles.creditDate}>{formatAbsolute(credit.expires_at)}</span>
+                  {next && <span className={styles.creditNextTag}>next</span>}
+                </span>
+                <span className={relClass} data-soon={soon || undefined}>
+                  {formatRelative(credit.expires_at)}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       );
     }
     if (manual_resets.credits_error !== null) {
@@ -144,7 +162,15 @@ export default function QuotaCard({
     return (
       <div className={styles.manualReset}>
         <div className={styles.resetHeader}>
-          <span>Manual resets: {count}</span>
+          <span className={styles.resetTitle}>
+            Manual resets
+            <span
+              className={count > 0 ? styles.countBadge : `${styles.countBadge} ${styles.countZero}`}
+              data-testid="manual-reset-count"
+            >
+              {count}
+            </span>
+          </span>
           {canStartReset(quota) && reset.status !== 'confirming' && (
             <Button variant="secondary" onClick={onRequestReset} disabled={running}>
               Reset quota

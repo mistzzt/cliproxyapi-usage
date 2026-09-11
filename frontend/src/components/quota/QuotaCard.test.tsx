@@ -35,7 +35,8 @@ describe('QuotaCard manual reset capability', () => {
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
       manual_resets: { available_count: 2, credits: [], credits_error: null }, extra: {},
     });
-    expect(markup).toContain('Manual resets: 2');
+    expect(markup).toContain('Manual resets');
+    expect(markup).toMatch(/data-testid="manual-reset-count">2</);
     expect(markup).toContain('Reset quota');
   });
 
@@ -44,7 +45,7 @@ describe('QuotaCard manual reset capability', () => {
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
       manual_resets: { available_count: 0, credits: [], credits_error: null }, extra: {},
     });
-    expect(markup).toContain('Manual resets: 0');
+    expect(markup).toMatch(/data-testid="manual-reset-count">0</);
     expect(markup).not.toContain('Reset quota');
     expect(render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
@@ -76,22 +77,48 @@ describe('QuotaCard manual reset credits', () => {
   test('renders one expiry row per credit and names the first in the confirmation', () => {
     const quota = { ...base, manual_resets: { available_count: 2, credits, credits_error: null } };
     const markup = render(quota, { status: 'confirming' });
-    expect(markup).toContain('Reset 1');
-    expect(markup).toContain('Reset 2');
+    expect(markup).toContain('aria-label="Reset 1"');
+    expect(markup).toContain('aria-label="Reset 2"');
     expect(markup).toContain(formatAbsolute('2026-06-01T00:00:00Z'));
     expect(markup).toContain(formatAbsolute('2026-06-15T00:00:00Z'));
-    expect(markup).toMatch(/\((in .+|.+ ago|just now)\)/);
+    expect(markup).toMatch(/>(in .+?|.+? ago|just now)<\/span><\/li>/);
     expect(markup).toContain(
       `This spends the credit expiring ${formatAbsolute('2026-06-01T00:00:00Z')}.`,
     );
+  });
+
+  test('marks the earliest credit as next only when more than one is listed', () => {
+    const two = render({ ...base, manual_resets: { available_count: 2, credits, credits_error: null } });
+    expect(two.match(/>next</g)?.length).toBe(1);
+    expect(two).toMatch(/<li[^>]*data-next="true"[^>]*><span[^>]*aria-label="Reset 1"/);
+
+    const one = render({
+      ...base, manual_resets: { available_count: 1, credits: credits.slice(0, 1), credits_error: null },
+    });
+    expect(one).not.toContain('>next<');
+    expect(one).not.toContain('data-next');
+  });
+
+  test('flags credits expiring within a week', () => {
+    const soon = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString();
+    const far = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const markup = render({
+      ...base,
+      manual_resets: {
+        available_count: 2,
+        credits: [{ id: 'a', granted_at: null, expires_at: soon }, { id: 'b', granted_at: null, expires_at: far }],
+        credits_error: null,
+      },
+    });
+    expect(markup.match(/data-soon="true"/g)?.length).toBe(1);
   });
 
   test('shows the error text when credits are unavailable', () => {
     const markup = render({
       ...base, manual_resets: { available_count: 2, credits: [], credits_error: 'HTTP 500' },
     });
-    expect(markup).toContain('Manual resets: 2');
+    expect(markup).toMatch(/data-testid="manual-reset-count">2</);
     expect(markup).toContain('Expiry unavailable: HTTP 500');
-    expect(markup).not.toContain('Reset 1');
+    expect(markup).not.toContain('aria-label="Reset 1"');
   });
 });
