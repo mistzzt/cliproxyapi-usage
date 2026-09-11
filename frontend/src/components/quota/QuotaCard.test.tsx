@@ -74,7 +74,7 @@ describe('QuotaCard manual reset credits', () => {
     { id: 'b', granted_at: null, expires_at: '2026-06-15T00:00:00Z' },
   ];
 
-  test('renders one expiry row per credit and names the first in the confirmation', () => {
+  test('renders one expiry row per credit and points the confirmation at the first', () => {
     const quota = { ...base, manual_resets: { available_count: 2, credits, credits_error: null } };
     const markup = render(quota, { status: 'confirming' });
     expect(markup).toContain('aria-label="Reset 1"');
@@ -82,9 +82,10 @@ describe('QuotaCard manual reset credits', () => {
     expect(markup).toContain(formatAbsolute('2026-06-01T00:00:00Z'));
     expect(markup).toContain(formatAbsolute('2026-06-15T00:00:00Z'));
     expect(markup).toMatch(/>(in .+?|.+? ago|just now)<\/span><\/li>/);
-    expect(markup).toContain(
-      `This spends the credit expiring ${formatAbsolute('2026-06-01T00:00:00Z')}.`,
-    );
+    expect(markup).toContain('Consume reset 1?');
+    expect(markup).toMatch(/<li[^>]*data-spending="true"[^>]*><span[^>]*aria-label="Reset 1"/);
+    expect(markup.match(/data-spending="true"/g)?.length).toBe(1);
+    expect(render(quota)).not.toContain('data-spending');
   });
 
   test('flags credits expiring within two weeks', () => {

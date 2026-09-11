@@ -110,7 +110,7 @@ export default function QuotaCard({
     );
   }
 
-  function renderCredits({ manual_resets }: ProviderQuota) {
+  function renderCredits({ manual_resets }: ProviderQuota, confirming: boolean) {
     if (manual_resets === null) return null;
     const { credits } = manual_resets;
     if (credits.length > 0) {
@@ -118,11 +118,21 @@ export default function QuotaCard({
         <ol className={styles.creditList} aria-label="Manual reset credits">
           {credits.map((credit, index) => {
             const soon = expiresSoon(credit.expires_at);
+            // Credits arrive sorted by expiry, so the first row is the credit a reset spends.
+            const spending = confirming && index === 0;
+            const rowClass = [
+              styles.creditRow,
+              soon && styles.creditSoon,
+              spending && styles.creditSpending,
+            ]
+              .filter(Boolean)
+              .join(' ');
             return (
               <li
                 key={credit.id || index}
-                className={soon ? `${styles.creditRow} ${styles.creditSoon}` : styles.creditRow}
+                className={rowClass}
                 data-soon={soon || undefined}
+                data-spending={spending || undefined}
               >
                 <span className={styles.creditOrdinal} aria-label={`Reset ${index + 1}`}>
                   {index + 1}
@@ -148,11 +158,9 @@ export default function QuotaCard({
     const count = manualResetCount(quota);
     if (count === null) return null;
     const running = reset.status === 'loading';
-    // Credits arrive sorted by expiry, so the first one is the credit a reset spends.
-    const spending = quota.manual_resets?.credits[0];
-    const prompt = spending
-      ? `Consume one manual reset? This spends the credit expiring ${formatAbsolute(spending.expires_at)}.`
-      : 'Consume one manual reset?';
+    const confirming = reset.status === 'confirming' && canStartReset(quota);
+    const hasCredits = (quota.manual_resets?.credits.length ?? 0) > 0;
+    const prompt = hasCredits ? 'Consume reset 1?' : 'Consume one manual reset?';
     return (
       <div className={styles.manualReset}>
         <div className={styles.resetHeader}>
@@ -171,8 +179,8 @@ export default function QuotaCard({
             </Button>
           )}
         </div>
-        {renderCredits(quota)}
-        {reset.status === 'confirming' && canStartReset(quota) && (
+        {renderCredits(quota, confirming)}
+        {confirming && (
           <div className={styles.confirmation}>
             <span>{prompt}</span>
             <div className={styles.confirmActions}>
