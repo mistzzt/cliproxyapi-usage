@@ -166,9 +166,9 @@ def test_prefixed_spa_and_assets_use_configured_base_path(
     app = create_app(cfg, pricing_provider=lambda: {})
     with TestClient(app, follow_redirects=False) as client:
         redirect = client.get("/api-usage")
-        shell = client.get("/api-usage/quota")
+        shell = client.get("/api-usage/limits")
         asset = client.get("/api-usage/assets/app.js")
-        unprefixed_shell = client.get("/quota")
+        unprefixed_shell = client.get("/limits")
         unprefixed_asset = client.get("/assets/app.js")
 
     assert redirect.status_code == 307
@@ -201,8 +201,8 @@ def test_root_level_static_files_served(
     with TestClient(app) as client:
         favicon = client.get("/favicon.svg")
         # Deep client routes request the favicon relative to the route.
-        nested_favicon = client.get("/quota/favicon.svg")
-        shell = client.get("/quota")
+        nested_favicon = client.get("/limits/favicon.svg")
+        shell = client.get("/limits")
         traversal = client.get("/../etc/passwd")
 
     assert favicon.status_code == 200

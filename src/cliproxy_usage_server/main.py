@@ -202,7 +202,7 @@ def create_app(
 
     if _SPA_DIR.is_dir():
         # Serve hashed assets directly, then fall back to index.html for any
-        # non-API path so client-side routes (e.g. /quota) resolve.
+        # non-API path so client-side routes (e.g. /limits) resolve.
         app.mount(
             _prefixed(config.base_path, "/assets"),
             StaticFiles(directory=_SPA_DIR / "assets"),

@@ -8,7 +8,7 @@ interface QuotaWindowBarProps {
 
 export default function QuotaWindowBar({ window }: QuotaWindowBarProps) {
   const percent = window.used_percent;
-  const percentLabel = percent !== null ? `${Math.round(percent)}%` : '—';
+  const percentLabel = percent !== null ? `${Math.round(percent)}% used` : '—';
   const barWidth = percent !== null ? Math.min(100, Math.max(0, percent)) : 0;
 
   return (
