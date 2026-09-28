@@ -14,10 +14,10 @@ export default function AppHeader() {
           Usage
         </NavLink>
         <NavLink
-          to="/quota"
+          to="/limits"
           className={({ isActive }) => `${styles.link}${isActive ? ` ${styles.active}` : ''}`}
         >
-          Quota
+          Limits
         </NavLink>
       </div>
       <ThemeToggle />

@@ -71,7 +71,7 @@ export default function QuotaPage() {
     <div className={styles.page}>
       <AppHeader />
       <div className={styles.header}>
-        <h1 className={styles.title}>OAuth Quota</h1>
+        <h1 className={styles.title}>Plan Limits</h1>
       </div>
 
       {renderBanner()}

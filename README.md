@@ -104,21 +104,21 @@ collector.
 
 ### Server environment variables
 
-| Variable                    | Default                                                | Required     |
-| --------------------------- | ------------------------------------------------------ | ------------ |
-| `USAGE_DB_PATH`             | `./usage.db`                                           | no           |
-| `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no           |
-| `USAGE_SERVER_PORT`         | `8318`                                                 | no           |
-| `USAGE_BASE_PATH`           | `/`                                                    | no           |
-| `USAGE_PAGE_TITLE`          | `CLIProxyAPI Usage Dashboard`                          | no           |
-| `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no           |
-| `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no           |
-| `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no           |
-| `CLIPROXY_BASE_URL`         | —                                                      | for `/quota` |
-| `CLIPROXY_MANAGEMENT_KEY`   | —                                                      | for `/quota` |
-| `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no           |
+| Variable                    | Default                                                | Required      |
+| --------------------------- | ------------------------------------------------------ | ------------- |
+| `USAGE_DB_PATH`             | `./usage.db`                                           | no            |
+| `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no            |
+| `USAGE_SERVER_PORT`         | `8318`                                                 | no            |
+| `USAGE_BASE_PATH`           | `/`                                                    | no            |
+| `USAGE_PAGE_TITLE`          | `CLIProxyAPI Usage Dashboard`                          | no            |
+| `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no            |
+| `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no            |
+| `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no            |
+| `CLIPROXY_BASE_URL`         | —                                                      | for `/limits` |
+| `CLIPROXY_MANAGEMENT_KEY`   | —                                                      | for `/limits` |
+| `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no            |
 
-`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota API. For quota, `CLIPROXY_BASE_URL` should be the CLIProxyAPI management API base URL, for example `http://localhost:8317/v0/management`. When both are set, the server serves live OAuth quota for Claude and Codex auth-files at `/quota` (UI) and `/api/quota/*` (JSON). Successful quota responses are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); clicking "Refresh" within the TTL returns the cached value rather than re-hitting the upstream OAuth endpoints. When either variable is unset, `/api/quota/*` returns `503` and the UI shows a disabled banner; the dashboard remains available.
+`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota API. For quota, `CLIPROXY_BASE_URL` should be the CLIProxyAPI management API base URL, for example `http://localhost:8317/v0/management`. When both are set, the server serves live OAuth quota for Claude and Codex auth-files at `/limits` (UI) and `/api/quota/*` (JSON). Successful quota responses are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); clicking "Refresh" within the TTL returns the cached value rather than re-hitting the upstream OAuth endpoints. When either variable is unset, `/api/quota/*` returns `503` and the UI shows a disabled banner; the dashboard remains available.
 
 Codex window labels come from each window's declared duration. A duration of 18,000 seconds is a five-hour limit, 604,800 seconds is a weekly limit, and missing or unknown durations use a neutral account or named-limit label. The Codex card shows the manual reset count when OpenAI supplies it, including zero, and lists the expiry of each available reset credit (fetched from the `rate-limit-reset-credits` endpoint after the usage call; if that call fails the count still shows with a note that expiry is unavailable). When resets are available, the user must confirm before consuming one; the prompt names the expiry of the earliest-expiring credit, which is the one spent. Claude accounts get a "7-day Fable 5" row read from Anthropic's `limits[]` array (weekly Fable entry, active one preferred), falling back to the legacy `iguana_necktie` window when `limits[]` has no Fable entry. `POST /api/quota/{provider}/{auth_name}/reset` exposes this as a provider capability, returns `405` for registered providers without reset support, and returns `204` after a supported provider accepts the reset. A successful reset invalidates both successful and error quota cache entries, including older in-flight fetches, so the following quota read goes upstream. A failed reset preserves the last cached quota.
 
@@ -165,7 +165,7 @@ FastAPI handles `/api/*`. Visit `http://127.0.0.1:8318/` and browse.
 
 To deploy the same build under a URL prefix, set `USAGE_BASE_PATH` before
 starting the server. For example, `USAGE_BASE_PATH=/api-usage` serves the SPA
-at `/api-usage/`, client routes such as `/api-usage/quota`, static assets at
+at `/api-usage/`, client routes such as `/api-usage/limits`, static assets at
 `/api-usage/assets/*`, and JSON endpoints at `/api-usage/api/*`.
 
 ### Dev workflow
