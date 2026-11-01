@@ -1,7 +1,6 @@
 // Ratios derived from a Totals record (pure).
 import type { Totals } from '@/types/api';
 import { fmtCost } from './format';
-import { modelFamily } from './modelNames';
 
 type Counts = Pick<Totals, 'requests' | 'failed'>;
 
@@ -21,9 +20,9 @@ export function failureRate(t: Counts): number {
   return t.requests > 0 ? t.failed / t.requests : 0;
 }
 
-/** OpenAI-convention models (GPT family) count cached tokens within input; others report them separately. */
-export function cacheHitRate(model: string, t: Pick<Totals, 'input_tokens' | 'cached_tokens'>): number | null {
-  const denom = modelFamily(model) === 'GPT' ? t.input_tokens : t.input_tokens + t.cached_tokens;
+/** `cachedInInput` (the model's `price.cached_in_input`): cached tokens are a subset of input, else reported separately. */
+export function cacheHitRate(t: Pick<Totals, 'input_tokens' | 'cached_tokens'>, cachedInInput: boolean): number | null {
+  const denom = cachedInInput ? t.input_tokens : t.input_tokens + t.cached_tokens;
   return denom > 0 ? t.cached_tokens / denom : null;
 }
 

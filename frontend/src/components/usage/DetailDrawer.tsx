@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import b from '@/components/ui/Busy.module.scss';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { useApi } from '@/hooks/useApi';
 import { getBreakdown, getSummary } from '@/services/api';
@@ -71,6 +72,7 @@ export default function DetailDrawer({
   }, [split.data, splitDim, metric, lookup]);
 
   const error = summary.error ?? split.error ?? other.error;
+  const busy = summary.loading || split.loading || other.loading;
   const cur = summary.data?.current;
   const prev = summary.data?.previous ?? null;
 
@@ -99,7 +101,7 @@ export default function DetailDrawer({
         {!cur ? (
           !error && <LoadingSpinner />
         ) : (
-          <>
+          <div className={busy ? `${s.body} ${b.busy}` : s.body} aria-busy={busy}>
             <div className={s.tiles}>
               <StatTile
                 className={s.tile}
@@ -145,7 +147,7 @@ export default function DetailDrawer({
               <span>Cached {fmtCompact(cur.cached_tokens)}</span>
               <span>Reasoning {fmtCompact(cur.reasoning_tokens)}</span>
             </div>
-          </>
+          </div>
         )}
       </aside>
     </>

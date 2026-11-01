@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
+import b from '@/components/ui/Busy.module.scss';
 import type { SummaryResponse } from '@/types/api';
 import { change, fmtCompact, fmtPct } from '@/utils/usage/format';
 import { failureRate, fmtLatency, fmtSpend, SPEND_LOWER_BOUND_NOTE, tokenSeries, tokens } from '@/utils/usage/totals';
 import ChangeBadge from './ChangeBadge';
 import s from './KpiStrip.module.scss';
 
-export default function KpiStrip({ summary, accent }: { summary: SummaryResponse; accent: string }) {
+export default function KpiStrip({ summary, accent, busy }: { summary: SummaryResponse; accent: string; busy: boolean }) {
   const cur = summary.current;
   const prev = summary.previous;
   const tiles = [
@@ -27,7 +28,7 @@ export default function KpiStrip({ summary, accent }: { summary: SummaryResponse
     { label: 'Avg latency', value: fmtLatency(cur.avg_latency_ms), change: change(cur.avg_latency_ms, prev?.avg_latency_ms) },
   ];
   return (
-    <div className={s.strip}>
+    <div className={busy ? `${s.strip} ${b.busy}` : s.strip} aria-busy={busy}>
       {tiles.map((t) => (
         <StatTile
           key={t.label}

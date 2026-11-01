@@ -156,8 +156,19 @@ def test_price_only_on_model_rows(client: TestClient) -> None:
         "gpt-t": 8.0,
     }
     # Missing cache-write rates show the 1.25x input fallback cost uses.
-    claude = next(r["price"] for r in models if r["key"] == "claude-t")
-    assert (claude["cache_write"], claude["long_context"]) == (1.25, None)
+    price = {r["key"]: r["price"] for r in models}
+    assert (price["claude-t"]["cache_write"], price["claude-t"]["long_context"]) == (
+        1.25,
+        None,
+    )
+    # Token accounting comes from the pricing provider, not the model name.
+    assert (
+        price["claude-t"]["cached_in_input"],
+        price["gpt-t"]["cached_in_input"],
+    ) == (
+        False,
+        True,
+    )
     people = _get(client, f"/api/usage/breakdown?dim=person&{Q}")["rows"]
     assert all(r["price"] is None for r in people)
 

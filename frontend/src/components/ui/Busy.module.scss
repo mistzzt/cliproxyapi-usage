@@ -1,0 +1,5 @@
+// Dims content whose data belongs to an earlier query while the current one loads.
+.busy {
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}

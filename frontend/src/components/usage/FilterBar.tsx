@@ -13,7 +13,7 @@ import {
   type RangeSel,
   type RangeWindow,
 } from '@/utils/usage/range';
-import type { Granularity, Metric, ViewState } from '@/utils/usage/viewState';
+import { granularityOptions, type Granularity, type Metric, type ViewState } from '@/utils/usage/viewState';
 import Segmented from './Segmented';
 import s from './FilterBar.module.scss';
 
@@ -60,12 +60,7 @@ export default function FilterBar({ state, update, win, now, effectiveBucket, op
       <Segmented<Granularity>
         label="Granularity"
         value={state.granularity}
-        options={[
-          { value: 'auto', label: effectiveBucket ? `Auto (${effectiveBucket[0]})` : 'Auto' },
-          { value: 'hour', label: '1h' },
-          { value: 'day', label: '1d' },
-          { value: 'week', label: '1w' },
-        ]}
+        options={granularityOptions(state.granularity, effectiveBucket)}
         onChange={(granularity) => update({ granularity })}
       />
       <Segmented<Metric>

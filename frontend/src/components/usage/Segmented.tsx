@@ -3,6 +3,7 @@ import s from './Segmented.module.scss';
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  title?: string;
 }
 
 export default function Segmented<T extends string>({
@@ -24,6 +25,7 @@ export default function Segmented<T extends string>({
           type="button"
           className={o.value === value ? s.active : undefined}
           aria-pressed={o.value === value}
+          title={o.title}
           onClick={() => onChange(o.value)}
         >
           {o.label}

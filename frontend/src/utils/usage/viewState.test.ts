@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
   DEFAULT_VIEW_STATE,
+  granularityOptions,
   VIEW_STORAGE_KEY,
   loadViewState,
   parseViewState,
@@ -35,4 +36,15 @@ test('storage restores everything but the drawer, only when the URL has no query
   expect(data.has(VIEW_STORAGE_KEY)).toBe(true);
   expect(loadViewState('', storage)).toEqual({ ...full, drawer: null });
   expect(loadViewState('?range=7d', storage)).toEqual({ ...DEFAULT_VIEW_STATE, range: { kind: 'preset', id: '7d' } });
+});
+
+test('granularity buttons show the bucket the server used', () => {
+  const labels = (sel: Parameters<typeof granularityOptions>[0], eff: Parameters<typeof granularityOptions>[1]) =>
+    granularityOptions(sel, eff).map((o) => o.label);
+  expect(labels('auto', 'day')).toEqual(['Auto (1d)', '1h', '1d', '1w']);
+  expect(labels('day', 'day')).toEqual(['Auto (1d)', '1h', '1d', '1w']);
+  // A fixed choice the server coarsened names the bucket it fell back to.
+  expect(labels('hour', 'week')).toEqual(['Auto (1w)', '1h → 1w', '1d', '1w']);
+  expect(granularityOptions('hour', 'week')[1]?.title).toBe('Too many hour buckets for this range; showing weeks');
+  expect(labels('hour', null)).toEqual(['Auto', '1h', '1d', '1w']);
 });

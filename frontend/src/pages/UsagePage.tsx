@@ -81,22 +81,22 @@ export default function UsagePage() {
         <div className={s.empty}>No usage in this window.</div>
       ) : (
         <div className={s.stack}>
-          <KpiStrip summary={summary.data} accent={lookup.accent} />
-          <Panel title={`People by ${metricWord}`}>
+          <KpiStrip summary={summary.data} accent={lookup.accent} busy={summary.loading} />
+          <Panel title={`People by ${metricWord}`} busy={people.loading}>
             {people.data ? (
               <BreakdownSection data={people.data} metric={state.metric} lookup={lookup} onSelect={select('person')} />
             ) : (
               <LoadingSpinner />
             )}
           </Panel>
-          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`}>
+          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`} busy={matrix.loading}>
             {matrix.data ? (
               <Heatmap matrix={matrix.data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />
             ) : (
               <LoadingSpinner />
             )}
           </Panel>
-          <Panel>
+          <Panel busy={secondary.loading}>
             <Tabs tabs={TABS} value={state.tab} onChange={(tab) => update({ tab })} />
             {secondaryData ? (
               <BreakdownSection data={secondaryData} metric={state.metric} lookup={lookup} onSelect={select(tabDim)} compact />
