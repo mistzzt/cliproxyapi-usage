@@ -1,6 +1,11 @@
 EMPTY_KEY = "<empty>"
 
 
+def model_key(model: str) -> str:
+    """Display and pricing key for a model id; an empty id becomes ``EMPTY_KEY``."""
+    return model or EMPTY_KEY
+
+
 def redact_key(key: str) -> str:
     """Redact an API key for safe display.
 

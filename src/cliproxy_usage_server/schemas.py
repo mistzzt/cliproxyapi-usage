@@ -62,17 +62,28 @@ class MixEntry(BaseModel):
     cached_tokens: int
 
 
-class ModelPrice(BaseModel):
-    """LiteLLM list price in USD per 1M tokens (base tier, no speed multiplier)."""
+class UnitPrices(BaseModel):
+    """USD per 1M tokens of each type."""
 
     model_config = ConfigDict(frozen=True)
 
-    input: float | None
-    output: float | None
-    cache_read: float | None
-    cache_write: float | None
-    input_above_200k: float | None
-    output_above_200k: float | None
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+
+
+class LongContextPrice(UnitPrices):
+    """Rates past *threshold* tokens, for the whole request or each type's excess."""
+
+    threshold: int
+    whole_request: bool
+
+
+class ModelPrice(UnitPrices):
+    """The rates cost is computed with (base tier, no speed multiplier)."""
+
+    long_context: LongContextPrice | None  # None when the model has no long tier
 
 
 class BreakdownRow(BaseModel):

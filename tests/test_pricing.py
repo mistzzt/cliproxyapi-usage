@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import time
 from datetime import UTC, datetime
@@ -15,8 +14,6 @@ import pytest
 
 from cliproxy_usage_server.pricing import (
     ModelPricing,
-    TokenCounts,
-    compute_cost,
     fetch_pricing,
     resolve,
 )
@@ -66,126 +63,6 @@ def test_resolve_missing(pricing_map: dict[str, ModelPricing]) -> None:
     """Unrelated name → None."""
     result, _ = resolve("totally-unknown-model-xyz", pricing_map)
     assert result is None
-
-
-# ---------------------------------------------------------------------------
-# compute_cost() tests
-# ---------------------------------------------------------------------------
-
-
-def test_compute_cost_flat(pricing_map: dict[str, ModelPricing]) -> None:
-    """gpt-5 flat pricing: input=1000, output=500, cache_read=200."""
-    pricing = pricing_map["gpt-5"]
-    tokens: TokenCounts = {
-        "input_tokens": 1000,
-        "output_tokens": 500,
-        "cache_read_input_tokens": 200,
-    }
-    cost = compute_cost(tokens, pricing)
-    assert pricing.input_cost_per_token is not None
-    assert pricing.output_cost_per_token is not None
-    assert pricing.cache_read_input_token_cost is not None
-    expected = (
-        1000 * pricing.input_cost_per_token
-        + 500 * pricing.output_cost_per_token
-        + 200 * pricing.cache_read_input_token_cost
-    )
-    assert math.isclose(cost, expected, rel_tol=1e-9)
-
-
-def test_compute_cost_tiered_all_above_200k(
-    raw_fixture: dict[str, Any], pricing_map: dict[str, ModelPricing]
-) -> None:
-    """300k/250k/300k/250k tokens with tiered pricing for claude-4-sonnet."""
-    pricing = pricing_map["anthropic/claude-4-sonnet-20250514"]
-    tokens: TokenCounts = {
-        "input_tokens": 300_000,
-        "output_tokens": 250_000,
-        "cache_creation_input_tokens": 300_000,
-        "cache_read_input_tokens": 250_000,
-    }
-    cost = compute_cost(tokens, pricing)
-
-    p = raw_fixture["anthropic/claude-4-sonnet-20250514"]
-    base_in = p["input_cost_per_token"]
-    tier_in = p["input_cost_per_token_above_200k_tokens"]
-    base_out = p["output_cost_per_token"]
-    tier_out = p["output_cost_per_token_above_200k_tokens"]
-    base_cc = p["cache_creation_input_token_cost"]
-    tier_cc = p["cache_creation_input_token_cost_above_200k_tokens"]
-    base_cr = p["cache_read_input_token_cost"]
-    tier_cr = p["cache_read_input_token_cost_above_200k_tokens"]
-
-    expected = (
-        200_000 * base_in
-        + 100_000 * tier_in
-        + 200_000 * base_out
-        + 50_000 * tier_out
-        + 200_000 * base_cc
-        + 100_000 * tier_cc
-        + 200_000 * base_cr
-        + 50_000 * tier_cr
-    )
-    assert math.isclose(cost, expected, rel_tol=1e-9)
-
-
-def test_compute_cost_no_tiered_fallback(pricing_map: dict[str, ModelPricing]) -> None:
-    """gpt-5 (no tiered fields) with 300k input + 250k output → flat pricing."""
-    pricing = pricing_map["gpt-5"]
-    tokens: TokenCounts = {
-        "input_tokens": 300_000,
-        "output_tokens": 250_000,
-    }
-    cost = compute_cost(tokens, pricing)
-    assert pricing.input_cost_per_token is not None
-    assert pricing.output_cost_per_token is not None
-    expected = (
-        300_000 * pricing.input_cost_per_token + 250_000 * pricing.output_cost_per_token
-    )
-    assert math.isclose(cost, expected, rel_tol=1e-9)
-
-
-def test_compute_cost_200k_boundary(pricing_map: dict[str, ModelPricing]) -> None:
-    """Exactly 200k uses base only; 200_001 charges 1 token at tiered rate."""
-    pricing = pricing_map["anthropic/claude-4-sonnet-20250514"]
-    assert pricing.input_cost_per_token is not None
-    assert pricing.input_cost_per_token_above_200k_tokens is not None
-
-    # Exactly 200k → base only
-    tokens_at: TokenCounts = {"input_tokens": 200_000, "output_tokens": 0}
-    cost_at = compute_cost(tokens_at, pricing)
-    assert math.isclose(cost_at, 200_000 * pricing.input_cost_per_token, rel_tol=1e-9)
-
-    # 200_001 → base for 200k + tiered for 1 token
-    tokens_above: TokenCounts = {"input_tokens": 200_001, "output_tokens": 0}
-    cost_above = compute_cost(tokens_above, pricing)
-    expected = (
-        200_000 * pricing.input_cost_per_token
-        + 1 * pricing.input_cost_per_token_above_200k_tokens
-    )
-    assert math.isclose(cost_above, expected, rel_tol=1e-9)
-
-
-def test_compute_cost_fast_multiplier(pricing_map: dict[str, ModelPricing]) -> None:
-    """Model with provider_specific_entry.fast=6.0 → speed='fast' gives 6x standard."""
-    pricing = pricing_map["anthropic/claude-3-5-haiku-fast"]
-    tokens: TokenCounts = {"input_tokens": 1000, "output_tokens": 500}
-
-    standard = compute_cost(tokens, pricing, speed="standard")
-    fast = compute_cost(tokens, pricing, speed="fast")
-    assert math.isclose(fast, standard * 6.0, rel_tol=1e-9)
-
-
-def test_compute_cost_speed_standard_no_multiplier(
-    pricing_map: dict[str, ModelPricing],
-) -> None:
-    """speed='standard' equals no-speed (default)."""
-    pricing = pricing_map["anthropic/claude-3-5-haiku-fast"]
-    tokens: TokenCounts = {"input_tokens": 1000, "output_tokens": 500}
-
-    default = compute_cost(tokens, pricing)
-    standard = compute_cost(tokens, pricing, speed="standard")
-    assert math.isclose(default, standard, rel_tol=1e-9)
 
 
 # ---------------------------------------------------------------------------

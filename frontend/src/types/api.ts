@@ -39,14 +39,23 @@ export interface MixEntry {
   cached_tokens: number;
 }
 
-/** LiteLLM list price in USD per 1M tokens (base tier). */
-export interface ModelPrice {
-  input: number | null;
-  output: number | null;
-  cache_read: number | null;
-  cache_write: number | null;
-  input_above_200k: number | null;
-  output_above_200k: number | null;
+/** USD per 1M tokens of each type. */
+export interface UnitPrices {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+/** Rates past `threshold` tokens, for the whole request or each type's excess. */
+export interface LongContextPrice extends UnitPrices {
+  threshold: number;
+  whole_request: boolean;
+}
+
+/** The rates cost is computed with (base tier, no speed multiplier). */
+export interface ModelPrice extends UnitPrices {
+  long_context: LongContextPrice | null;
 }
 
 export interface BreakdownRow {

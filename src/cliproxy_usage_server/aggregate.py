@@ -35,16 +35,18 @@ from cliproxy_usage_server.pricing import (
     CostStatus,
     ModelPricing,
     PricingResolution,
+    Rates,
     cost_plan,
     resolve,
     rollup_cost_status,
 )
-from cliproxy_usage_server.redact import EMPTY_KEY, redact_key, redact_source
+from cliproxy_usage_server.redact import model_key, redact_key, redact_source
 from cliproxy_usage_server.schemas import (
     BreakdownResponse,
     BreakdownRow,
     Dimension,
     Entity,
+    LongContextPrice,
     MatrixCell,
     MatrixResponse,
     MixEntry,
@@ -54,6 +56,7 @@ from cliproxy_usage_server.schemas import (
     SummaryResponse,
     Totals,
     TrendMetric,
+    UnitPrices,
 )
 
 # Number of entities per dimension that get a fixed color slot.
@@ -106,6 +109,7 @@ class _Cell:
     last_used: datetime
     cost: float
     status: PricingResolution
+    plan: CostPlan | None
 
     def key(self, dim: Dimension) -> str:
         if dim == "person":
@@ -223,10 +227,10 @@ def _fetch_cells(
     pricing: Mapping[str, ModelPricing],
 ) -> list[_Cell]:
     """Group the window into priced (slice, api_key, model, source) cells."""
-    resolved: dict[str, tuple[ModelPricing | None, PricingResolution]] = {
-        m: resolve(m, pricing)
-        for (m,) in conn.execute("SELECT DISTINCT model FROM requests")
+    keys = {
+        m: model_key(m) for (m,) in conn.execute("SELECT DISTINCT model FROM requests")
     }
+    resolved = {m: resolve(k, pricing) for m, k in keys.items()}
     plans: dict[str, CostPlan] = {
         m: cost_plan(entry) for m, (entry, _) in resolved.items() if entry is not None
     }
@@ -315,7 +319,7 @@ def _fetch_cells(
             _Cell(
                 slice_no=slice_no,
                 person=people[api_key],
-                model=model or EMPTY_KEY,
+                model=keys[model],
                 credential=credentials[source],
                 requests=req,
                 failed=failed,
@@ -327,13 +331,14 @@ def _fetch_cells(
                 last_used=_parse_ts(last),
                 cost=cost,
                 status=status,
+                plan=plan,
             )
         )
     return cells
 
 
 def _base_rate(column: str) -> str:
-    """Per-request share of *column* billed at the base rate (mirrors CostPlan.tier)."""
+    """Per-request share of *column* billed at its CostPlan's base rate."""
     return (
         f"CASE WHEN switch THEN (CASE WHEN inp + cr > t THEN 0 ELSE {column} END) "
         f"ELSE MIN({column}, t) END"
@@ -387,9 +392,11 @@ def resolve_redacted_api_keys(
     return [r[0] for r in rows if redact_key(r[0]) in target]
 
 
-def resolve_model_keys(keys: list[str]) -> list[str]:
-    """Map model keys back to raw model ids (``EMPTY_KEY`` is the empty id)."""
-    return ["" if k == EMPTY_KEY else k for k in keys]
+def resolve_model_keys(conn: sqlite3.Connection, keys: list[str]) -> list[str]:
+    """Return the raw model ids whose ``model_key`` value is in *keys*."""
+    target = set(keys)
+    rows = conn.execute("SELECT DISTINCT model FROM requests").fetchall()
+    return [r[0] for r in rows if model_key(r[0]) in target]
 
 
 def resolve_redacted_sources(
@@ -457,24 +464,33 @@ def query_summary(
     )
 
 
-def _per_million(per_token: float | None) -> float | None:
+def _unit_prices(rates: Rates) -> UnitPrices:
     # Rounding drops float noise such as 3e-06 * 1e6 == 3.0000000000000004.
-    return None if per_token is None else round(per_token * 1_000_000, 6)
+    def m(per_token: float) -> float:
+        return round(per_token * 1_000_000, 6)
 
-
-def _model_price(model: str, pricing: Mapping[str, ModelPricing]) -> ModelPrice | None:
-    """List price per 1M tokens from the same resolution used for cost."""
-    entry, _ = resolve(model, pricing)
-    if entry is None:
-        return None
-    return ModelPrice(
-        input=_per_million(entry.input_cost_per_token),
-        output=_per_million(entry.output_cost_per_token),
-        cache_read=_per_million(entry.cache_read_input_token_cost),
-        cache_write=_per_million(entry.cache_creation_input_token_cost),
-        input_above_200k=_per_million(entry.input_cost_per_token_above_200k_tokens),
-        output_above_200k=_per_million(entry.output_cost_per_token_above_200k_tokens),
+    return UnitPrices(
+        input=m(rates.input),
+        output=m(rates.output),
+        cache_read=m(rates.cache_read),
+        cache_write=m(rates.cache_creation),
     )
+
+
+def _model_price(plan: CostPlan | None) -> ModelPrice | None:
+    """Per-1M rates of the plan that prices the model's cost."""
+    if plan is None:
+        return None
+    long_context = (
+        None
+        if plan.above == plan.base
+        else LongContextPrice(
+            **_unit_prices(plan.above).model_dump(),
+            threshold=plan.threshold,
+            whole_request=plan.switch,
+        )
+    )
+    return ModelPrice(**_unit_prices(plan.base).model_dump(), long_context=long_context)
 
 
 def query_breakdown(
@@ -503,8 +519,10 @@ def query_breakdown(
             "cached_tokens": [0.0] * n,
         }
     )
+    plans: dict[str, CostPlan | None] = {}
     for c in _fetch_cells(conn, window, filters, pricing):
         key = c.key(dim)
+        plans[c.model] = c.plan
         per[key].add(c)
         mix[key][c.key(mix_dim)].add(c)
         pos = axis.position(c.slice_no)
@@ -547,7 +565,7 @@ def query_breakdown(
                     )
                     for k in sorted(parts, key=lambda k: parts[k].rank(k))
                 ],
-                price=_model_price(key, pricing) if dim == "model" else None,
+                price=_model_price(plans[key]) if dim == "model" else None,
             )
         )
     return BreakdownResponse(

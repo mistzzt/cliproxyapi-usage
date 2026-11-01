@@ -55,11 +55,11 @@ export function toLocalInput(ms: number): string {
   return format(ms, "yyyy-MM-dd'T'HH:mm");
 }
 
-/** Calendar day picks as whole local days: the first day's midnight to the midnight after the last. */
-export function dayRange(first: Date, last: Date): { start: string; end: string } {
+/** Calendar day picks as whole local days: first day's midnight to the next midnight after the last, capped at now. */
+export function dayRange(first: Date, last: Date, now: number): { start: string; end: string } {
   return {
     start: toLocalInput(startOfDay(first).getTime()),
-    end: toLocalInput(addDays(startOfDay(last), 1).getTime()),
+    end: toLocalInput(Math.min(addDays(startOfDay(last), 1).getTime(), now)),
   };
 }
 

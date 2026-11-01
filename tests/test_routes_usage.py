@@ -155,6 +155,9 @@ def test_price_only_on_model_rows(client: TestClient) -> None:
         "claude-t": 5.0,
         "gpt-t": 8.0,
     }
+    # Missing cache-write rates show the 1.25x input fallback cost uses.
+    claude = next(r["price"] for r in models if r["key"] == "claude-t")
+    assert (claude["cache_write"], claude["long_context"]) == (1.25, None)
     people = _get(client, f"/api/usage/breakdown?dim=person&{Q}")["rows"]
     assert all(r["price"] is None for r in people)
 
@@ -175,7 +178,9 @@ def test_invalid_requests_are_422(client: TestClient, path: str) -> None:
     assert client.get(path).status_code == 422
 
 
-def test_empty_model_and_source_are_addressable(tmp_path: pathlib.Path) -> None:
+def test_empty_model_and_source_are_addressable_and_unpriced(
+    tmp_path: pathlib.Path,
+) -> None:
     db = write_usage_db(
         tmp_path / "empty.db",
         [("2026-10-01T00:00:00Z", "sk-a-bob", "", "", 100, 10, 0)],
@@ -188,7 +193,10 @@ def test_empty_model_and_source_are_addressable(tmp_path: pathlib.Path) -> None:
             c,
             "/api/usage/summary?tz=UTC&models=%3Cempty%3E&credentials=%3Cempty%3E",
         )
+        [row] = _get(c, "/api/usage/breakdown?dim=model&tz=UTC")["rows"]
     assert body["current"]["requests"] == 1
+    # "<empty>" matches no pricing entry, so cost and price agree it is unpriced.
+    assert (body["current"]["cost_status"], row["price"]) == ("missing", None)
 
 
 def test_unmatched_aliases_warn_once_from_options(
@@ -232,7 +240,7 @@ def test_all_time_axis_starts_at_earliest_instant(tmp_path: pathlib.Path) -> Non
 
 
 def test_tiers_apply_per_request_not_per_cell(tmp_path: pathlib.Path) -> None:
-    from test_pricing_ccusage import CLAUDE, GPT_LONG, _cost
+    from test_pricing_ccusage import CLAUDE, GPT_LONG
 
     # Every row lands in one 15-minute slice, so cell sums cross every threshold.
     rows: list[tuple[str, str, str, str, int, int, int]] = [
@@ -271,14 +279,29 @@ def test_tiers_apply_per_request_not_per_cell(tmp_path: pathlib.Path) -> None:
         ("2026-10-01T00:05:00Z", "sk-a-bob", "free-x", "al@x.io", 900_000, 0, 0),
     ]
     pricing = {"claude-x": CLAUDE, "gpt-x": GPT_LONG}
-    expected = sum(
-        _cost(pricing[model], inp, out, cac)
-        for _, _, model, _, inp, out, cac in rows
-        if model in pricing
-    )
+    # Hand-checked per-request sum: claude-x 20 x $0.195 + $0.90, gpt-x
+    # $2.19 (long) + $0.835 + $1.31. Pricing the summed cell would give $14.76.
+    expected = 9.135
     db = write_usage_db(tmp_path / "tiers.db", rows)
     with _client(db, pricing=pricing) as c:
         body = _get(c, "/api/usage/summary?tz=UTC")
         models = _get(c, "/api/usage/breakdown?dim=model&tz=UTC")["rows"]
     assert body["current"]["cost"] == pytest.approx(expected)
     assert sum(r["current"]["cost"] or 0 for r in models) == pytest.approx(expected)
+    # The price column shows the same plan that priced the cost.
+    long: dict[str, Any] = {
+        r["key"]: r["price"] and r["price"]["long_context"] for r in models
+    }
+    assert long["free-x"] is None
+    assert (long["claude-x"]["threshold"], long["claude-x"]["whole_request"]) == (
+        200_000,
+        False,
+    )
+    assert long["gpt-x"] == {
+        "input": 10.0,
+        "output": 45.0,
+        "cache_read": 1.0,
+        "cache_write": 6.25,
+        "threshold": 272_000,
+        "whole_request": True,
+    }

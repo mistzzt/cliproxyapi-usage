@@ -113,7 +113,7 @@ function RangePicker({
   const toDate = selected?.to ?? new Date(now);
   const onCalendar = (r: DateRange | undefined) => {
     if (!r?.from) return;
-    const days = dayRange(r.from, r.to ?? r.from);
+    const days = dayRange(r.from, r.to ?? r.from, now);
     setFrom(days.start);
     setTo(days.end);
   };

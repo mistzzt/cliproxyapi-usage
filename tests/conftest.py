@@ -2,14 +2,17 @@ import json
 import pathlib
 import sqlite3
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.parser import iter_records
 from cliproxy_usage_collect.schemas import RequestRecord
+from cliproxy_usage_server.aggregate import Filters, Window, query_summary
 from cliproxy_usage_server.pricing import ModelPricing
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -99,8 +102,8 @@ SYNTHETIC_PRICING: dict[str, ModelPricing] = {
 }
 
 
-def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
-    records = [
+def _records(rows: Iterable[UsageRow]) -> list[RequestRecord]:
+    return [
         RequestRecord(
             timestamp=ts,
             api_key=key,
@@ -117,10 +120,28 @@ def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
         )
         for ts, key, model, source, inp, out, cac in rows
     ]
+
+
+def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
     conn = open_db(db_path)
-    insert_records(conn, records)
+    insert_records(conn, _records(rows))
     conn.close()
     return db_path
+
+
+def request_cost(pricing: ModelPricing, inp: int, out: int, cached: int) -> float:
+    """Cost of one request with these raw DB counts, priced by the production query."""
+    conn = open_db(Path(":memory:"))
+    insert_records(
+        conn, _records([("2026-10-01T00:00:00Z", "k", "m", "s", inp, out, cached)])
+    )
+    window = Window(None, datetime(2100, 1, 1, tzinfo=UTC))
+    summary = query_summary(
+        conn, window, None, ZoneInfo("UTC"), Filters(), {"m": pricing}
+    )
+    conn.close()
+    assert summary.current.cost is not None
+    return summary.current.cost
 
 
 @pytest.fixture

@@ -114,7 +114,9 @@ class _RangeParams:
                 else None
             ),
             models=(
-                resolve_model_keys(self.models) if self.models is not None else None
+                resolve_model_keys(conn, self.models)
+                if self.models is not None
+                else None
             ),
             sources=(
                 resolve_redacted_sources(conn, self.credentials)

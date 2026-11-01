@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NamedTuple, TypedDict
+from typing import Literal, NamedTuple
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -25,15 +25,11 @@ __all__ = [
     "CostStatus",
     "ModelPricing",
     "PricingResolution",
-    "ProviderEntry",
     "Rates",
-    "TokenCounts",
-    "compute_cost",
     "cost_plan",
     "fetch_pricing",
     "resolve",
     "rollup_cost_status",
-    "split_tokens_for_cost",
 ]
 
 PricingResolution = Literal["live", "missing"]
@@ -53,36 +49,6 @@ def _uses_openai_token_accounting(pricing: ModelPricing) -> bool:
     return provider in _OPENAI_LITELLM_PROVIDERS
 
 
-def split_tokens_for_cost(
-    pricing: ModelPricing,
-    input_tokens: int,
-    output_tokens: int,
-    cached_tokens: int,
-) -> TokenCounts:
-    """Return TokenCounts ready for compute_cost.
-
-    For OpenAI-convention providers cached_tokens is treated as a subset of
-    input_tokens. This mirrors ccusage's Codex cost split and OpenAI Responses
-    token accounting.
-
-    For all other sources the values pass through: cached_tokens flow into
-    cache_read_input_tokens and input_tokens stays as the already-uncached
-    count (Anthropic / Gemini convention).
-    """
-    if _uses_openai_token_accounting(pricing):
-        cache_read = min(cached_tokens, input_tokens)
-        return {
-            "input_tokens": max(input_tokens - cache_read, 0),
-            "output_tokens": output_tokens,
-            "cache_read_input_tokens": cache_read,
-        }
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_read_input_tokens": cached_tokens,
-    }
-
-
 _log = logging.getLogger(__name__)
 
 _THRESHOLD_200K = 200_000
@@ -97,12 +63,6 @@ PREFIX_CANDIDATES: tuple[str, ...] = (
     "azure/",
     "openrouter/openai/",
 )
-
-
-class ProviderEntry(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    fast: float | None = None
 
 
 class ModelPricing(BaseModel):
@@ -122,14 +82,6 @@ class ModelPricing(BaseModel):
     output_cost_per_token_above_272k_tokens: float | None = None
     cache_creation_input_token_cost_above_272k_tokens: float | None = None
     cache_read_input_token_cost_above_272k_tokens: float | None = None
-    provider_specific_entry: ProviderEntry | None = None
-
-
-class TokenCounts(TypedDict, total=False):
-    input_tokens: int
-    output_tokens: int
-    cache_creation_input_tokens: int
-    cache_read_input_tokens: int
 
 
 def resolve(
@@ -190,7 +142,10 @@ Amounts = tuple[int, int, int, int]  # token counts in ``Rates`` field order
 
 
 class CostPlan(NamedTuple):
-    """How one model bills a request, following ccusage."""
+    """How one model bills a request, following ccusage.
+
+    ``aggregate._fetch_cells`` applies it per request in SQL; ``price`` prices the sums.
+    """
 
     openai: bool  # cached tokens are reported inside input_tokens
     # True: past the threshold the whole request bills at `above`.
@@ -199,17 +154,6 @@ class CostPlan(NamedTuple):
     threshold: int
     base: Rates
     above: Rates
-
-    def tier(self, amounts: Amounts) -> tuple[Amounts, Amounts]:
-        """Split one request's split-form token counts into (base-rate, above-rate)."""
-        none: Amounts = (0, 0, 0, 0)
-        if self.switch:
-            inp, _, cache_creation, cache_read = amounts
-            long = inp + cache_creation + cache_read > self.threshold
-            return (none, amounts) if long else (amounts, none)
-        i, o, cc, cr = (min(n, self.threshold) for n in amounts)
-        base: Amounts = (i, o, cc, cr)
-        return base, (amounts[0] - i, amounts[1] - o, amounts[2] - cc, amounts[3] - cr)
 
     def price(self, base: Amounts, above: Amounts) -> float:
         """Cost of token sums billed at the base and above rates."""
@@ -263,38 +207,6 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
 
 def _or(value: float | None, default: float) -> float:
     return default if value is None else value
-
-
-def compute_cost(
-    tokens: TokenCounts,
-    pricing: ModelPricing,
-    *,
-    speed: Literal["standard", "fast"] = "standard",
-) -> float:
-    """Return the USD cost of one request's split-form *tokens* given *pricing*.
-
-    Tiers apply per request (see ``cost_plan``); never pass summed counts. When
-    speed='fast' and pricing.provider_specific_entry.fast is set, multiplies the
-    total by that value.
-    """
-    plan = cost_plan(pricing)
-    amounts: Amounts = (
-        tokens.get("input_tokens", 0),
-        tokens.get("output_tokens", 0),
-        tokens.get("cache_creation_input_tokens", 0),
-        tokens.get("cache_read_input_tokens", 0),
-    )
-    total = plan.price(*plan.tier(amounts))
-
-    multiplier = 1.0
-    if (
-        speed == "fast"
-        and pricing.provider_specific_entry is not None
-        and pricing.provider_specific_entry.fast is not None
-    ):
-        multiplier = pricing.provider_specific_entry.fast
-
-    return total * multiplier
 
 
 # ---------------------------------------------------------------------------

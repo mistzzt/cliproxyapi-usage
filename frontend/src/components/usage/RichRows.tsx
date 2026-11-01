@@ -65,7 +65,7 @@ export default function RichRows({
             <th>{DIMENSION_LABEL[mixDim]} mix</th>
             {dim === 'model' && th('cacheHit', 'Cache hit')}
             {dim === 'model' && (
-              <th className={s.num} title="LiteLLM list price per 1M tokens: input / output / cache read">
+              <th className={s.num} title="Price per 1M tokens used for cost: input / output / cache read">
                 Price / 1M
               </th>
             )}
