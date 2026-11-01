@@ -37,7 +37,7 @@ Data flow (`src/cliproxy_usage_collect/`):
 
 ### Webapp (`src/cliproxy_usage_server/` + `frontend/`)
 
-FastAPI + Vite/React dashboard that reads `usage.db` **read-only** and serves usage/quota JSON endpoints plus the built SPA at `/`. Single-process deployment via `uv run cliproxy-usage-server`. Env vars are documented in README.
+FastAPI + Vite/React dashboard that reads `usage.db` **read-only** and serves usage/quota JSON endpoints plus the built SPA at `/` (client routes: usage page at `/usage`, limits at `/limits`; `/` and unknown paths redirect to `/usage`). Single-process deployment via `uv run cliproxy-usage-server`. Env vars are documented in README.
 
 - `config.py`: `ServerConfig` via pydantic-settings; same `AliasChoices` + `_env_name` error-translation pattern as the collector. `load_key_aliases` reads `USAGE_KEY_ALIASES` (path to a JSON object, redacted key to display name); unset or absent file gives `{}`, malformed content raises `ConfigError`.
 - Usage endpoints (`routes/usage.py`, under `/api/usage`): `summary` (KPI totals, previous period, dense `cost`/`input_tokens`/`output_tokens`/`cached_tokens`/`requests` series), `breakdown?dim=person|model|credential` (one row per entity with current/previous totals, `cost`/`input_tokens`/`output_tokens`/`cached_tokens` trend aligned to `buckets`, paired-dimension `mix`: person to model, model and credential to person), `matrix?rows=&cols=` (sparse cross tab, default person x model, no time axis, `rows == cols` is 422), `options` (no params; every entity per dimension with `label` and color `slot`).

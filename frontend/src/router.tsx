@@ -18,10 +18,10 @@ export function AppRouter() {
     <BrowserRouter basename={runtimeConfig.basePath}>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<UsagePage />} />
+          <Route path="/usage" element={<UsagePage />} />
           <Route path="/limits" element={<QuotaPage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/usage" replace />} />
       </Routes>
     </BrowserRouter>
   );

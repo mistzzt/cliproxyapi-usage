@@ -8,7 +8,7 @@ export default function AppHeader() {
       <nav className={styles.nav}>
         <div className={styles.links}>
           <NavLink
-            to="/"
+            to="/usage"
             end
             className={({ isActive }) => `${styles.link}${isActive ? ` ${styles.active}` : ''}`}
           >

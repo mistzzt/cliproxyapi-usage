@@ -104,17 +104,17 @@ A local dashboard (`cliproxy-usage-server`) serves a read-only FastAPI backend
 plus a React SPA built with Vite, backed by the same `usage.db` produced by the
 collector.
 
-The usage page (`/`) answers how much each person uses and what share of the
-total that is; a person is one API key, shown redacted or by its alias from
-`USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average
-latency with the change against the previous period of equal length, a share bar
-and per-row trends for people, a people by model heatmap, and Models /
-Credentials tabs. Clicking a row opens a detail drawer with that entity's trend
-and mix. Tokens always mean input + output tokens (cached tokens excluded). Time
-buckets (hour, day, or week) follow the browser's timezone. Filters and view
-settings live in the URL, so links are shareable, and opening the page without
-them restores the last view. Entity colors are fixed by all-time spend, so they
-do not change with filters.
+The usage page (`/usage`; `/` redirects there) answers how much each person uses
+and what share of the total that is; a person is one API key, shown redacted or
+by its alias from `USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure
+rate, and average latency with the change against the previous period of equal
+length, a share bar and per-row trends for people, a people by model heatmap,
+and Models / Credentials tabs. Clicking a row opens a detail drawer with that
+entity's trend and mix. Tokens always mean input + output tokens (cached tokens
+excluded). Time buckets (hour, day, or week) follow the browser's timezone.
+Filters and view settings live in the URL, so links are shareable, and opening
+the page without them restores the last view. Entity colors are fixed by
+all-time spend, so they do not change with filters.
 
 The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`,
 `/api/usage/matrix`, `/api/usage/options`, and the quota endpoints under
@@ -225,12 +225,14 @@ uv run cliproxy-usage-server
 ```
 
 The SPA is built into `frontend/dist/` and served at `/` by default;
-FastAPI handles `/api/*`. Visit `http://127.0.0.1:8318/` and browse.
+FastAPI handles `/api/*`. Visit `http://127.0.0.1:8318/usage` (or `/`, which
+redirects there) and browse.
 
 To deploy the same build under a URL prefix, set `USAGE_BASE_PATH` before
-starting the server. For example, `USAGE_BASE_PATH=/api-usage` serves the SPA
-at `/api-usage/`, client routes such as `/api-usage/limits`, static assets at
-`/api-usage/assets/*`, and JSON endpoints at `/api-usage/api/*`.
+starting the server. For example, `USAGE_BASE_PATH=/api-usage` serves the SPA at
+`/api-usage/`, client routes such as `/api-usage/usage` and `/api-usage/limits`,
+static assets at `/api-usage/assets/*`, and JSON endpoints at
+`/api-usage/api/*`.
 
 ### Dev workflow
 
