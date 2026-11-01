@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useQuotaStore } from '@/stores';
 import type { QuotaProvider } from '@/types/api';
-import AppHeader from '@/components/ui/AppHeader';
 import QuotaCard from '@/components/quota/QuotaCard';
 import styles from './QuotaPage.module.scss';
 
@@ -69,7 +68,6 @@ export default function QuotaPage() {
 
   return (
     <div className={styles.page}>
-      <AppHeader />
       <div className={styles.header}>
         <h1 className={styles.title}>Plan Limits</h1>
       </div>

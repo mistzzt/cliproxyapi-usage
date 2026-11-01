@@ -30,7 +30,7 @@
           outputHashMode = "recursive";
           outputHash =
             {
-              x86_64-linux = "sha256-/FiVzhvUB6hE7QBG35fw9tonqC9bLEmJCL9ty3ZqjWc=";
+              x86_64-linux = "sha256-UpM/RNZjGnV84tlr+lsATuzub2O91kpPEebIJ3zydTw=";
               aarch64-linux = pkgs.lib.fakeHash;
               x86_64-darwin = pkgs.lib.fakeHash;
               aarch64-darwin = pkgs.lib.fakeHash;

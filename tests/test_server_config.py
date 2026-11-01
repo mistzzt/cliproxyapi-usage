@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cliproxy_usage_server.config import ConfigError, load_config
+from cliproxy_usage_server.config import ConfigError, load_config, load_key_aliases
 
 # Env vars that must be cleared so tests stay hermetic even if the process env
 # happens to have them set (e.g. from .envrc).
@@ -21,6 +21,7 @@ _ALL_ENVS = (
     "CLIPROXY_BASE_URL",
     "CLIPROXY_MANAGEMENT_KEY",
     "QUOTA_CACHE_TTL_SECONDS",
+    "USAGE_KEY_ALIASES",
 )
 
 
@@ -140,3 +141,11 @@ def test_quota_settings_invalid_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config()
     assert "QUOTA_CACHE_TTL_SECONDS" in str(excinfo.value)
+
+
+def test_load_key_aliases_absent_vs_malformed(tmp_path: Path) -> None:
+    path = tmp_path / "aliases.json"
+    assert load_key_aliases(None) == load_key_aliases(path) == {}
+    path.write_text('{"k": 1}')
+    with pytest.raises(ConfigError, match="USAGE_KEY_ALIASES"):
+        load_key_aliases(path)

@@ -9,6 +9,7 @@ Dependency manager: `uv` (Python >=3.12; `.python-version` pins 3.14). Frontend 
 - Install deps: `uv sync`
 - Run the collector: `uv run cliproxy-usage-collect` (requires `CLIPROXY_MANAGEMENT_KEY`; see README for all env vars). `.envrc` in the repo root (gitignored) exports a working `CLIPROXY_BASE_URL` + key for the upstream dev proxy.
 - Run the webapp: `uv run cliproxy-usage-server` (serves `http://127.0.0.1:8318/`).
+- Frontend commands need `bun`; when it is not on PATH, run them inside the flake dev shell (Python 3.14, uv, bun): `nix develop -c bash -c 'cd frontend && bun test && bun run lint && bun run build'`.
 - Frontend dev: `cd frontend && bun install && bun run dev` (Vite on `:5173` proxies `/api` to `:8318`).
 - Frontend build: `cd frontend && bun run build` (outputs into `frontend/dist/`).
 - Run backend tests: `uv run pytest`
@@ -16,6 +17,7 @@ Dependency manager: `uv` (Python >=3.12; `.python-version` pins 3.14). Frontend 
 - Frontend tests: `cd frontend && bun test` (bun:test suites colocated with the pure logic modules they cover)
 - Lint: `uv run ruff check` / `uv run ruff format`; frontend `cd frontend && bun run lint`
 - Type-check: `uv run basedpyright` (config in `pyproject.toml`: `include = ["src", "tests"]`, mode `standard`); frontend type errors surface via `bun run build` (`tsc -b`)
+- Nix package: `nix build` (builds the frontend into the Python package). Frontend dependency changes must update the x86_64-linux `outputHash` in `flake.nix`.
 
 `state/` (gitignored) holds a local `usage.db` and `pricing.json` for development.
 
@@ -35,35 +37,39 @@ Data flow (`src/cliproxy_usage_collect/`):
 
 ### Webapp (`src/cliproxy_usage_server/` + `frontend/`)
 
-FastAPI + Vite/React dashboard that reads `usage.db` **read-only** and serves usage/pricing/quota JSON endpoints plus the built SPA at `/`. Single-process deployment via `uv run cliproxy-usage-server`. Env vars are documented in README.
+FastAPI + Vite/React dashboard that reads `usage.db` **read-only** and serves usage/quota JSON endpoints plus the built SPA at `/`. Single-process deployment via `uv run cliproxy-usage-server`. Env vars are documented in README.
 
-- `config.py`: `ServerConfig` via pydantic-settings; same `AliasChoices` + `_env_name` error-translation pattern as the collector.
-- `db.py`: `open_ro(path)` via `file:...?mode=ro` URI; bucket helpers `bucket_for_span` (span <= 48h gets hour buckets, else day) and `coarsen_bucket` (auto-coarsens hour to day beyond ~10 days to cap bucket counts); `tz_sql_modifier` builds the SQLite strftime timezone modifier.
-- Time windows: range-consuming endpoints take an explicit `(start, end)` pair of ISO-8601 instants plus `tz_offset_minutes` (viewer-local bucketing), not a rolling-range enum. `start` absent means all time; naive datetimes and `start > end` are 422s. The effective bucket is echoed back in responses.
-- `aggregate.py`: one query helper per endpoint (`query_totals`, `query_timeseries`, `query_token_breakdown`, `query_api_stats`, `query_model_stats`, `query_credential_stats`, `query_health`, ...); buckets are **dense** (missing intervals zero-filled in Python, generated off the range window).
-- `pricing.py`: hand-ported subset of ccusage's litellm pricing (`ModelPricing`, `resolve`, tiered-200k `compute_cost`, disk cache with TTL). Cache lives at `<db_parent>/pricing.json` by default. Cost series are computed by applying `compute_cost` to per-bucket-per-model token splits (see `routes/usage.py` module docstring).
-- `redact.py`: API keys and credential sources are redacted before leaving the server; `resolve_redacted_api_keys` in `aggregate.py` maps redacted filter values back to real keys.
-- `main.py`: `create_app(config, *, pricing_provider=None)` + `run()`. Lifespan loads pricing on startup and schedules a background TTL refresh. SPA static mount only happens if `frontend/dist/` exists (so backend-only test runs don't need built assets). Routers live in `routes/`.
+- `config.py`: `ServerConfig` via pydantic-settings; same `AliasChoices` + `_env_name` error-translation pattern as the collector. `load_key_aliases` reads `USAGE_KEY_ALIASES` (path to a JSON object, redacted key to display name); unset or absent file gives `{}`, malformed content raises `ConfigError`.
+- Usage endpoints (`routes/usage.py`, under `/api/usage`): `summary` (KPI totals, previous period, dense `cost`/`input_tokens`/`output_tokens`/`cached_tokens`/`requests` series), `breakdown?dim=person|model|credential` (one row per entity with current/previous totals, `cost`/`input_tokens`/`output_tokens`/`cached_tokens` trend aligned to `buckets`, paired-dimension `mix`: person to model, model and credential to person), `matrix?rows=&cols=` (sparse cross tab, default person x model, no time axis, `rows == cols` is 422), `options` (no params; every entity per dimension with `label` and color `slot`).
+- Range params (all but `options`): `start` (optional; absent means all time, and then `previous` is `None`), `end` (default now), `tz` (required IANA name), comma-separated `people` (redacted keys), `models`, `credentials` (redacted sources); `summary`/`breakdown` also take `bucket=auto|hour|day|week`. Naive datetimes, `start > end`, and unknown `tz` are 422s. The previous period is the equal-length window ending at `start`. The effective bucket is echoed back.
+- `db.py`: `open_ro(path)` via `file:...?mode=ro` URI; viewer-local bucketing in the IANA `tz` (DST aware): day buckets run local midnight to midnight, week buckets start Monday 00:00 local. `auto_bucket` picks hour up to 2 days, day up to 120 days, week beyond; `effective_bucket` coarsens an explicit bucket to the next unit past `MAX_BUCKETS` (1,000). `bucket_starts` builds the dense axis; `SliceIndexer` maps 15-minute UTC slices onto it.
+- `aggregate.py`: every endpoint aggregates one grouped query, `_fetch_cells`: rows per (15-minute UTC slice, api_key, model, source), each priced with `split_tokens_for_cost` + `compute_cost`. Totals, rows, trends, and matrix cells are sums of the same cells, so they always agree and cost does not depend on the bucket. Helpers: `query_summary`, `query_breakdown`, `query_matrix`, `query_options`. All-time axes start at the first recorded request. Rows, mixes, and matrix axes sort by cost desc, then tokens desc.
+- Tokens everywhere mean input + output (cached excluded); the stored `total_tokens` column is never summed. The API returns only the raw components (`input_tokens`, `output_tokens`, `cached_tokens` in totals, series, trends, mix entries, and matrix cells); the frontend derives tokens with `tokens`/`tokenSeries` in `src/utils/usage/totals.ts`, the single definition. Latency is average only.
+- People are API keys redacted with `redact_key` (raw keys that redact alike merge into one person); `label` is the `USAGE_KEY_ALIASES` name or the redacted key as-is. Unmatched alias entries are logged once at startup. Models and credentials use their key as label. Credentials are sources redacted with `redact_source` (email sources pass through). `resolve_redacted_api_keys` / `resolve_redacted_sources` map redacted filter values back to raw values.
+- Color slots: `options` ranks each dimension by all-time spend; the top 7 (`SLOT_COUNT`) get slots 0..6, the rest `None` ("Other"), so colors never change with filters.
+- `pricing.py`: hand-ported subset of ccusage's litellm pricing (`ModelPricing`, `resolve`, tiered-200k `compute_cost`, disk cache with TTL). Cache lives at `<db_parent>/pricing.json` by default. Missing pricing is signalled by `cost_status` (`live`/`partial_missing`/`missing`); there is no pricing endpoint. Model breakdown rows carry `price` (LiteLLM list price per 1M tokens: input, output, cache read/write, above-200k input/output) from the same `resolve` used for cost; `None` when unpriced or not a model row.
+- `main.py`: `create_app(config, *, pricing_provider=None, quota_service_factory=None)` + `run()`. Lifespan loads pricing on startup and schedules a background TTL refresh. SPA static mount only happens if `frontend/dist/` exists (so backend-only test runs don't need built assets); unknown `/api/*` paths 404 instead of returning the SPA shell. `/usage-config.js` injects base path, API base, and page title at runtime.
 - `quota/`: quota API client, provider parsers, TTL cache, and service layer for Claude/Codex OAuth quota lookups through CLIProxyAPI's management API.
-- `routes/usage.py`, `routes/pricing.py`, `routes/quota.py`: each exposes `build_router(...)` factories included in `main.py` under `/api`.
+- `routes/usage.py`, `routes/quota.py`: each exposes a `build_router(...)` factory included in `main.py` under `/api`.
 
 Shared-schema rule: response DTOs live in `cliproxy_usage_server/schemas.py`. The frontend types in `frontend/src/types/api.ts` are **hand-maintained** to match those DTOs; keep them in sync when backend schemas change.
 
 ### Frontend (`frontend/`)
 
-Bun + Vite + React 19 + TypeScript (strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` + `verbatimModuleSyntax`) + Chart.js (with chartjs-plugin-zoom) + SCSS modules + Zustand + react-router v7 + react-day-picker/date-fns for the range calendar. Path alias `@/*` maps to `./src/*`.
+Bun + Vite + React 19 + TypeScript (strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` + `verbatimModuleSyntax`) + Chart.js (registered in `src/components/charts/chart-setup.ts`) + SCSS modules + Zustand (theme and quota stores) + react-router v7 + Radix popover + react-day-picker/date-fns for the range calendar. Path alias `@/*` maps to `./src/*`.
 
-- Pages: `src/pages/UsagePage.tsx` (orchestration) and `src/pages/QuotaPage.tsx`; API clients in `src/services/`.
-- Components under `src/components/{ui,usage,quota,charts}/`.
-- The unified usage explorer (`src/components/usage/explorer/`) replaced the old per-metric charts. Its state machine is a **pure module** (`explorerState.ts`): metric (requests/tokens/cost) x breakdown (total/model/token_type) x granularity x display (line/stacked), with `normalizeExplorerState` snapping invalid combinations to valid ones. Companion pure modules `otherSeries.ts` and `requestSelection.ts` handle top-N "other" bucketing and series selection.
-- Pure logic lives in plain `.ts` modules with colocated `*.test.ts` files run by `bun test` (also `src/utils/rangeResolver.ts`). Keep new chart/state logic in this testable pure-module style rather than inside components.
-- Persistent UI state uses localStorage keys following the `usage.*.v1` convention.
+- Pages: `src/pages/UsagePage.tsx` (route `/`) and `src/pages/QuotaPage.tsx` (route `/limits`), rendered under a layout route in `src/router.tsx` that draws the shared top bar (`src/components/ui/AppHeader.tsx`, which owns its own inset); pages pad only their own content. API clients in `src/services/` (`api.ts`: `getSummary`, `getBreakdown`, `getMatrix`, `getOptions`; `quotaApi.ts`).
+- Usage page, top to bottom: sticky `FilterBar` (range presets or custom date+time, people/models/credentials multi-selects, granularity, metric cost/tokens), `KpiStrip` (spend, tokens, requests, failure rate, avg latency, change vs previous period), "People by {metric}" (`ShareBar` + `RichRows`), `Heatmap` (people x models matrix), Models/Credentials tabs (`ShareBar` + `RichRows`), and `DetailDrawer` (opened from any row, segment, or heatmap row; calls `summary`/`breakdown` with the entity added to the filters; "Filter page to this" applies it). Components live in `src/components/usage/`; `TimeChart.tsx` is the Chart.js stacked bar chart.
+- `RichRows` is generic over dimension: share, spend, tokens, change, trend strip with shared hover bucket, mix bar, failure rate; models add cache hit rate, list price, latency; credentials add last used.
+- Pure logic lives in `src/utils/usage/*.ts` with colocated `*.test.ts` (bun:test): `range` (presets, custom windows, `resolveRange` to API params with `viewerTimeZone()`), `viewState` (URL parse/serialize, `usageQueryParams`, `scopeToEntity`), `format`, `dates`, `modelNames` (short names, families), `palette` (7 light + 7 dark slots plus Other gray), `entities` (label/slot lookup from `options`), `share` (Other folding), `stack`, `richRows` (row derivation, mix sorting, sort state), `heatmap` (column selection, bins), `price`, `totals` (failure and cache hit rates, `tokens`/`tokenSeries`). Keep new chart/state logic in this testable pure-module style rather than inside components.
+- View state (range, filters, granularity, metric, tab, open drawer) lives in the URL query string via `src/hooks/useUsageViewState.ts`; a load with no query string restores localStorage key `usage.view.v1`. The browser's IANA timezone is sent as `tz` on every range request.
+- Every place the UI names an entity uses the server `label` (model ids shortened by `modelNames` for display); colors come from `options` slots, never from filtered ranks.
 
 Authentication is delegated to an upstream reverse proxy; the app itself exposes `/api/*` without access control.
 
 ## Tests
 
-- `tests/`: pytest suite; JSON fixtures live in `tests/fixtures/`. `conftest.py` exposes queue-record fixtures for the collector and a `seeded_db_path` fixture for server/dashboard DB seeding.
+- `tests/`: pytest suite; JSON fixtures live in `tests/fixtures/`. `conftest.py` exposes queue-record fixtures for the collector, `seeded_db_path` (one key, 40 minutes of data), and `synthetic_db_path` (multi-person, multi-model, spans the 2026-11-01 DST change in `America/Chicago`) for server tests; `write_usage_db` builds custom DBs.
 - `test_queue_client.py` uses `httpx.MockTransport`; prefer that over a real CLIProxyAPI process.
 - Frontend tests are bun:test, colocated with the modules they test.
 

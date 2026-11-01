@@ -6,186 +6,142 @@ Immutable pydantic models for request/response validation.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from cliproxy_usage_server.db import Bucket
 from cliproxy_usage_server.pricing import CostStatus
-from cliproxy_usage_server.redact import redact_key, redact_source
 
-RedactedApiKey = Annotated[str, BeforeValidator(redact_key)]
-RedactedSource = Annotated[str, BeforeValidator(redact_source)]
+Dimension = Literal["person", "model", "credential"]
+TrendMetric = Literal["cost", "input_tokens", "output_tokens", "cached_tokens"]
+SeriesMetric = Literal[
+    "cost", "input_tokens", "output_tokens", "cached_tokens", "requests"
+]
 
 
 class Totals(BaseModel):
-    """Summary totals."""
+    """Aggregate usage over a window; derived "tokens" is a frontend concern."""
 
     model_config = ConfigDict(frozen=True)
 
     requests: int
-    tokens: int
+    failed: int
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    reasoning_tokens: int
     cost: float | None
     cost_status: CostStatus
-    rpm: float
-    tpm: float
+    avg_latency_ms: float
+    last_used: datetime | None
 
 
-class SparklinePoint(BaseModel):
-    """Single point in a sparkline."""
-
-    model_config = ConfigDict(frozen=True)
-
-    ts: str  # ISO-8601
-    value: float
-
-
-class Sparklines(BaseModel):
-    """Collection of sparkline series."""
+class SummaryResponse(BaseModel):
+    """``GET /api/usage/summary``: KPI totals plus dense per-bucket series."""
 
     model_config = ConfigDict(frozen=True)
 
-    requests: list[SparklinePoint]
-    tokens: list[SparklinePoint]
-    rpm: list[SparklinePoint]
-    tpm: list[SparklinePoint]
-    cost: list[SparklinePoint]
+    bucket: Bucket  # effective bucket after auto selection / coarsening
+    buckets: list[datetime]  # bucket starts in the viewer's timezone, dense
+    current: Totals
+    previous: Totals | None  # None when the window has no start (all time)
+    series: dict[SeriesMetric, list[float]]
 
 
-class LatencyPercentiles(BaseModel):
-    """Latency percentile values."""
+class MixEntry(BaseModel):
+    """One slice of a row's paired-dimension mix."""
 
     model_config = ConfigDict(frozen=True)
 
-    p50: float
-    p95: float
-    p99: float
+    key: str
+    label: str
+    cost: float | None
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
 
 
-class PricingEntry(BaseModel):
-    """Pricing for a single model."""
+class ModelPrice(BaseModel):
+    """LiteLLM list price in USD per 1M tokens (base tier, no speed multiplier)."""
 
     model_config = ConfigDict(frozen=True)
 
     input: float | None
     output: float | None
     cache_read: float | None
-    cache_creation: float | None
-    tiered: bool
+    cache_write: float | None
+    input_above_200k: float | None
+    output_above_200k: float | None
 
 
-class OverviewResponse(BaseModel):
-    """Overview endpoint response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    totals: Totals
-    sparklines: Sparklines
-
-
-class TimeseriesResponse(BaseModel):
-    """Timeseries endpoint response."""
+class BreakdownRow(BaseModel):
+    """One entity (person, model, or credential) in a breakdown."""
 
     model_config = ConfigDict(frozen=True)
 
-    buckets: list[str]  # ISO-8601 strings
-    series: dict[str, list[float]]  # key: model name or "__all__"
-    series_status: dict[str, CostStatus] = Field(default_factory=dict)
-    bucket: Literal["hour", "day"]  # effective bucket after auto-coarsening
+    key: str  # redacted key / model id / redacted source
+    label: str
+    current: Totals
+    previous: Totals | None
+    trend: dict[TrendMetric, list[float]]  # aligned with the response buckets
+    mix: list[MixEntry]  # paired dimension: person -> model, others -> person
+    price: ModelPrice | None  # model rows only; None when unpriced or not a model
 
 
-class TokenBreakdownResponse(BaseModel):
-    """Token breakdown endpoint response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    buckets: list[str]
-    input: list[int]
-    output: list[int]
-    cached: list[int]
-    reasoning: list[int]
-    bucket: Literal["hour", "day"]  # effective bucket after auto-coarsening
-
-
-class ApiStat(BaseModel):
-    """Statistics for a single API key."""
+class BreakdownResponse(BaseModel):
+    """``GET /api/usage/breakdown``: per-entity rows for one dimension."""
 
     model_config = ConfigDict(frozen=True)
 
-    api_key: RedactedApiKey
-    requests: int
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+    dim: Dimension
+    bucket: Bucket
+    buckets: list[datetime]
+    rows: list[BreakdownRow]
+
+
+class MatrixCell(BaseModel):
+    """One (row entity, column entity) cell of the usage matrix."""
+
+    model_config = ConfigDict(frozen=True)
+
+    row: str
+    col: str
     cost: float | None
-    cost_status: CostStatus
-    failed: int
-    avg_latency_ms: float
-
-
-class ModelStat(BaseModel):
-    """Statistics for a single model."""
-
-    model_config = ConfigDict(frozen=True, protected_namespaces=())
-
-    model: str
-    requests: int
     input_tokens: int
     output_tokens: int
     cached_tokens: int
-    reasoning_tokens: int
-    total_tokens: int
-    cost: float | None
-    cost_status: CostStatus
-    avg_latency_ms: float
-    failed: int
-
-
-class CredentialStat(BaseModel):
-    """Statistics for a single credential."""
-
-    model_config = ConfigDict(frozen=True)
-
-    source: RedactedSource
     requests: int
-    total_tokens: int
-    failed: int
-    cost: float | None
-    cost_status: CostStatus
 
 
-class HealthResponse(BaseModel):
-    """Health endpoint response."""
+class MatrixResponse(BaseModel):
+    """``GET /api/usage/matrix``: sparse cross tabulation of two dimensions."""
 
     model_config = ConfigDict(frozen=True)
 
-    total_requests: int
-    failed: int
-    failed_rate: float  # 0.0-1.0
-    latency: LatencyPercentiles
+    rows: list[str]
+    cols: list[str]
+    cells: list[MatrixCell]  # sparse; absent means zero
 
 
-class ModelsResponse(BaseModel):
-    """Models endpoint response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    models: list[str]
-
-
-class ApiKeysResponse(BaseModel):
-    """Api-keys endpoint response (redacted)."""
+class Entity(BaseModel):
+    """A filterable entity with its stable color slot."""
 
     model_config = ConfigDict(frozen=True)
 
-    api_keys: list[RedactedApiKey]
+    key: str
+    label: str
+    slot: int | None  # 0..6 by all-time spend rank; None folds to "Other"
 
 
-class PricingResponse(BaseModel):
-    """Pricing endpoint response."""
+class OptionsResponse(BaseModel):
+    """``GET /api/usage/options``: every entity per dimension, by all-time spend."""
 
     model_config = ConfigDict(frozen=True)
 
-    pricing: dict[str, PricingEntry]
+    people: list[Entity]
+    models: list[Entity]
+    credentials: list[Entity]
 
 
 class QuotaAccount(BaseModel):

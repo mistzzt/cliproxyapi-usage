@@ -24,8 +24,7 @@ export function readThemeColors(): ChartThemeColors {
   };
 }
 
-// Fully theme-wired Chart.js tooltip config. Spread into
-// `options.plugins.tooltip` so the three chart files stay in lock-step.
+// Fully theme-wired Chart.js tooltip config; spread into `options.plugins.tooltip`.
 export interface ChartTooltipConfig {
   enabled: true;
   backgroundColor: string;

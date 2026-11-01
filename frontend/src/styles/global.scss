@@ -6,6 +6,14 @@
   box-sizing: border-box;
 }
 
+:root {
+  --page-gutter: #{$space-5};
+
+  @media (max-width: 768px) {
+    --page-gutter: #{$space-4};
+  }
+}
+
 html,
 body,
 #root {

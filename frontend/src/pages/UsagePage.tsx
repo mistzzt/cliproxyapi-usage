@@ -1,258 +1,156 @@
-import { useState, useMemo } from 'react';
-import type { Bucket, RangeSpec } from '@/types/api';
-import { resolveRange, formatCalendarLabel } from '@/utils/rangeResolver';
-import {
-  getOverview,
-  getApiStats,
-  getModelStats,
-  getCredentialStats,
-  getHealth,
-  getModels,
-  getApiKeys,
-  getPricing,
-} from '@/services/api';
+import { useCallback, useMemo } from 'react';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import DetailDrawer from '@/components/usage/DetailDrawer';
+import FilterBar from '@/components/usage/FilterBar';
+import Heatmap from '@/components/usage/Heatmap';
+import KpiStrip from '@/components/usage/KpiStrip';
+import { Panel, Tabs } from '@/components/usage/Panel';
+import RichRows from '@/components/usage/RichRows';
+import ShareBar, { type ShareItem } from '@/components/usage/ShareBar';
 import { useApi } from '@/hooks/useApi';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
-import AppHeader from '@/components/ui/AppHeader';
-import Button from '@/components/ui/Button';
-import FilterSidebar from '@/components/usage/FilterSidebar';
-import StatCards from '@/components/usage/StatCards';
-import UsageExplorer from '@/components/usage/explorer/UsageExplorer';
-import {
-  DEFAULT_EXPLORER_STATE,
-  EXPLORER_STATE_KEY,
-  normalizeExplorerState,
-  parseExplorerState,
-  type ExplorerState,
-} from '@/components/usage/explorer/explorerState';
-import ApiDetailsCard from '@/components/usage/ApiDetailsCard';
-import ModelStatsCard from '@/components/usage/ModelStatsCard';
-import CredentialStatsCard from '@/components/usage/CredentialStatsCard';
-import ServiceHealthCard from '@/components/usage/ServiceHealthCard';
-import styles from './UsagePage.module.scss';
+import { useUsageViewState } from '@/hooks/useUsageViewState';
+import { getBreakdown, getMatrix, getOptions, getSummary } from '@/services/api';
+import { useThemeStore } from '@/stores';
+import type { BreakdownResponse, Dimension } from '@/types/api';
+import { createLookup, type EntityLookup } from '@/utils/usage/entities';
+import { resolveWindow } from '@/utils/usage/range';
+import { metricValue } from '@/utils/usage/richRows';
+import { scopeToEntity, usageQueryParams, type Metric, type SecondaryTab } from '@/utils/usage/viewState';
+import s from './UsagePage.module.scss';
 
-/** Range-appropriate default bucket, used when explorer granularity is 'auto'. */
-function autoBucketFor(spec: RangeSpec): Bucket {
-  switch (spec.kind) {
-    case 'all':
-      return 'day';
-    case 'calendar':
-      return spec.unit === 'day' ? 'hour' : 'day';
-    case 'custom':
-      return spec.startDate === spec.endDate ? 'hour' : 'day';
-    case 'rolling':
-      return 'hour';
-  }
-}
+const TABS: readonly { value: SecondaryTab; label: string }[] = [
+  { value: 'models', label: 'Models' },
+  { value: 'credentials', label: 'Credentials' },
+];
 
-/** Short human label for the active range, for the explorer's text summary. */
-function rangeLabelFor(spec: RangeSpec): string {
-  switch (spec.kind) {
-    case 'rolling':
-      return spec.preset === '7h' ? 'the last 7 hours' : 'the last 24 hours';
-    case 'all':
-      return 'all time';
-    case 'calendar':
-      return formatCalendarLabel(spec.unit, spec.anchor);
-    case 'custom':
-      return `${spec.startDate} to ${spec.endDate}`;
-  }
-}
+const TAB_DIMENSION: Record<SecondaryTab, Dimension> = { models: 'model', credentials: 'credential' };
 
 export default function UsagePage() {
-  // Persisted state
-  const [range, setRange] = useLocalStorage<RangeSpec>('usage.range.v2', {
-    kind: 'rolling',
-    preset: '24h',
-  });
-  const [selectedModels, setSelectedModels] = useLocalStorage<string[]>(
-    'usage.models-filter.v1',
-    ['all'],
-  );
-  const [selectedApiKeys, setSelectedApiKeys] = useLocalStorage<string[]>(
-    'usage.api-keys-filter.v1',
-    ['all'],
-  );
-  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage<boolean>(
-    'usage.sidebar.collapsed.v1',
-    false,
-  );
-  const [explorerRaw, setExplorerRaw] = useLocalStorage<ExplorerState>(
-    EXPLORER_STATE_KEY,
-    DEFAULT_EXPLORER_STATE,
-  );
-  const explorerState = useMemo(() => parseExplorerState(explorerRaw), [explorerRaw]);
-  const setExplorerState = (next: ExplorerState) =>
-    setExplorerRaw(normalizeExplorerState(next));
+  const { state, update, now, refreshToken, refresh } = useUsageViewState();
+  const theme = useThemeStore((t) => t.theme);
+  const tabDim = TAB_DIMENSION[state.tab];
 
-  // Session state
-  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  // `now` is recomputed once per load/refresh, then held stable so the resolved
-  // window doesn't drift on unrelated re-renders.
-  const [now, setNow] = useState<Date>(() => new Date());
-  // Bumped on Refresh so the explorer refetches even for fixed (calendar/custom)
-  // ranges whose resolved window does not change with `now`.
-  const [refreshToken, setRefreshToken] = useState(0);
+  const params = useMemo(() => usageQueryParams(state, now), [state, now]);
+  const key = JSON.stringify(params);
+  const options = useApi(getOptions, [refreshToken]);
+  const summary = useApi(() => getSummary(params), [key, refreshToken]);
+  const people = useApi(() => getBreakdown('person', params), [key, refreshToken]);
+  const secondary = useApi(() => getBreakdown(tabDim, params), [key, tabDim, refreshToken]);
+  const matrix = useApi(() => getMatrix(params), [key, refreshToken]);
 
-  // Resolve the selection into concrete instants + tz offset for the API.
-  const resolved = useMemo(() => resolveRange(range, now), [range, now]);
-  const autoBucket = useMemo(() => autoBucketFor(range), [range]);
-  const rangeLabel = useMemo(() => rangeLabelFor(range), [range]);
+  const lookup = useMemo(() => createLookup(options.data, theme), [options.data, theme]);
+  const win = useMemo(() => resolveWindow(state.range, now), [state.range, now]);
+  const select = useCallback((dim: Dimension) => (k: string) => update({ drawer: { dim, key: k } }), [update]);
+  const closeDrawer = useCallback(() => update({ drawer: null }), [update]);
 
-  // Media queries
-  const isMobile = useMediaQuery('(max-width: 768px)');
-
-  // Derived
-  const isAllModels = selectedModels.includes('all') || selectedModels.length === 0;
-  const modelsParam = useMemo(
-    () => (isAllModels ? undefined : selectedModels),
-    [isAllModels, selectedModels],
-  );
-
-  const isAllApiKeys = selectedApiKeys.includes('all') || selectedApiKeys.length === 0;
-  const apiKeysParam = useMemo(
-    () => (isAllApiKeys ? undefined : selectedApiKeys),
-    [isAllApiKeys, selectedApiKeys],
-  );
-
-  const filterArgs = useMemo(
-    () => ({
-      ...(modelsParam ? { models: modelsParam } : {}),
-      ...(apiKeysParam ? { api_keys: apiKeysParam } : {}),
-    }),
-    [modelsParam, apiKeysParam],
-  );
-
-  // --- Data hooks (explorer fetches its own active dataset) ---
-  const overview = useApi(
-    () => getOverview({ range: resolved, ...filterArgs }),
-    [resolved, filterArgs],
-  );
-  const models = useApi(() => getModels(), []);
-  const apiKeys = useApi(() => getApiKeys(), []);
-  const pricing = useApi(() => getPricing(), []);
-
-  const apiStats = useApi(
-    () => getApiStats({ range: resolved, ...filterArgs }),
-    [resolved, filterArgs],
-  );
-  const modelStats = useApi(
-    () => getModelStats({ range: resolved, ...filterArgs }),
-    [resolved, filterArgs],
-  );
-  const credentialStats = useApi(
-    () => getCredentialStats({ range: resolved, ...filterArgs }),
-    [resolved, filterArgs],
-  );
-  const health = useApi(() => getHealth({ range: resolved, ...filterArgs }), [resolved, filterArgs]);
-
-  // Derived hasPricing
-  const hasPricing = pricing.data !== null && Object.keys(pricing.data.pricing).length > 0;
-
-  // Refresh all (preserves filters and explorer state).
-  function handleRefresh() {
-    setNow(new Date());
-    setRefreshToken((t) => t + 1);
-    overview.reload();
-    models.reload();
-    apiKeys.reload();
-    pricing.reload();
-    apiStats.reload();
-    modelStats.reload();
-    credentialStats.reload();
-    health.reload();
-  }
-
-  function handleRangeChange(next: RangeSpec) {
-    // Refresh the clock too: rolling/`all` windows end at `now`, so a stale
-    // `now` (from page load or the last refresh) would ask for an old `end` and
-    // miss recent records until the user hits Refresh.
-    setNow(new Date());
-    setRange(next);
-  }
-
-  // Page-level error banner excludes the explorer, which surfaces its own
-  // fetch errors inside its card without hiding the summary/tables.
-  const pageHooks = [overview, models, apiKeys, pricing, apiStats, modelStats, credentialStats, health];
-  const errors = pageHooks.map((h) => h.error).filter((e): e is string => e !== null);
+  const errors = [options, summary, people, secondary, matrix].map((h) => h.error).filter((e) => e !== null);
+  const metricWord = state.metric === 'cost' ? 'spend' : 'tokens';
+  const secondaryData = secondary.data?.dim === tabDim ? secondary.data : null;
 
   return (
-    <div className={styles.page}>
-      <AppHeader />
-      <div className={styles.header}>
-        <h1 className={styles.title}>Usage statistics</h1>
-        {isMobile && <Button onClick={() => setMobileDrawerOpen(true)}>Filter</Button>}
+    <div className={s.page}>
+      <div className={s.titleRow}>
+        <h1 className={s.title}>Usage</h1>
       </div>
-
-      <div className={styles.layout}>
-        <FilterSidebar
-          range={range}
-          onRangeChange={handleRangeChange}
-          models={models.data?.models ?? []}
-          selectedModels={selectedModels}
-          onModelsChange={setSelectedModels}
-          apiKeys={apiKeys.data?.api_keys ?? []}
-          selectedApiKeys={selectedApiKeys}
-          onApiKeysChange={setSelectedApiKeys}
-          onRefresh={handleRefresh}
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-          mobileOpen={mobileDrawerOpen}
-          onMobileClose={() => setMobileDrawerOpen(false)}
-        />
-
-        <div className={styles.content}>
-          {errors.length > 0 && (
-            <div className={styles.errorBanner}>
-              <strong>API error</strong>
-              <ul>
-                {errors.map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className={styles.stack}>
-            <StatCards overview={overview.data} loading={overview.loading} />
-
-            <UsageExplorer
-              state={explorerState}
-              onStateChange={setExplorerState}
-              range={resolved}
-              autoBucket={autoBucket}
-              isAllModels={isAllModels}
-              selectedModels={selectedModels}
-              {...(apiKeysParam ? { apiKeys: apiKeysParam } : {})}
-              hasPricing={hasPricing}
-              isMobile={isMobile}
-              rangeLabel={rangeLabel}
-              refreshToken={refreshToken}
-            />
-
-            <ApiDetailsCard
-              rows={apiStats.data ?? []}
-              loading={apiStats.loading}
-              hasPricing={hasPricing}
-            />
-
-            <ModelStatsCard
-              rows={modelStats.data ?? []}
-              loading={modelStats.loading}
-              hasPricing={hasPricing}
-            />
-
-            <CredentialStatsCard
-              rows={credentialStats.data ?? []}
-              loading={credentialStats.loading}
-              hasPricing={hasPricing}
-            />
-
-            <ServiceHealthCard data={health.data} loading={health.loading} />
-          </div>
+      <FilterBar
+        state={state}
+        update={update}
+        win={win}
+        now={now}
+        effectiveBucket={summary.data?.bucket ?? null}
+        options={options.data}
+        onRefresh={refresh}
+      />
+      {errors.length > 0 && (
+        <div className={s.error}>
+          <strong>API error</strong>
+          <ul>
+            {[...new Set(errors)].map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
         </div>
-      </div>
+      )}
+      {!summary.data ? (
+        errors.length === 0 && (
+          <div className={s.stack}>
+            <LoadingSpinner />
+          </div>
+        )
+      ) : summary.data.current.requests === 0 ? (
+        <div className={s.empty}>No usage in this window.</div>
+      ) : (
+        <div className={s.stack}>
+          <KpiStrip summary={summary.data} accent={lookup.accent} />
+          <Panel title={`People by ${metricWord}`}>
+            {people.data ? (
+              <BreakdownSection data={people.data} metric={state.metric} lookup={lookup} onSelect={select('person')} />
+            ) : (
+              <LoadingSpinner />
+            )}
+          </Panel>
+          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`}>
+            {matrix.data ? (
+              <Heatmap matrix={matrix.data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />
+            ) : (
+              <LoadingSpinner />
+            )}
+          </Panel>
+          <Panel>
+            <Tabs tabs={TABS} value={state.tab} onChange={(tab) => update({ tab })} />
+            {secondaryData ? (
+              <BreakdownSection data={secondaryData} metric={state.metric} lookup={lookup} onSelect={select(tabDim)} compact />
+            ) : (
+              <LoadingSpinner />
+            )}
+          </Panel>
+        </div>
+      )}
+      {state.drawer && (
+        <DetailDrawer
+          key={`${state.drawer.dim}:${state.drawer.key}`}
+          target={state.drawer}
+          state={state}
+          now={now}
+          refreshToken={refreshToken}
+          pageTotals={summary.data?.current ?? null}
+          lookup={lookup}
+          onClose={closeDrawer}
+          onFilter={() => state.drawer && update(scopeToEntity(state, state.drawer))}
+        />
+      )}
     </div>
+  );
+}
+
+/** Share bar plus the rich rows table for one dimension. */
+function BreakdownSection({
+  data,
+  metric,
+  lookup,
+  onSelect,
+  compact = false,
+}: {
+  data: BreakdownResponse;
+  metric: Metric;
+  lookup: EntityLookup;
+  onSelect: (key: string) => void;
+  compact?: boolean;
+}) {
+  const items = useMemo<ShareItem[]>(
+    () =>
+      data.rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        value: metricValue(r.current, metric),
+        slot: lookup.entity(data.dim, r.key).slot,
+      })),
+    [data, metric, lookup],
+  );
+  return (
+    <>
+      <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} onSelect={onSelect} compact={compact} />
+      <RichRows data={data} metric={metric} lookup={lookup} onSelect={onSelect} />
+    </>
   );
 }

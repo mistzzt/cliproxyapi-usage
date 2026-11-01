@@ -9,6 +9,8 @@ import pytest
 
 from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.parser import iter_records
+from cliproxy_usage_collect.schemas import RequestRecord
+from cliproxy_usage_server.pricing import ModelPricing
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -67,3 +69,60 @@ def codex_api_call_fixture() -> dict:  # type: ignore[type-arg]
 def codex_weekly_only_api_call_fixture() -> dict:  # type: ignore[type-arg]
     """Current Codex payload with weekly windows in primary positions."""
     return json.loads((_FIXTURES / "codex-weekly-only-api-call.json").read_text())
+
+
+# (timestamp, api_key, model, source, input, output, cached). The last five
+# straddle the 2026-11-01 fall-back in America/Chicago; sk-a/b-alice redact alike.
+UsageRow = tuple[str, str, str, str, int, int, int]
+SYNTHETIC_ROWS: list[UsageRow] = [
+    ("2026-10-29T15:00:00Z", "sk-a-bob", "gpt-t", "sk-c-secret", 200, 100, 50),
+    ("2026-10-31T05:30:00Z", "sk-a-alice", "claude-t", "al@x.io", 1000, 200, 100),
+    ("2026-11-01T04:30:00Z", "sk-b-alice", "claude-t", "al@x.io", 2000, 400, 500),
+    ("2026-11-01T06:30:00Z", "sk-a-bob", "gpt-t", "sk-c-secret", 4000, 1000, 1000),
+    ("2026-11-02T05:30:00Z", "sk-a-alice", "gpt-t", "sk-c-secret", 600, 60, 100),
+    ("2026-11-02T06:30:00Z", "sk-a-bob", "claude-t", "al@x.io", 700, 70, 0),
+]
+
+# gpt-t uses OpenAI cached-in-input accounting.
+SYNTHETIC_PRICING: dict[str, ModelPricing] = {
+    "claude-t": ModelPricing(
+        input_cost_per_token=1e-6,
+        output_cost_per_token=5e-6,
+        cache_read_input_token_cost=1e-7,
+    ),
+    "gpt-t": ModelPricing(
+        litellm_provider="openai",
+        input_cost_per_token=2e-6,
+        output_cost_per_token=8e-6,
+        cache_read_input_token_cost=2e-7,
+    ),
+}
+
+
+def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
+    records = [
+        RequestRecord(
+            timestamp=ts,
+            api_key=key,
+            model=model,
+            source=source,
+            auth_index="0",
+            latency_ms=0,
+            input_tokens=inp,
+            output_tokens=out,
+            reasoning_tokens=0,
+            cached_tokens=cac,
+            total_tokens=inp + out + cac,
+            failed=False,
+        )
+        for ts, key, model, source, inp, out, cac in rows
+    ]
+    conn = open_db(db_path)
+    insert_records(conn, records)
+    conn.close()
+    return db_path
+
+
+@pytest.fixture
+def synthetic_db_path(tmp_path: pathlib.Path) -> pathlib.Path:
+    return write_usage_db(tmp_path / "synthetic.db", SYNTHETIC_ROWS)

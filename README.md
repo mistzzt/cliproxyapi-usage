@@ -70,18 +70,20 @@ tool can store them.
 
 ## Example SQL queries
 
-**Total tokens per user per day**
+**Tokens per person (API key) per day**
+
+Tokens here match the dashboard: input + output, cached tokens excluded.
 
 ```sql
 SELECT
-    source                    AS user,
-    date(timestamp)           AS day,
-    SUM(input_tokens)         AS input_tokens,
-    SUM(output_tokens)        AS output_tokens,
-    SUM(total_tokens)         AS total_tokens
+    api_key                               AS person,
+    date(timestamp)                       AS day,
+    SUM(input_tokens)                     AS input_tokens,
+    SUM(output_tokens)                    AS output_tokens,
+    SUM(input_tokens + output_tokens)     AS tokens
 FROM requests
-GROUP BY source, date(timestamp)
-ORDER BY day DESC, total_tokens DESC;
+GROUP BY api_key, date(timestamp)
+ORDER BY day DESC, tokens DESC;
 ```
 
 **Top models by request count**
@@ -102,6 +104,24 @@ A local dashboard (`cliproxy-usage-server`) serves a read-only FastAPI backend
 plus a React SPA built with Vite, backed by the same `usage.db` produced by the
 collector.
 
+The usage page (`/`) answers how much each person uses and what share of the
+total that is; a person is one API key, shown redacted or by its alias from
+`USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average
+latency with the change against the previous period of equal length, a share bar
+and per-row trends for people, a people by model heatmap, and Models /
+Credentials tabs. Clicking a row opens a detail drawer with that entity's trend
+and mix. Tokens always mean input + output tokens (cached tokens excluded). Time
+buckets (hour, day, or week) follow the browser's timezone. Filters and view
+settings live in the URL, so links are shareable, and opening the page without
+them restores the last view. Entity colors are fixed by all-time spend, so they
+do not change with filters.
+
+The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`,
+`/api/usage/matrix`, `/api/usage/options`, and the quota endpoints under
+`/api/quota/*`. The usage endpoints report only the raw token components
+(`input_tokens`, `output_tokens`, `cached_tokens`); the dashboard derives tokens
+from them.
+
 ### Server environment variables
 
 | Variable                    | Default                                                | Required      |
@@ -114,21 +134,63 @@ collector.
 | `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no            |
 | `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no            |
 | `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no            |
+| `USAGE_KEY_ALIASES`         | unset (redacted keys are shown)                        | no            |
 | `CLIPROXY_BASE_URL`         | —                                                      | for `/limits` |
 | `CLIPROXY_MANAGEMENT_KEY`   | —                                                      | for `/limits` |
 | `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no            |
 
-`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota API. For quota, `CLIPROXY_BASE_URL` should be the CLIProxyAPI management API base URL, for example `http://localhost:8317/v0/management`. When both are set, the server serves live OAuth quota for Claude and Codex auth-files at `/limits` (UI) and `/api/quota/*` (JSON). Successful quota responses are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); clicking "Refresh" within the TTL returns the cached value rather than re-hitting the upstream OAuth endpoints. When either variable is unset, `/api/quota/*` returns `503` and the UI shows a disabled banner; the dashboard remains available.
+`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota
+API. For quota, `CLIPROXY_BASE_URL` should be the CLIProxyAPI management API
+base URL, for example `http://localhost:8317/v0/management`. When both are set,
+the server serves live OAuth quota for Claude and Codex auth-files at `/limits`
+(UI) and `/api/quota/*` (JSON). Successful quota responses are cached for
+`QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); clicking "Refresh" within
+the TTL returns the cached value rather than re-hitting the upstream OAuth
+endpoints. When either variable is unset, `/api/quota/*` returns `503` and the
+UI shows a disabled banner; the dashboard remains available.
 
-Codex window labels come from each window's declared duration. A duration of 18,000 seconds is a five-hour limit, 604,800 seconds is a weekly limit, and missing or unknown durations use a neutral account or named-limit label. The Codex card shows the manual reset count when OpenAI supplies it, including zero, and lists the expiry of each available reset credit (fetched from the `rate-limit-reset-credits` endpoint after the usage call; if that call fails the count still shows with a note that expiry is unavailable). When resets are available, the user must confirm before consuming one; the prompt names the expiry of the earliest-expiring credit, which is the one spent. Claude accounts get a "7-day Fable 5" row read from Anthropic's `limits[]` array (weekly Fable entry, active one preferred), falling back to the legacy `iguana_necktie` window when `limits[]` has no Fable entry. `POST /api/quota/{provider}/{auth_name}/reset` exposes this as a provider capability, returns `405` for registered providers without reset support, and returns `204` after a supported provider accepts the reset. A successful reset invalidates both successful and error quota cache entries, including older in-flight fetches, so the following quota read goes upstream. A failed reset preserves the last cached quota.
+Codex window labels come from each window's declared duration. A duration of
+18,000 seconds is a five-hour limit, 604,800 seconds is a weekly limit, and
+missing or unknown durations use a neutral account or named-limit label. The
+Codex card shows the manual reset count when OpenAI supplies it, including zero,
+and lists the expiry of each available reset credit (fetched from the
+`rate-limit-reset-credits` endpoint after the usage call; if that call fails the
+count still shows with a note that expiry is unavailable). When resets are
+available, the user must confirm before consuming one; the prompt names the
+expiry of the earliest-expiring credit, which is the one spent. Claude accounts
+get a "7-day Fable 5" row read from Anthropic's `limits[]` array (weekly Fable
+entry, active one preferred), falling back to the legacy `iguana_necktie` window
+when `limits[]` has no Fable entry. `POST
+/api/quota/{provider}/{auth_name}/reset` exposes this as a provider capability,
+returns `405` for registered providers without reset support, and returns `204`
+after a supported provider accepts the reset. A successful reset invalidates
+both successful and error quota cache entries, including older in-flight
+fetches, so the following quota read goes upstream. A failed reset preserves the
+last cached quota.
 
 `USAGE_PAGE_TITLE` sets the browser tab title (default `CLIProxyAPI Usage
 Dashboard`). It is injected at runtime, so a single prebuilt `frontend/dist/`
 can be relabeled by restarting the server, no rebuild required.
 
+`USAGE_KEY_ALIASES` is an optional path to a JSON file that gives people display
+names. The file holds one JSON object that maps a redacted key, exactly as the
+UI shows it (for example `sk-*******-alice` or `*******0a1b`), to a display
+name. Full API keys are never needed in this file. Keys without an entry keep
+their redacted label. If the file does not exist, the server logs a warning and
+shows redacted keys; if it is not a JSON object of strings, the server refuses
+to start. Entries that match no recorded key are logged as warnings at startup.
+
+```json
+{
+  "sk-*******-alice": "Alice",
+  "*******0a1b": "Shared CI key"
+}
+```
+
 ### Cost accuracy
 
-The webapp computes per-row cost using liteLLM's pricing data
+The webapp computes cost per (15-minute slice, API key, model, credential)
+group using liteLLM's pricing data
 (`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`,
 disk-cached locally) and a few provider-aware adjustments. Three things to know:
 
@@ -147,11 +209,13 @@ disk-cached locally) and a few provider-aware adjustments. Three things to know:
   cache-write/read ratio. There is no purely-backend fix because the data
   needed to split the two buckets is not in the queue payload.
 - **Missing pricing.** When liteLLM has no entry for a model the dashboard
-  renders that row's cost as `—` in red ("missing"). The pricing map is
-  refreshed periodically (`PRICING_TTL_SECONDS`, default daily); restart the
-  server or shorten the TTL if you need a newly-released model picked up
-  sooner. Roll-up rows that combine some live and some missing models render
-  their partial total in red ("partial_missing").
+  renders that model's cost as `n/a` ("missing"). Totals that combine some
+  priced and some unpriced models show the priced part with a trailing `*`
+  ("partial_missing"), so they are a lower bound. The models table also shows
+  each model's liteLLM list price per 1M tokens (`n/a` when unpriced). The
+  pricing map is refreshed periodically (`USAGE_PRICING_TTL_SECONDS`, default
+  daily); restart the server or shorten the TTL if you need a newly-released
+  model picked up sooner.
 
 ### Production run (single process)
 
