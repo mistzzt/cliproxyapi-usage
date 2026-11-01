@@ -1,6 +1,7 @@
 """Pricing model, resolver, cost computation, and disk-cached fetcher.
 
-Ports the liteLLM pricing logic from ccusage's pricing.ts into Python.
+Ports ccusage's LiteLLM pricing and per-request cost calculation (Rust core
+``cost.rs`` and the Codex adapter for OpenAI-accounting models) into Python.
 """
 
 from __future__ import annotations
@@ -13,19 +14,22 @@ import tempfile
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 __all__ = [
     "PREFIX_CANDIDATES",
+    "CostPlan",
     "CostStatus",
     "ModelPricing",
     "PricingResolution",
     "ProviderEntry",
+    "Rates",
     "TokenCounts",
     "compute_cost",
+    "cost_plan",
     "fetch_pricing",
     "resolve",
     "rollup_cost_status",
@@ -81,7 +85,8 @@ def split_tokens_for_cost(
 
 _log = logging.getLogger(__name__)
 
-_TIERED_THRESHOLD = 200_000
+_THRESHOLD_200K = 200_000
+_THRESHOLD_272K = 272_000
 
 PREFIX_CANDIDATES: tuple[str, ...] = (
     "anthropic/",
@@ -104,14 +109,19 @@ class ModelPricing(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     litellm_provider: str | None = None
-    input_cost_per_token: float | None = None
-    output_cost_per_token: float | None = None
+    # Required, as in ccusage: entries without base input/output rates are dropped.
+    input_cost_per_token: float
+    output_cost_per_token: float
     cache_creation_input_token_cost: float | None = None
     cache_read_input_token_cost: float | None = None
     input_cost_per_token_above_200k_tokens: float | None = None
     output_cost_per_token_above_200k_tokens: float | None = None
     cache_creation_input_token_cost_above_200k_tokens: float | None = None
     cache_read_input_token_cost_above_200k_tokens: float | None = None
+    input_cost_per_token_above_272k_tokens: float | None = None
+    output_cost_per_token_above_272k_tokens: float | None = None
+    cache_creation_input_token_cost_above_272k_tokens: float | None = None
+    cache_read_input_token_cost_above_272k_tokens: float | None = None
     provider_specific_entry: ProviderEntry | None = None
 
 
@@ -167,34 +177,92 @@ def rollup_cost_status(statuses: list[PricingResolution]) -> CostStatus:
     return "live" if has_live else "missing"
 
 
-def _tiered_cost(
-    total_tokens: int,
-    base_price: float | None,
-    tiered_price: float | None,
-    threshold: int = _TIERED_THRESHOLD,
-) -> float:
-    """Compute cost with optional tiered pricing at *threshold*.
+class Rates(NamedTuple):
+    """USD per token for each token type."""
 
-    Mirrors ccusage's calculateTieredCost:
-    - If total_tokens <= threshold OR tiered_price is None → flat at base_price (or 0).
-    - If total_tokens > threshold AND tiered_price is not None:
-        - Tokens above threshold charged at tiered_price.
-        - Tokens at or below threshold charged at base_price (if present), else 0.
+    input: float
+    output: float
+    cache_creation: float
+    cache_read: float
+
+
+Amounts = tuple[int, int, int, int]  # token counts in ``Rates`` field order
+
+
+class CostPlan(NamedTuple):
+    """How one model bills a request, following ccusage."""
+
+    openai: bool  # cached tokens are reported inside input_tokens
+    # True: past the threshold the whole request bills at `above`.
+    # False: only each token type's excess over the threshold does.
+    switch: bool
+    threshold: int
+    base: Rates
+    above: Rates
+
+    def tier(self, amounts: Amounts) -> tuple[Amounts, Amounts]:
+        """Split one request's split-form token counts into (base-rate, above-rate)."""
+        none: Amounts = (0, 0, 0, 0)
+        if self.switch:
+            inp, _, cache_creation, cache_read = amounts
+            long = inp + cache_creation + cache_read > self.threshold
+            return (none, amounts) if long else (amounts, none)
+        i, o, cc, cr = (min(n, self.threshold) for n in amounts)
+        base: Amounts = (i, o, cc, cr)
+        return base, (amounts[0] - i, amounts[1] - o, amounts[2] - cc, amounts[3] - cr)
+
+    def price(self, base: Amounts, above: Amounts) -> float:
+        """Cost of token sums billed at the base and above rates."""
+        return sum(n * r for n, r in zip(base, self.base, strict=True)) + sum(
+            n * r for n, r in zip(above, self.above, strict=True)
+        )
+
+
+def cost_plan(pricing: ModelPricing) -> CostPlan:
+    """Derive the billing plan for *pricing* as ccusage does for LiteLLM data.
+
+    LiteLLM ``*_above_200k_tokens`` rates are marginal per token type. Rates only
+    published above 272k (the models.dev tier ccusage uses) switch the whole
+    request. OpenAI-accounting models always switch, as in ccusage's Codex adapter.
     """
-    if total_tokens <= 0:
-        return 0.0
+    openai = _uses_openai_token_accounting(pricing)
+    inp = pricing.input_cost_per_token
+    cache_read = pricing.cache_read_input_token_cost
+    base = Rates(
+        input=inp,
+        output=pricing.output_cost_per_token,
+        cache_creation=_or(pricing.cache_creation_input_token_cost, inp * 1.25),
+        cache_read=_or(cache_read, inp if openai else inp * 0.1),
+    )
+    above_200k = (
+        pricing.input_cost_per_token_above_200k_tokens,
+        pricing.output_cost_per_token_above_200k_tokens,
+        pricing.cache_creation_input_token_cost_above_200k_tokens,
+        pricing.cache_read_input_token_cost_above_200k_tokens,
+    )
+    above_272k = (
+        pricing.input_cost_per_token_above_272k_tokens,
+        pricing.output_cost_per_token_above_272k_tokens,
+        pricing.cache_creation_input_token_cost_above_272k_tokens,
+        pricing.cache_read_input_token_cost_above_272k_tokens,
+    )
+    has_200k = any(r is not None for r in above_200k)
+    has_272k = any(r is not None for r in above_272k)
+    switch = openai or (has_272k and not has_200k)
+    threshold, tier = (
+        (_THRESHOLD_272K, above_272k)
+        if switch and has_272k
+        else (_THRESHOLD_200K, above_200k)
+    )
+    above = Rates(*(_or(a, b) for a, b in zip(tier, base, strict=True)))
+    if openai and cache_read is None:
+        # Codex bills unpriced cache reads of long requests at the long input rate.
+        above = above._replace(cache_read=above.input)
+    return CostPlan(openai, switch, threshold, base, above)
 
-    if total_tokens > threshold and tiered_price is not None:
-        above = total_tokens - threshold
-        cost = above * tiered_price
-        if base_price is not None:
-            cost += threshold * base_price
-        return cost
 
-    # Flat (no tiered or below threshold)
-    if base_price is not None:
-        return total_tokens * base_price
-    return 0.0
+def _or(value: float | None, default: float) -> float:
+    return default if value is None else value
 
 
 def compute_cost(
@@ -203,39 +271,20 @@ def compute_cost(
     *,
     speed: Literal["standard", "fast"] = "standard",
 ) -> float:
-    """Return total USD cost for *tokens* given *pricing*.
+    """Return the USD cost of one request's split-form *tokens* given *pricing*.
 
-    Applies tiered pricing at 200k where the *_above_200k_tokens fields are
-    present.  When speed='fast' and pricing.provider_specific_entry.fast is
-    set, multiplies the total by that value.
+    Tiers apply per request (see ``cost_plan``); never pass summed counts. When
+    speed='fast' and pricing.provider_specific_entry.fast is set, multiplies the
+    total by that value.
     """
-    input_tokens = tokens.get("input_tokens", 0)
-    output_tokens = tokens.get("output_tokens", 0)
-    cache_creation = tokens.get("cache_creation_input_tokens", 0)
-    cache_read = tokens.get("cache_read_input_tokens", 0)
-
-    total = (
-        _tiered_cost(
-            input_tokens,
-            pricing.input_cost_per_token,
-            pricing.input_cost_per_token_above_200k_tokens,
-        )
-        + _tiered_cost(
-            output_tokens,
-            pricing.output_cost_per_token,
-            pricing.output_cost_per_token_above_200k_tokens,
-        )
-        + _tiered_cost(
-            cache_creation,
-            pricing.cache_creation_input_token_cost,
-            pricing.cache_creation_input_token_cost_above_200k_tokens,
-        )
-        + _tiered_cost(
-            cache_read,
-            pricing.cache_read_input_token_cost,
-            pricing.cache_read_input_token_cost_above_200k_tokens,
-        )
+    plan = cost_plan(pricing)
+    amounts: Amounts = (
+        tokens.get("input_tokens", 0),
+        tokens.get("output_tokens", 0),
+        tokens.get("cache_creation_input_tokens", 0),
+        tokens.get("cache_read_input_tokens", 0),
     )
+    total = plan.price(*plan.tier(amounts))
 
     multiplier = 1.0
     if (

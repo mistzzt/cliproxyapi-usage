@@ -35,10 +35,12 @@ export default function KpiStrip({ summary, accent }: { summary: SummaryResponse
           value={t.value}
           title={t.title}
           foot={
-            <>
-              <ChangeBadge value={t.change} />
-              <span className={s.muted}>vs prev. period</span>
-            </>
+            t.change !== null && (
+              <>
+                <ChangeBadge value={t.change} />
+                <span className={s.muted}>vs prev. period</span>
+              </>
+            )
           }
         >
           {t.spark && <Sparkline values={t.spark} color={accent} />}

@@ -7,6 +7,12 @@ import pytest
 from cliproxy_usage_server.pricing import ModelPricing, split_tokens_for_cost
 
 
+def _pricing(provider: str | None) -> ModelPricing:
+    return ModelPricing(
+        litellm_provider=provider, input_cost_per_token=1e-6, output_cost_per_token=1e-6
+    )
+
+
 @pytest.mark.parametrize(
     "provider",
     [
@@ -18,7 +24,7 @@ from cliproxy_usage_server.pricing import ModelPricing, split_tokens_for_cost
 def test_openai_providers_subtract_cached_from_input(provider: str) -> None:
     """For OpenAI-convention providers cached_tokens is a subset of input_tokens."""
     out = split_tokens_for_cost(
-        ModelPricing(litellm_provider=provider),
+        _pricing(provider),
         input_tokens=1000,
         output_tokens=500,
         cached_tokens=200,
@@ -31,7 +37,7 @@ def test_openai_providers_subtract_cached_from_input(provider: str) -> None:
 
 
 def test_openai_cached_zero_passthrough() -> None:
-    out = split_tokens_for_cost(ModelPricing(litellm_provider="openai"), 1000, 500, 0)
+    out = split_tokens_for_cost(_pricing("openai"), 1000, 500, 0)
     assert out == {
         "input_tokens": 1000,
         "output_tokens": 500,
@@ -40,9 +46,7 @@ def test_openai_cached_zero_passthrough() -> None:
 
 
 def test_openai_cached_equal_input() -> None:
-    out = split_tokens_for_cost(
-        ModelPricing(litellm_provider="openai"), 1000, 500, 1000
-    )
+    out = split_tokens_for_cost(_pricing("openai"), 1000, 500, 1000)
     assert out == {
         "input_tokens": 0,
         "output_tokens": 500,
@@ -52,9 +56,7 @@ def test_openai_cached_equal_input() -> None:
 
 def test_openai_cached_exceeds_input_clamps() -> None:
     """Defensive: if upstream sends cached > input, clamp cache_read at input."""
-    out = split_tokens_for_cost(
-        ModelPricing(litellm_provider="openai"), 1000, 500, 2000
-    )
+    out = split_tokens_for_cost(_pricing("openai"), 1000, 500, 2000)
     assert out == {
         "input_tokens": 0,
         "output_tokens": 500,
@@ -66,7 +68,7 @@ def test_openai_cached_exceeds_input_clamps() -> None:
 def test_non_openai_providers_passthrough(provider: str | None) -> None:
     """Non-OpenAI providers keep cached_tokens in cache_read and input untouched."""
     out = split_tokens_for_cost(
-        ModelPricing(litellm_provider=provider),
+        _pricing(provider),
         input_tokens=1000,
         output_tokens=500,
         cached_tokens=200,

@@ -10,6 +10,7 @@ filters. Naive datetimes, ``start > end`` and unknown ``tz`` are 422s.
 explicit buckets coarsen past 1,000 buckets and the effective one is echoed.
 """
 
+import logging
 import sqlite3
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from cliproxy_usage_server.aggregate import (
     query_matrix,
     query_options,
     query_summary,
+    resolve_model_keys,
     resolve_redacted_api_keys,
     resolve_redacted_sources,
 )
@@ -38,6 +40,8 @@ from cliproxy_usage_server.schemas import (
     OptionsResponse,
     SummaryResponse,
 )
+
+_log = logging.getLogger(__name__)
 
 _ListParam = Annotated[str | None, Query()]
 _BucketParam = Annotated[Bucket | Literal["auto"], Query()]
@@ -109,7 +113,9 @@ class _RangeParams:
                 if self.people is not None
                 else None
             ),
-            models=self.models,
+            models=(
+                resolve_model_keys(self.models) if self.models is not None else None
+            ),
             sources=(
                 resolve_redacted_sources(conn, self.credentials)
                 if self.credentials is not None
@@ -129,6 +135,7 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
     maps redacted keys to display names. Access control is delegated upstream.
     """
     r = APIRouter(prefix="/usage", tags=["usage"])
+    warned: set[str] = set()
 
     def get_conn() -> Iterator[sqlite3.Connection]:
         conn = open_ro(db_path)
@@ -187,6 +194,11 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
         conn: Annotated[sqlite3.Connection, Depends(get_conn)], pricing: _Pricing
     ) -> OptionsResponse:
         """Every person, model and credential with its all-time color slot."""
-        return query_options(conn, pricing, aliases)
+        body = query_options(conn, pricing, aliases)
+        unmatched = set(aliases) - {e.key for e in body.people} - warned
+        for key in sorted(unmatched):
+            _log.warning("USAGE_KEY_ALIASES entry %r matches no API key", key)
+        warned.update(unmatched)
+        return body
 
     return r

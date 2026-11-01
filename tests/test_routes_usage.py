@@ -138,7 +138,10 @@ def test_options_slots_stop_after_seven(tmp_path: pathlib.Path) -> None:
         for i in range(9)
     ]
     db = write_usage_db(tmp_path / "nine.db", rows)
-    pricing = {f"m{i}": ModelPricing(input_cost_per_token=1e-6) for i in range(9)}
+    pricing = {
+        f"m{i}": ModelPricing(input_cost_per_token=1e-6, output_cost_per_token=0)
+        for i in range(9)
+    }
     with _client(db, pricing=pricing) as c:
         models = _get(c, "/api/usage/options")["models"]
     assert [(e["key"], e["slot"]) for e in models] == [
@@ -170,3 +173,112 @@ def test_price_only_on_model_rows(client: TestClient) -> None:
 )
 def test_invalid_requests_are_422(client: TestClient, path: str) -> None:
     assert client.get(path).status_code == 422
+
+
+def test_empty_model_and_source_are_addressable(tmp_path: pathlib.Path) -> None:
+    db = write_usage_db(
+        tmp_path / "empty.db",
+        [("2026-10-01T00:00:00Z", "sk-a-bob", "", "", 100, 10, 0)],
+    )
+    with _client(db) as c:
+        opts = _get(c, "/api/usage/options")
+        assert [e["key"] for e in opts["models"]] == ["<empty>"]
+        assert [e["key"] for e in opts["credentials"]] == ["<empty>"]
+        body = _get(
+            c,
+            "/api/usage/summary?tz=UTC&models=%3Cempty%3E&credentials=%3Cempty%3E",
+        )
+    assert body["current"]["requests"] == 1
+
+
+def test_unmatched_aliases_warn_once_from_options(
+    synthetic_db_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    aliases = tmp_path / "aliases.json"
+    aliases.write_text(json.dumps({ALICE: "Alice", "sk-*******-ghost": "Ghost"}))
+    with _client(synthetic_db_path, aliases=aliases) as c:
+        _get(c, "/api/usage/options")
+        _get(c, "/api/usage/options")
+    warnings = [
+        r.getMessage() for r in caplog.records if "USAGE_KEY_ALIASES" in r.getMessage()
+    ]
+    assert warnings == ["USAGE_KEY_ALIASES entry 'sk-*******-ghost' matches no API key"]
+
+
+def test_startup_does_not_read_db(tmp_path: pathlib.Path) -> None:
+    db = tmp_path / "blank.db"
+    db.touch()
+    aliases = tmp_path / "aliases.json"
+    aliases.write_text(json.dumps({ALICE: "Alice"}))
+    with _client(db, aliases=aliases) as c:
+        assert c.get("/api/health-check").status_code == 200
+
+
+def test_all_time_axis_starts_at_earliest_instant(tmp_path: pathlib.Path) -> None:
+    # The -06:00 row sorts first as text but is 40 minutes later.
+    db = write_usage_db(
+        tmp_path / "offsets.db",
+        [
+            ("2026-11-01T01:30:00-05:00", "sk-a-bob", "gpt-t", "al@x.io", 100, 0, 0),
+            ("2026-11-01T01:10:00-06:00", "sk-a-bob", "gpt-t", "al@x.io", 100, 0, 0),
+        ],
+    )
+    with _client(db) as c:
+        body = _get(c, "/api/usage/summary?tz=UTC&bucket=hour")
+    assert body["buckets"][0] == "2026-11-01T06:00:00Z"
+    assert sum(body["series"]["requests"]) == 2
+
+
+def test_tiers_apply_per_request_not_per_cell(tmp_path: pathlib.Path) -> None:
+    from test_pricing_ccusage import CLAUDE, GPT_LONG, _cost
+
+    # Every row lands in one 15-minute slice, so cell sums cross every threshold.
+    rows: list[tuple[str, str, str, str, int, int, int]] = [
+        (
+            f"2026-10-01T00:00:{i:02d}Z",
+            "sk-a-bob",
+            "claude-x",
+            "al@x.io",
+            50_000,
+            1_000,
+            100_000,
+        )
+        for i in range(20)
+    ]
+    rows += [
+        (
+            "2026-10-01T00:01:00Z",
+            "sk-a-bob",
+            "gpt-x",
+            "al@x.io",
+            300_000,
+            2_000,
+            100_000,
+        ),
+        (
+            "2026-10-01T00:02:00Z",
+            "sk-a-bob",
+            "gpt-x",
+            "al@x.io",
+            200_000,
+            2_000,
+            50_000,
+        ),
+        ("2026-10-01T00:03:00Z", "sk-a-bob", "gpt-x", "al@x.io", 250_000, 2_000, 0),
+        ("2026-10-01T00:04:00Z", "sk-a-bob", "claude-x", "al@x.io", 250_000, 0, 0),
+        ("2026-10-01T00:05:00Z", "sk-a-bob", "free-x", "al@x.io", 900_000, 0, 0),
+    ]
+    pricing = {"claude-x": CLAUDE, "gpt-x": GPT_LONG}
+    expected = sum(
+        _cost(pricing[model], inp, out, cac)
+        for _, _, model, _, inp, out, cac in rows
+        if model in pricing
+    )
+    db = write_usage_db(tmp_path / "tiers.db", rows)
+    with _client(db, pricing=pricing) as c:
+        body = _get(c, "/api/usage/summary?tz=UTC")
+        models = _get(c, "/api/usage/breakdown?dim=model&tz=UTC")["rows"]
+    assert body["current"]["cost"] == pytest.approx(expected)
+    assert sum(r["current"]["cost"] or 0 for r in models) == pytest.approx(expected)

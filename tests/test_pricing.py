@@ -166,26 +166,6 @@ def test_compute_cost_200k_boundary(pricing_map: dict[str, ModelPricing]) -> Non
     assert math.isclose(cost_above, expected, rel_tol=1e-9)
 
 
-def test_compute_cost_only_tiered_rates(pricing_map: dict[str, ModelPricing]) -> None:
-    """theoretical-tiered-only: below 200k → 0; above 200k → only excess charged."""
-    pricing = pricing_map["theoretical-tiered-only"]
-    assert pricing.input_cost_per_token_above_200k_tokens is not None
-    assert pricing.output_cost_per_token_above_200k_tokens is not None
-
-    # Below threshold → 0
-    tokens_below: TokenCounts = {"input_tokens": 100_000, "output_tokens": 100_000}
-    assert compute_cost(tokens_below, pricing) == 0.0
-
-    # Above threshold → only excess charged
-    tokens_above: TokenCounts = {"input_tokens": 300_000, "output_tokens": 250_000}
-    cost = compute_cost(tokens_above, pricing)
-    expected = (
-        100_000 * pricing.input_cost_per_token_above_200k_tokens
-        + 50_000 * pricing.output_cost_per_token_above_200k_tokens
-    )
-    assert math.isclose(cost, expected, rel_tol=1e-9)
-
-
 def test_compute_cost_fast_multiplier(pricing_map: dict[str, ModelPricing]) -> None:
     """Model with provider_specific_entry.fast=6.0 → speed='fast' gives 6x standard."""
     pricing = pricing_map["anthropic/claude-3-5-haiku-fast"]
@@ -275,12 +255,18 @@ def test_fetch_refreshes_after_ttl(tmp_path: Path) -> None:
     """Stale cache (mtime > ttl ago) → network fetch; map reflects fresh data."""
     cache_path = tmp_path / "pricing.json"
     # Seed stale cache
-    cache_path.write_text(json.dumps({"stale-model": {"input_cost_per_token": 1.0}}))
+    cache_path.write_text(
+        json.dumps(
+            {"stale-model": {"input_cost_per_token": 1.0, "output_cost_per_token": 1.0}}
+        )
+    )
     ttl = 60
     stale_time = time.time() - ttl - 1
     os.utime(cache_path, (stale_time, stale_time))
 
-    fresh_payload = {"fresh-model": {"input_cost_per_token": 5e-6}}
+    fresh_payload = {
+        "fresh-model": {"input_cost_per_token": 5e-6, "output_cost_per_token": 1e-5}
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=fresh_payload)
@@ -361,6 +347,8 @@ def test_fetch_drops_invalid_entries(tmp_path: Path) -> None:
         "good-model": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6},
         # 'input_cost_per_token' expects float, not a string
         "bad-model": {"input_cost_per_token": "not-a-number"},
+        # ccusage drops entries without base input and output rates
+        "tiered-only": {"input_cost_per_token_above_200k_tokens": 6e-6},
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -376,3 +364,4 @@ def test_fetch_drops_invalid_entries(tmp_path: Path) -> None:
 
     assert "good-model" in result
     assert "bad-model" not in result
+    assert "tiered-only" not in result

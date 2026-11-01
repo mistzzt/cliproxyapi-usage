@@ -1,10 +1,11 @@
 """Usage aggregation behind the ``/api/usage/*`` endpoints.
 
 Every endpoint is built from one grouped query: rows per (15-minute UTC slice,
-api_key, model, source), each priced with ``split_tokens_for_cost`` and
-``compute_cost``. Totals, per-entity rows, trends and the matrix are sums of
-the same priced cells, so they always agree, and pricing per slice keeps cost
-independent of the chosen bucket.
+api_key, model, source). The query tiers each request with its model's
+``CostPlan`` and sums the base-rate and above-rate tokens, so cells price
+exactly as the sum of per-request costs. Totals, per-entity rows, trends and
+the matrix are sums of the same priced cells, so they always agree, and cost
+is independent of the chosen bucket.
 
 People are redacted API keys (raw keys that redact alike merge into one
 person); credentials are redacted sources. Responses carry only raw token
@@ -30,15 +31,15 @@ from cliproxy_usage_server.db import (
     effective_bucket,
 )
 from cliproxy_usage_server.pricing import (
+    CostPlan,
     CostStatus,
     ModelPricing,
     PricingResolution,
-    compute_cost,
+    cost_plan,
     resolve,
     rollup_cost_status,
-    split_tokens_for_cost,
 )
-from cliproxy_usage_server.redact import redact_key, redact_source
+from cliproxy_usage_server.redact import EMPTY_KEY, redact_key, redact_source
 from cliproxy_usage_server.schemas import (
     BreakdownResponse,
     BreakdownRow,
@@ -222,9 +223,34 @@ def _fetch_cells(
     pricing: Mapping[str, ModelPricing],
 ) -> list[_Cell]:
     """Group the window into priced (slice, api_key, model, source) cells."""
+    resolved: dict[str, tuple[ModelPricing | None, PricingResolution]] = {
+        m: resolve(m, pricing)
+        for (m,) in conn.execute("SELECT DISTINCT model FROM requests")
+    }
+    plans: dict[str, CostPlan] = {
+        m: cost_plan(entry) for m, (entry, _) in resolved.items() if entry is not None
+    }
+    # The NULL row keeps VALUES non-empty; unpriced models get no plan row.
+    plan_rows = ", ".join(["(NULL, 0, 0, 0)", *["(?, ?, ?, ?)"] * len(plans)])
+    plan_params = [
+        v for m, p in plans.items() for v in (m, p.openai, p.switch, p.threshold)
+    ]
     where, params = _where(window, filters)
     rows = conn.execute(
         f"""
+        WITH plan(plan_model, openai, switch, threshold) AS (VALUES {plan_rows}),
+        r AS (
+            SELECT
+                requests.*,
+                COALESCE(switch, 0) AS switch,
+                COALESCE(threshold, 0) AS t,
+                CASE WHEN openai THEN MIN(cached_tokens, input_tokens)
+                     ELSE cached_tokens END AS cr,
+                input_tokens - CASE WHEN openai THEN MIN(cached_tokens, input_tokens)
+                                    ELSE 0 END AS inp
+            FROM requests LEFT JOIN plan ON plan_model = model
+            {where}
+        )
         SELECT
             CAST(strftime('%s', timestamp) AS INTEGER) / {SLICE_SECONDS} AS slice_no,
             api_key,
@@ -237,15 +263,18 @@ def _fetch_cells(
             SUM(cached_tokens),
             SUM(reasoning_tokens),
             SUM(latency_ms),
-            MAX(timestamp)
-        FROM requests
-        {where}
+            MAX(timestamp),
+            SUM(inp),
+            SUM(cr),
+            SUM({_base_rate("inp")}),
+            SUM({_base_rate("output_tokens")}),
+            SUM({_base_rate("cr")})
+        FROM r
         GROUP BY slice_no, api_key, model, source
         """,
-        params,
+        [*plan_params, *params],
     ).fetchall()
 
-    resolved: dict[str, tuple[ModelPricing | None, PricingResolution]] = {}
     people: dict[str, str] = {}
     credentials: dict[str, str] = {}
     cells: list[_Cell] = []
@@ -262,13 +291,20 @@ def _fetch_cells(
         rea,
         lat,
         last,
+        cost_inp,
+        cost_cr,
+        base_inp,
+        base_out,
+        base_cr,
     ) in rows:
-        if model not in resolved:
-            resolved[model] = resolve(model, pricing)
-        entry, status = resolved[model]
+        _, status = resolved[model]
+        plan = plans.get(model)
         cost = (
-            compute_cost(split_tokens_for_cost(entry, inp, out, cac), entry)
-            if entry is not None
+            plan.price(
+                (base_inp, base_out, 0, base_cr),
+                (cost_inp - base_inp, out - base_out, 0, cost_cr - base_cr),
+            )
+            if plan is not None
             else 0.0
         )
         if api_key not in people:
@@ -279,7 +315,7 @@ def _fetch_cells(
             _Cell(
                 slice_no=slice_no,
                 person=people[api_key],
-                model=model,
+                model=model or EMPTY_KEY,
                 credential=credentials[source],
                 requests=req,
                 failed=failed,
@@ -296,9 +332,20 @@ def _fetch_cells(
     return cells
 
 
+def _base_rate(column: str) -> str:
+    """Per-request share of *column* billed at the base rate (mirrors CostPlan.tier)."""
+    return (
+        f"CASE WHEN switch THEN (CASE WHEN inp + cr > t THEN 0 ELSE {column} END) "
+        f"ELSE MIN({column}, t) END"
+    )
+
+
 def _data_start(conn: sqlite3.Connection) -> datetime | None:
-    row = conn.execute("SELECT MIN(timestamp) FROM requests").fetchone()
-    return None if row is None or row[0] is None else _parse_ts(row[0])
+    # Text MIN is not chronological across UTC offsets; order by the indexed instant.
+    row = conn.execute(
+        "SELECT timestamp FROM requests ORDER BY datetime(timestamp) LIMIT 1"
+    ).fetchone()
+    return None if row is None else _parse_ts(row[0])
 
 
 def _axis(
@@ -340,6 +387,11 @@ def resolve_redacted_api_keys(
     return [r[0] for r in rows if redact_key(r[0]) in target]
 
 
+def resolve_model_keys(keys: list[str]) -> list[str]:
+    """Map model keys back to raw model ids (``EMPTY_KEY`` is the empty id)."""
+    return ["" if k == EMPTY_KEY else k for k in keys]
+
+
 def resolve_redacted_sources(
     conn: sqlite3.Connection,
     redacted: list[str],
@@ -348,12 +400,6 @@ def resolve_redacted_sources(
     target = set(redacted)
     rows = conn.execute("SELECT DISTINCT source FROM requests").fetchall()
     return [r[0] for r in rows if redact_source(r[0]) in target]
-
-
-def query_people(conn: sqlite3.Connection) -> set[str]:
-    """Return every distinct redacted api key."""
-    rows = conn.execute("SELECT DISTINCT api_key FROM requests").fetchall()
-    return {redact_key(r[0]) for r in rows}
 
 
 # ---------------------------------------------------------------------------

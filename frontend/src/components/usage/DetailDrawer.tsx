@@ -4,7 +4,7 @@ import { useApi } from '@/hooks/useApi';
 import { getBreakdown, getSummary } from '@/services/api';
 import type { BreakdownResponse, Dimension, Totals } from '@/types/api';
 import { displayName, DIMENSION_LABEL, DRAWER_DIMENSIONS, type EntityLookup } from '@/utils/usage/entities';
-import { change, fmtCompact, fmtPct } from '@/utils/usage/format';
+import { type Change, change, fmtCompact, fmtPct } from '@/utils/usage/format';
 import { metricSeries, metricValue } from '@/utils/usage/richRows';
 import { stackLayers } from '@/utils/usage/stack';
 import { failureRate, fmtSpend, tokens } from '@/utils/usage/totals';
@@ -152,7 +152,7 @@ export default function DetailDrawer({
   );
 }
 
-function Foot({ sub, change }: { sub: string; change: number | null }) {
+function Foot({ sub, change }: { sub: string; change: Change }) {
   return (
     <>
       <span className={s.muted}>{sub}</span>

@@ -4,8 +4,10 @@ import { DayPicker, type DateRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import type { Bucket, Entity, OptionsResponse } from '@/types/api';
 import {
+  dayRange,
   isValidCustomRange,
   PRESETS,
+  rangeDays,
   rangeLabel,
   toLocalInput,
   type RangeSel,
@@ -82,11 +84,6 @@ export default function FilterBar({ state, update, win, now, effectiveBucket, op
   );
 }
 
-/** Replaces the date part of a local `YYYY-MM-DDTHH:mm` string, keeping its time of day. */
-function withDate(input: string, day: Date): string {
-  return `${toLocalInput(day.getTime()).slice(0, 10)}T${input.slice(11) || '00:00'}`;
-}
-
 function RangePicker({
   value,
   win,
@@ -112,11 +109,13 @@ function RangePicker({
   };
 
   const valid = isValidCustomRange(from, to);
-  const toDate = new Date(to);
-  const selected: DateRange = { from: new Date(from), to: toDate };
+  const selected = rangeDays(from, to);
+  const toDate = selected?.to ?? new Date(now);
   const onCalendar = (r: DateRange | undefined) => {
-    if (r?.from) setFrom(withDate(from, r.from));
-    if (r?.to) setTo(withDate(to, r.to));
+    if (!r?.from) return;
+    const days = dayRange(r.from, r.to ?? r.from);
+    setFrom(days.start);
+    setTo(days.end);
   };
 
   return (

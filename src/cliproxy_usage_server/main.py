@@ -14,9 +14,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from cliproxy_usage_server.aggregate import query_people
 from cliproxy_usage_server.config import ServerConfig, load_config, load_key_aliases
-from cliproxy_usage_server.db import open_ro
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
 from cliproxy_usage_server.quota.client import CliProxyClient
 from cliproxy_usage_server.quota.providers import PROVIDERS
@@ -52,19 +50,6 @@ async def _refresh_loop(app: FastAPI, config: ServerConfig) -> None:
             )
         except Exception as exc:
             _log.warning("Failed to refresh pricing: %s", exc)
-
-
-def _warn_unmatched_aliases(db_path: Path, aliases: Mapping[str, str]) -> None:
-    """Log each alias entry whose redacted key matches no recorded API key."""
-    if not aliases or not db_path.is_file():
-        return
-    conn = open_ro(db_path)
-    try:
-        known = query_people(conn)
-    finally:
-        conn.close()
-    for key in sorted(set(aliases) - known):
-        _log.warning("USAGE_KEY_ALIASES entry %r matches no API key", key)
 
 
 def _default_pricing_provider() -> dict[str, ModelPricing]:
@@ -162,7 +147,6 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        _warn_unmatched_aliases(config.db_path, aliases)
         if pricing_provider is not None:
             app.state.pricing = dict(pricing_provider())
             try:

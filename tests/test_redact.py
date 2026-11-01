@@ -49,7 +49,7 @@ def test_redact_key_is_idempotent(raw: str) -> None:
         ("sk-rawkey-abc-1234", "sk-*******-1234"),
         ("rawkey1234", "*******1234"),
         # Empty
-        ("", ""),
+        ("", "<empty>"),
     ],
 )
 def test_redact_source(raw: str, expected: str) -> None:

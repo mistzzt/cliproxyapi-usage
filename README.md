@@ -178,7 +178,8 @@ UI shows it (for example `sk-*******-alice` or `*******0a1b`), to a display
 name. Full API keys are never needed in this file. Keys without an entry keep
 their redacted label. If the file does not exist, the server logs a warning and
 shows redacted keys; if it is not a JSON object of strings, the server refuses
-to start. Entries that match no recorded key are logged as warnings at startup.
+to start. Entries that match no recorded key are logged as warnings once, the
+first time the dashboard loads its filter options.
 
 ```json
 {

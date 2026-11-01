@@ -1,5 +1,5 @@
 // Range presets and custom date+time windows, resolved against an explicit `now`.
-import { format } from 'date-fns';
+import { addDays, format, startOfDay } from 'date-fns';
 
 export type PresetId = '24h' | '7d' | '30d' | '90d' | 'this_month' | 'last_month' | 'all';
 
@@ -53,6 +53,22 @@ export function parseLocalInput(s: string): number | null {
 
 export function toLocalInput(ms: number): string {
   return format(ms, "yyyy-MM-dd'T'HH:mm");
+}
+
+/** Calendar day picks as whole local days: the first day's midnight to the midnight after the last. */
+export function dayRange(first: Date, last: Date): { start: string; end: string } {
+  return {
+    start: toLocalInput(startOfDay(first).getTime()),
+    end: toLocalInput(addDays(startOfDay(last), 1).getTime()),
+  };
+}
+
+/** Days a custom range covers on the calendar; an end at midnight excludes that day. */
+export function rangeDays(start: string, end: string): { from: Date; to: Date } | undefined {
+  const s = parseLocalInput(start);
+  const e = parseLocalInput(end);
+  if (s === null || e === null) return undefined;
+  return { from: new Date(s), to: new Date(Math.max(s, e - 1)) };
 }
 
 /** A custom range is valid when both ends parse and start is strictly before end. */

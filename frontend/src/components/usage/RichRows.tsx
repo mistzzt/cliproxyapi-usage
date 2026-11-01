@@ -42,6 +42,7 @@ export default function RichRows({
   const rows = useMemo(() => buildRichRows(data.rows, dim, metric), [data.rows, dim, metric]);
   const sorted = useMemo(() => sortRichRows(rows, sort, (r) => displayName(dim, r.label)), [rows, sort, dim]);
   const maxShare = Math.max(0, ...rows.map((r) => r.share));
+  const hasPrevious = data.rows.some((r) => r.previous !== null);
   const th = (key: SortKey, label: string, num = true) => (
     <SortHeader sortKey={key} sort={sort} onSort={setSort} num={num}>
       {label}
@@ -57,7 +58,7 @@ export default function RichRows({
             {th('share', `Share of ${metric === 'cost' ? 'spend' : 'tokens'}`)}
             {th('cost', 'Spend')}
             {th('tokens', 'Tokens')}
-            {th('change', 'Δ vs prev.')}
+            {hasPrevious && th('change', 'Δ vs prev.')}
             <th className={s.trendHead}>
               {hover !== null ? <b>{bucketLabel(buckets[hover] ?? 0, bucket)}</b> : <>Trend by {bucket}, own scale</>}
             </th>
@@ -85,6 +86,7 @@ export default function RichRows({
               buckets={buckets}
               bucket={bucket}
               maxShare={maxShare}
+              hasPrevious={hasPrevious}
               hover={hover}
               onHover={setHover}
               onSelect={onSelect}
@@ -105,6 +107,7 @@ function Row({
   buckets,
   bucket,
   maxShare,
+  hasPrevious,
   hover,
   onHover,
   onSelect,
@@ -117,6 +120,7 @@ function Row({
   buckets: readonly number[];
   bucket: BreakdownResponse['bucket'];
   maxShare: number;
+  hasPrevious: boolean;
   hover: number | null;
   onHover: (i: number | null) => void;
   onSelect: (key: string) => void;
@@ -149,9 +153,11 @@ function Row({
       </td>
       <td className={s.num}>{fmtSpend(r.totals)}</td>
       <td className={s.num}>{fmtCompact(tokens(r.totals))}</td>
-      <td className={s.num}>
-        <ChangeBadge value={r.change} />
-      </td>
+      {hasPrevious && (
+        <td className={s.num}>
+          <ChangeBadge value={r.change} />
+        </td>
+      )}
       <td className={s.trendCell}>
         <MiniColumns values={r.trend} color={color} hover={hover} onHover={onHover} />
         <div className={s.caption}>{caption}</div>

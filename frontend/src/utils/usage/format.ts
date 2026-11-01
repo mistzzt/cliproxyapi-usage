@@ -45,24 +45,28 @@ export function fmtPct(v: number): string {
   return `${(v * 100).toFixed(Math.abs(v) >= 0.1 ? 0 : 1)}%`;
 }
 
-/** Signed relative change, or null ("new") when there is no positive previous value. */
-export function change(current: number, previous: number | null | undefined): number | null {
-  return previous != null && previous > 0 ? (current - previous) / previous : null;
+/** Signed relative change; `new` when growing from zero, null when there is no previous period. */
+export type Change = number | 'new' | null;
+
+export function change(current: number, previous: number | null | undefined): Change {
+  if (previous == null) return null;
+  if (previous > 0) return (current - previous) / previous;
+  return current > 0 ? 'new' : 0;
 }
 
 export type ChangeDirection = 'up' | 'down' | 'flat' | 'new';
 
 export interface ChangeDisplay {
   direction: ChangeDirection;
-  /** Unsigned magnitude (`25%`, `3.2×`); `new` when there is no previous value. */
+  /** Unsigned magnitude (`25%`, `3.2×`); `new` when the previous value was zero. */
   text: string;
 }
 
 const FLAT_EPSILON = 0.005;
 
 /** At or above +100% the change reads as a multiple of the previous value. */
-export function fmtChange(value: number | null): ChangeDisplay {
-  if (value === null) return { direction: 'new', text: 'new' };
+export function fmtChange(value: number | 'new'): ChangeDisplay {
+  if (value === 'new') return { direction: 'new', text: 'new' };
   const direction = value > FLAT_EPSILON ? 'up' : value < -FLAT_EPSILON ? 'down' : 'flat';
   if (value < 1) return { direction, text: fmtPct(Math.abs(value)) };
   const ratio = 1 + value;

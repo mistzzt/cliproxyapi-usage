@@ -1,6 +1,6 @@
 // Per-row derivations for the rich rows table: metric values, mix bars, trend peaks (pure).
 import type { BreakdownRow, MixEntry, ModelPrice, Totals } from '@/types/api';
-import { change, fmtPct } from './format';
+import { type Change, change, fmtPct } from './format';
 import { cacheHitRate, failureRate, tokenSeries, tokens } from './totals';
 import type { Dimension, Metric } from './viewState';
 
@@ -69,7 +69,7 @@ export interface RichRow {
   /** Active metric value and its fraction of the sum over all rows. */
   value: number;
   share: number;
-  change: number | null;
+  change: Change;
   trend: number[];
   peak: { index: number; value: number } | null;
   parts: MixPart<MixEntry>[];
@@ -125,7 +125,7 @@ function sortValue(r: RichRow, key: Exclude<SortKey, 'name'>): number {
     case 'tokens':
       return tokens(r.totals);
     case 'change':
-      return r.change ?? -Infinity;
+      return r.change === 'new' ? Infinity : (r.change ?? -Infinity);
     case 'fail':
       return r.fail;
     case 'cacheHit':

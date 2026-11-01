@@ -1,3 +1,6 @@
+EMPTY_KEY = "<empty>"
+
+
 def redact_key(key: str) -> str:
     """Redact an API key for safe display.
 
@@ -21,10 +24,10 @@ def redact_source(source: str) -> str:
 
     OAuth sources are email-like values and pass through unchanged. All
     non-email values are treated as opaque keys/secrets and redacted as a
-    single string.
+    single string. An empty source becomes ``EMPTY_KEY`` so it stays addressable.
     """
-    if not source:
-        return source
+    if not source or source == EMPTY_KEY:
+        return EMPTY_KEY
     if "***" in source:
         return source
     if "@" in source:
