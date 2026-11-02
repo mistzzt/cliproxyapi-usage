@@ -490,7 +490,11 @@ def _model_price(plan: CostPlan | None) -> ModelPrice | None:
             whole_request=plan.switch,
         )
     )
-    return ModelPrice(**_unit_prices(plan.base).model_dump(), long_context=long_context)
+    return ModelPrice(
+        **_unit_prices(plan.base).model_dump(),
+        long_context=long_context,
+        cached_in_input=plan.openai,
+    )
 
 
 def query_breakdown(

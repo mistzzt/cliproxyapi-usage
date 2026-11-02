@@ -84,6 +84,12 @@
   }
 }
 
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+}
+
 .tiles {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

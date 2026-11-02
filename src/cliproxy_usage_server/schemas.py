@@ -84,6 +84,7 @@ class ModelPrice(UnitPrices):
     """The rates cost is computed with (base tier, no speed multiplier)."""
 
     long_context: LongContextPrice | None  # None when the model has no long tier
+    cached_in_input: bool  # OpenAI accounting: cached tokens are a subset of input
 
 
 class BreakdownRow(BaseModel):

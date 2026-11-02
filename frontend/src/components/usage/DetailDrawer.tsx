@@ -1,4 +1,6 @@
 import { useEffect, useMemo } from 'react';
+import b from '@/components/ui/Busy.module.scss';
+import Loaded from '@/components/ui/Loaded';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { useApi } from '@/hooks/useApi';
 import { getBreakdown, getSummary } from '@/services/api';
@@ -71,6 +73,7 @@ export default function DetailDrawer({
   }, [split.data, splitDim, metric, lookup]);
 
   const error = summary.error ?? split.error ?? other.error;
+  const busy = summary.loading || split.loading || other.loading;
   const cur = summary.data?.current;
   const prev = summary.data?.previous ?? null;
 
@@ -99,7 +102,7 @@ export default function DetailDrawer({
         {!cur ? (
           !error && <LoadingSpinner />
         ) : (
-          <>
+          <div className={busy ? `${s.body} ${b.busy}` : s.body} aria-busy={busy}>
             <div className={s.tiles}>
               <StatTile
                 className={s.tile}
@@ -131,13 +134,11 @@ export default function DetailDrawer({
               />
             </div>
             <h3 className={s.section}>Over time by {DIMENSION_LABEL[splitDim].toLowerCase()}</h3>
-            {chart ? (
-              <TimeChart buckets={chart.buckets} bucket={chart.bucket} layers={chart.layers} metric={metric} theme={lookup.theme} />
-            ) : (
-              <LoadingSpinner />
-            )}
-            <ShareSection dim={splitDim} data={split.data} metric={metric} lookup={lookup} />
-            <ShareSection dim={otherDim} data={other.data} metric={metric} lookup={lookup} />
+            <Loaded api={{ data: chart, error: split.error }}>
+              {(c) => <TimeChart buckets={c.buckets} bucket={c.bucket} layers={c.layers} metric={metric} theme={lookup.theme} />}
+            </Loaded>
+            <ShareSection dim={splitDim} api={split} metric={metric} lookup={lookup} />
+            <ShareSection dim={otherDim} api={other} metric={metric} lookup={lookup} />
             <h3 className={s.section}>Token mix</h3>
             <div className={s.tokenMix}>
               <span>Input {fmtCompact(cur.input_tokens)}</span>
@@ -145,7 +146,7 @@ export default function DetailDrawer({
               <span>Cached {fmtCompact(cur.cached_tokens)}</span>
               <span>Reasoning {fmtCompact(cur.reasoning_tokens)}</span>
             </div>
-          </>
+          </div>
         )}
       </aside>
     </>
@@ -163,29 +164,29 @@ function Foot({ sub, change }: { sub: string; change: Change }) {
 
 function ShareSection({
   dim,
-  data,
+  api,
   metric,
   lookup,
 }: {
   dim: Dimension;
-  data: BreakdownResponse | null;
+  api: { data: BreakdownResponse | null; error: string | null };
   metric: Metric;
   lookup: EntityLookup;
 }) {
   const items = useMemo<ShareItem[]>(
     () =>
-      (data?.rows ?? []).map((r) => ({
+      (api.data?.rows ?? []).map((r) => ({
         key: r.key,
         label: r.label,
         value: metricValue(r.current, metric),
         slot: lookup.entity(dim, r.key).slot,
       })),
-    [data, dim, metric, lookup],
+    [api.data, dim, metric, lookup],
   );
   return (
     <>
       <h3 className={s.section}>By {DIMENSION_LABEL[dim].toLowerCase()}</h3>
-      {data ? <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} /> : <LoadingSpinner />}
+      <Loaded api={api}>{() => <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} />}</Loaded>
     </>
   );
 }

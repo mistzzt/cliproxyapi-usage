@@ -14,12 +14,14 @@ type Action<T> =
 function reducer<T>(state: ApiState<T>, action: Action<T>): ApiState<T> {
   switch (action.type) {
     case 'start':
-      // Keep prior data visible during a reload so the UI doesn't flash empty.
-      return { data: state.data, loading: true, error: state.error };
+      // Keep prior data visible during a reload so the UI doesn't flash empty;
+      // `loading` marks it as belonging to the previous query.
+      return { data: state.data, loading: true, error: null };
     case 'success':
       return { data: action.data, loading: false, error: null };
     case 'error':
-      return { data: state.data, loading: false, error: action.error };
+      // Drop prior data: it answers a different query than the one that failed.
+      return { data: null, loading: false, error: action.error };
   }
 }
 

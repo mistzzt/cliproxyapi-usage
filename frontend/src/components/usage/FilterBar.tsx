@@ -6,6 +6,7 @@ import type { Bucket, Entity, OptionsResponse } from '@/types/api';
 import {
   dayRange,
   isValidCustomRange,
+  pickDay,
   PRESETS,
   rangeDays,
   rangeLabel,
@@ -13,7 +14,7 @@ import {
   type RangeSel,
   type RangeWindow,
 } from '@/utils/usage/range';
-import type { Granularity, Metric, ViewState } from '@/utils/usage/viewState';
+import { granularityOptions, type Granularity, type Metric, type ViewState } from '@/utils/usage/viewState';
 import Segmented from './Segmented';
 import s from './FilterBar.module.scss';
 
@@ -60,12 +61,7 @@ export default function FilterBar({ state, update, win, now, effectiveBucket, op
       <Segmented<Granularity>
         label="Granularity"
         value={state.granularity}
-        options={[
-          { value: 'auto', label: effectiveBucket ? `Auto (${effectiveBucket[0]})` : 'Auto' },
-          { value: 'hour', label: '1h' },
-          { value: 'day', label: '1d' },
-          { value: 'week', label: '1w' },
-        ]}
+        options={granularityOptions(state.granularity, effectiveBucket)}
         onChange={(granularity) => update({ granularity })}
       />
       <Segmented<Metric>
@@ -99,6 +95,7 @@ function RangePicker({
   const [custom, setCustom] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [anchor, setAnchor] = useState<Date | null>(null);
 
   const handleOpen = (next: boolean) => {
     setOpen(next);
@@ -106,14 +103,17 @@ function RangePicker({
     setFrom(toLocalInput(win.start ?? win.end - 30 * DAY));
     setTo(toLocalInput(win.end));
     setCustom(value.kind === 'custom');
+    setAnchor(null);
   };
 
   const valid = isValidCustomRange(from, to);
   const selected = rangeDays(from, to);
   const toDate = selected?.to ?? new Date(now);
-  const onCalendar = (r: DateRange | undefined) => {
-    if (!r?.from) return;
-    const days = dayRange(r.from, r.to ?? r.from, now);
+  // Uses the clicked day rather than DayPicker's range, which would extend the shown window.
+  const onCalendar = (_: DateRange | undefined, day: Date) => {
+    const pick = pickDay(anchor, day);
+    const days = dayRange(pick.first, pick.last, now);
+    setAnchor(pick.anchor);
     setFrom(days.start);
     setTo(days.end);
   };

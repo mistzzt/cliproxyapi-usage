@@ -15,13 +15,24 @@ export class ApiError extends Error {
   }
 }
 
+/** FastAPI's `{"detail": "..."}` message when present, else the raw body. */
+function errorMessage(body: string): string {
+  try {
+    const detail: unknown = (JSON.parse(body) as { detail?: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+  } catch {
+    // Not JSON: fall through to the raw body.
+  }
+  return body;
+}
+
 /** Range, `tz`, `bucket` and filter params, as built by `usageQueryParams`. */
 export type UsageParams = Readonly<Record<string, string>>;
 
 async function get<T>(path: string, params: UsageParams = {}): Promise<T> {
   const query = new URLSearchParams(params).toString();
   const resp = await fetch(apiPath(query ? `${path}?${query}` : path));
-  if (!resp.ok) throw new ApiError(resp.status, (await resp.text()) || resp.statusText);
+  if (!resp.ok) throw new ApiError(resp.status, errorMessage(await resp.text()) || resp.statusText);
   return resp.json() as Promise<T>;
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { loadViewState, saveViewState, serializeViewState, type ViewState } from '@/utils/usage/viewState';
 
@@ -34,8 +34,12 @@ export function useUsageViewState(): {
 
   const update = useCallback(
     (patch: Partial<ViewState>) => {
-      if (patch.range) setClock((c) => ({ ...c, now: Date.now() }));
-      setParams(serializeViewState({ ...state, ...patch }), { replace: true });
+      // The router commits URL changes in a transition; updating the clock in the same
+      // transition lands both in one render, so fetches never see the old range with a new `now`.
+      startTransition(() => {
+        if (patch.range) setClock((c) => ({ ...c, now: Date.now() }));
+        setParams(serializeViewState({ ...state, ...patch }), { replace: true });
+      });
     },
     [state, setParams],
   );

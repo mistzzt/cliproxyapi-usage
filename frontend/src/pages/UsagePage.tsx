@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import Loaded from '@/components/ui/Loaded';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import DetailDrawer from '@/components/usage/DetailDrawer';
 import FilterBar from '@/components/usage/FilterBar';
@@ -43,7 +44,14 @@ export default function UsagePage() {
   const select = useCallback((dim: Dimension) => (k: string) => update({ drawer: { dim, key: k } }), [update]);
   const closeDrawer = useCallback(() => update({ drawer: null }), [update]);
 
-  const errors = [options, summary, people, secondary, matrix].map((h) => h.error).filter((e) => e !== null);
+  const failures: [string, string | null][] = [
+    ['Filter options', options.error],
+    ['Summary', summary.error],
+    ['People', people.error],
+    ['Heatmap', matrix.error],
+    [TABS.find((t) => t.value === state.tab)?.label ?? 'Breakdown', secondary.error],
+  ];
+  const errors = failures.flatMap(([what, e]) => (e === null ? [] : [`${what}: ${e}`]));
   const metricWord = state.metric === 'cost' ? 'spend' : 'tokens';
   const secondaryData = secondary.data?.dim === tabDim ? secondary.data : null;
 
@@ -81,28 +89,22 @@ export default function UsagePage() {
         <div className={s.empty}>No usage in this window.</div>
       ) : (
         <div className={s.stack}>
-          <KpiStrip summary={summary.data} accent={lookup.accent} />
-          <Panel title={`People by ${metricWord}`}>
-            {people.data ? (
-              <BreakdownSection data={people.data} metric={state.metric} lookup={lookup} onSelect={select('person')} />
-            ) : (
-              <LoadingSpinner />
-            )}
+          <KpiStrip summary={summary.data} accent={lookup.accent} busy={summary.loading} />
+          <Panel title={`People by ${metricWord}`} busy={people.loading}>
+            <Loaded api={people}>
+              {(data) => <BreakdownSection data={data} metric={state.metric} lookup={lookup} onSelect={select('person')} />}
+            </Loaded>
           </Panel>
-          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`}>
-            {matrix.data ? (
-              <Heatmap matrix={matrix.data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />
-            ) : (
-              <LoadingSpinner />
-            )}
+          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`} busy={matrix.loading}>
+            <Loaded api={matrix}>
+              {(data) => <Heatmap matrix={data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />}
+            </Loaded>
           </Panel>
-          <Panel>
+          <Panel busy={secondary.loading}>
             <Tabs tabs={TABS} value={state.tab} onChange={(tab) => update({ tab })} />
-            {secondaryData ? (
-              <BreakdownSection data={secondaryData} metric={state.metric} lookup={lookup} onSelect={select(tabDim)} compact />
-            ) : (
-              <LoadingSpinner />
-            )}
+            <Loaded api={{ data: secondaryData, error: secondary.error }}>
+              {(data) => <BreakdownSection data={data} metric={state.metric} lookup={lookup} onSelect={select(tabDim)} compact />}
+            </Loaded>
           </Panel>
         </div>
       )}

@@ -56,6 +56,8 @@ export interface LongContextPrice extends UnitPrices {
 /** The rates cost is computed with (base tier, no speed multiplier). */
 export interface ModelPrice extends UnitPrices {
   long_context: LongContextPrice | null;
+  /** OpenAI accounting: cached tokens are a subset of input. */
+  cached_in_input: boolean;
 }
 
 export interface BreakdownRow {

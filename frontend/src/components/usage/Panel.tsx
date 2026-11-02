@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
+import b from '@/components/ui/Busy.module.scss';
 import s from './Panel.module.scss';
 
-export function Panel({ title, children }: { title?: ReactNode; children: ReactNode }) {
+/** `busy` dims content still showing the previous query's data. */
+export function Panel({ title, busy = false, children }: { title?: ReactNode; busy?: boolean; children: ReactNode }) {
   return (
-    <section className={s.panel}>
+    <section className={busy ? `${s.panel} ${b.busy}` : s.panel} aria-busy={busy}>
       {title && <h2 className={s.title}>{title}</h2>}
       {children}
     </section>
