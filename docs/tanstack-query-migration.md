@@ -49,8 +49,8 @@ interface ResolvedWindow {
   tz: string;
 }
 
-/** Key of each data request: what it asks for, inside which window. */
-type UsageQueryKey = ['usage', 'summary' | 'breakdown' | 'matrix', ResolvedWindow, Record<string, string>];
+/** Key of each data request: inside which window, what it asks for. The window comes first, so `['usage', window]` selects every request inside it. */
+type UsageQueryKey = ['usage', ResolvedWindow, 'summary' | 'breakdown' | 'matrix', Record<string, string>];
 ```
 
 Do the work in this order:
