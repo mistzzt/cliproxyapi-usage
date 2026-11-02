@@ -116,10 +116,13 @@
       default = with pkgs;
         mkShell {
           buildInputs = [
-            python314
+            # Runs the e2e browser tests: PyPI's Playwright driver cannot start on NixOS.
+            (python314.withPackages (ps: [ps.pytest ps.playwright]))
             uv
             bun
           ];
+          PLAYWRIGHT_BROWSERS_PATH = "${playwright-driver.browsers}";
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
         };
     });
   };
