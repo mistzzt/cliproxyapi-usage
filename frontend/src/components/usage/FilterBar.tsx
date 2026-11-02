@@ -3,6 +3,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { DayPicker, type DateRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import type { Bucket, Entity, OptionsResponse } from '@/types/api';
+import type { ResolvedWindow } from '@/utils/usage/queryKeys';
 import {
   dayRange,
   isValidCustomRange,
@@ -12,7 +13,6 @@ import {
   rangeLabel,
   toLocalInput,
   type RangeSel,
-  type RangeWindow,
 } from '@/utils/usage/range';
 import { granularityOptions, type Granularity, type Metric, type ViewState } from '@/utils/usage/viewState';
 import Segmented from './Segmented';
@@ -23,19 +23,18 @@ const DAY = 86_400_000;
 interface FilterBarProps {
   state: ViewState;
   update: (patch: Partial<ViewState>) => void;
-  win: RangeWindow;
-  now: number;
+  win: ResolvedWindow;
   /** Bucket echoed by the API, shown on the Auto button. */
   effectiveBucket: Bucket | null;
   options: OptionsResponse | null;
-  /** Advances `now` and refetches without touching the URL. */
+  /** Computes a fresh window and refetches without touching the URL. */
   onRefresh: () => void;
 }
 
-export default function FilterBar({ state, update, win, now, effectiveBucket, options, onRefresh }: FilterBarProps) {
+export default function FilterBar({ state, update, win, effectiveBucket, options, onRefresh }: FilterBarProps) {
   return (
     <div className={s.bar}>
-      <RangePicker value={state.range} win={win} now={now} onChange={(range) => update({ range })} />
+      <RangePicker value={state.range} win={win} onChange={(range) => update({ range })} />
       <MultiPill
         noun="people"
         allLabel="All people"
@@ -83,12 +82,10 @@ export default function FilterBar({ state, update, win, now, effectiveBucket, op
 function RangePicker({
   value,
   win,
-  now,
   onChange,
 }: {
   value: RangeSel;
-  win: RangeWindow;
-  now: number;
+  win: ResolvedWindow;
   onChange: (r: RangeSel) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -96,12 +93,16 @@ function RangePicker({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [anchor, setAnchor] = useState<Date | null>(null);
+  // Read when the picker opens, so the calendar never offers days past the real today.
+  const [now, setNow] = useState(0);
 
   const handleOpen = (next: boolean) => {
     setOpen(next);
     if (!next) return;
-    setFrom(toLocalInput(win.start ?? win.end - 30 * DAY));
-    setTo(toLocalInput(win.end));
+    const end = Date.parse(win.end);
+    setNow(Date.now());
+    setFrom(toLocalInput(win.start === null ? end - 30 * DAY : Date.parse(win.start)));
+    setTo(toLocalInput(end));
     setCustom(value.kind === 'custom');
     setAnchor(null);
   };

@@ -1,10 +1,5 @@
-import type {
-  BreakdownResponse,
-  Dimension,
-  MatrixResponse,
-  OptionsResponse,
-  SummaryResponse,
-} from '@/types/api';
+import type { OptionsResponse } from '@/types/api';
+import { requestParams, type UsageEndpoint, type UsageQueryKey, type UsageResponses } from '@/utils/usage/queryKeys';
 import { apiPath } from './runtimeConfig';
 
 export class ApiError extends Error {
@@ -26,31 +21,18 @@ function errorMessage(body: string): string {
   return body;
 }
 
-/** Range, `tz`, `bucket` and filter params, as built by `usageQueryParams`. */
-export type UsageParams = Readonly<Record<string, string>>;
-
-async function get<T>(path: string, params: UsageParams = {}): Promise<T> {
+async function get<T>(path: string, params: Record<string, string>, signal: AbortSignal): Promise<T> {
   const query = new URLSearchParams(params).toString();
-  const resp = await fetch(apiPath(query ? `${path}?${query}` : path));
+  const resp = await fetch(apiPath(query ? `${path}?${query}` : path), { signal });
   if (!resp.ok) throw new ApiError(resp.status, errorMessage(await resp.text()) || resp.statusText);
   return resp.json() as Promise<T>;
 }
 
-export function getSummary(params: UsageParams): Promise<SummaryResponse> {
-  return get('/usage/summary', params);
+/** The usage request that `key` names. */
+export function getUsage<E extends UsageEndpoint>(key: UsageQueryKey<E>, signal: AbortSignal): Promise<UsageResponses[E]> {
+  return get(`/usage/${key[2]}`, requestParams(key), signal);
 }
 
-export function getBreakdown(dim: Dimension, params: UsageParams): Promise<BreakdownResponse> {
-  return get('/usage/breakdown', { ...params, dim });
-}
-
-/** The matrix has no time axis, so any `bucket` param is dropped. */
-export function getMatrix(params: UsageParams, rows: Dimension = 'person', cols: Dimension = 'model'): Promise<MatrixResponse> {
-  const query: Record<string, string> = { ...params, rows, cols };
-  delete query.bucket;
-  return get('/usage/matrix', query);
-}
-
-export function getOptions(): Promise<OptionsResponse> {
-  return get('/usage/options');
+export function getOptions(signal: AbortSignal): Promise<OptionsResponse> {
+  return get('/usage/options', {}, signal);
 }

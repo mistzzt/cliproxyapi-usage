@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { loadViewState, saveViewState, serializeViewState, type ViewState } from '@/utils/usage/viewState';
 
@@ -10,22 +10,11 @@ function storage(): Storage | null {
   }
 }
 
-/**
- * Dashboard view state backed by the URL query string; an empty query restores the last saved state.
- * `now` anchors rolling ranges and only advances on a range change or `refresh`, so renders don't refetch.
- */
-export function useUsageViewState(): {
-  state: ViewState;
-  update: (patch: Partial<ViewState>) => void;
-  now: number;
-  /** Bumped by `refresh`; add to fetch deps so fixed ranges refetch too. */
-  refreshToken: number;
-  refresh: () => void;
-} {
+/** Dashboard view state backed by the URL query string; an empty query restores the last saved state. */
+export function useUsageViewState(): { state: ViewState; update: (patch: Partial<ViewState>) => void } {
   const [params, setParams] = useSearchParams();
   const search = params.toString();
   const state = useMemo(() => loadViewState(search, storage()), [search]);
-  const [clock, setClock] = useState(() => ({ now: Date.now(), refreshToken: 0 }));
 
   useEffect(() => {
     saveViewState(state, storage());
@@ -33,16 +22,8 @@ export function useUsageViewState(): {
   }, [state, search, setParams]);
 
   const update = useCallback(
-    (patch: Partial<ViewState>) => {
-      // The router commits URL changes in a transition; updating the clock in the same
-      // transition lands both in one render, so fetches never see the old range with a new `now`.
-      startTransition(() => {
-        if (patch.range) setClock((c) => ({ ...c, now: Date.now() }));
-        setParams(serializeViewState({ ...state, ...patch }), { replace: true });
-      });
-    },
+    (patch: Partial<ViewState>) => setParams(serializeViewState({ ...state, ...patch }), { replace: true }),
     [state, setParams],
   );
-  const refresh = useCallback(() => setClock((c) => ({ now: Date.now(), refreshToken: c.refreshToken + 1 })), []);
-  return { state, update, now: clock.now, refreshToken: clock.refreshToken, refresh };
+  return { state, update };
 }

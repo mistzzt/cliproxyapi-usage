@@ -1,5 +1,5 @@
 // Dashboard view state: URL query string round-trip plus the localStorage fallback (pure).
-import { isPresetId, isValidCustomRange, resolveRange, viewerTimeZone, type RangeSel } from './range';
+import { isPresetId, isValidCustomRange, type RangeSel } from './range';
 
 export type Dimension = 'person' | 'model' | 'credential';
 export type Metric = 'cost' | 'tokens';
@@ -146,13 +146,6 @@ export function saveViewState(s: ViewState, storage: Pick<Storage, 'setItem'> | 
   } catch {
     // Quota or disabled storage; persistence is best-effort.
   }
-}
-
-/** Query params for range-consuming endpoints: range, `tz`, `bucket`, comma-joined filters. */
-export function usageQueryParams(s: ViewState, now: number, tz: string = viewerTimeZone()): Record<string, string> {
-  const out: Record<string, string> = { ...resolveRange(s.range, now, tz), bucket: s.granularity };
-  for (const field of LIST_FIELDS) if (s[field].length > 0) out[field] = s[field].join(',');
-  return out;
 }
 
 /** Page state narrowed to one entity (replacing that dimension's filter), for the detail drawer. */

@@ -2,15 +2,15 @@ import { useEffect, useMemo } from 'react';
 import b from '@/components/ui/Busy.module.scss';
 import Loaded from '@/components/ui/Loaded';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import { useApi } from '@/hooks/useApi';
-import { getBreakdown, getSummary } from '@/services/api';
+import { useUsage } from '@/hooks/useUsageQueries';
 import type { BreakdownResponse, Dimension, Totals } from '@/types/api';
 import { displayName, DIMENSION_LABEL, DRAWER_DIMENSIONS, type EntityLookup } from '@/utils/usage/entities';
 import { type Change, change, fmtCompact, fmtPct } from '@/utils/usage/format';
+import { breakdownKey, summaryKey, type ResolvedWindow } from '@/utils/usage/queryKeys';
 import { metricSeries, metricValue } from '@/utils/usage/richRows';
 import { stackLayers } from '@/utils/usage/stack';
 import { failureRate, fmtSpend, tokens } from '@/utils/usage/totals';
-import { scopeToEntity, usageQueryParams, type DrawerTarget, type Metric, type ViewState } from '@/utils/usage/viewState';
+import { scopeToEntity, type DrawerTarget, type Metric, type ViewState } from '@/utils/usage/viewState';
 import ChangeBadge from './ChangeBadge';
 import { StatTile } from './KpiStrip';
 import ShareBar, { type ShareItem } from './ShareBar';
@@ -23,8 +23,7 @@ const share = (part: number | null, whole: number | null | undefined) => (whole 
 export default function DetailDrawer({
   target,
   state,
-  now,
-  refreshToken,
+  win,
   pageTotals,
   lookup,
   onClose,
@@ -32,8 +31,7 @@ export default function DetailDrawer({
 }: {
   target: DrawerTarget;
   state: ViewState;
-  now: number;
-  refreshToken: number;
+  win: ResolvedWindow;
   pageTotals: Totals | null;
   lookup: EntityLookup;
   onClose: () => void;
@@ -41,11 +39,10 @@ export default function DetailDrawer({
 }) {
   const { dim, key } = target;
   const [splitDim, otherDim] = DRAWER_DIMENSIONS[dim];
-  const params = useMemo(() => usageQueryParams(scopeToEntity(state, target), now), [state, target, now]);
-  const paramsKey = JSON.stringify(params);
-  const summary = useApi(() => getSummary(params), [paramsKey, refreshToken]);
-  const split = useApi(() => getBreakdown(splitDim, params), [paramsKey, splitDim, refreshToken]);
-  const other = useApi(() => getBreakdown(otherDim, params), [paramsKey, otherDim, refreshToken]);
+  const scoped = scopeToEntity(state, target);
+  const summary = useUsage(summaryKey(win, scoped));
+  const split = useUsage(breakdownKey(win, scoped, splitDim));
+  const other = useUsage(breakdownKey(win, scoped, otherDim));
   const entity = lookup.entity(dim, key);
   const metric = state.metric;
 
@@ -58,7 +55,7 @@ export default function DetailDrawer({
   }, [onClose]);
 
   const chart = useMemo(() => {
-    if (!split.data) return null;
+    if (!split.data) return undefined;
     const d = split.data;
     const layers = stackLayers(
       d.rows.map((r) => ({
@@ -72,9 +69,9 @@ export default function DetailDrawer({
     return { buckets: d.buckets.map((b) => Date.parse(b)), bucket: d.bucket, layers };
   }, [split.data, splitDim, metric, lookup]);
 
-  const error = summary.error ?? split.error ?? other.error;
-  const busy = summary.loading || split.loading || other.loading;
-  const cur = summary.data?.current;
+  const error = (summary.error ?? split.error ?? other.error)?.message;
+  const busy = summary.isFetching || split.isFetching || other.isFetching;
+  const cur = summary.isError ? undefined : summary.data?.current;
   const prev = summary.data?.previous ?? null;
 
   return (
@@ -134,11 +131,11 @@ export default function DetailDrawer({
               />
             </div>
             <h3 className={s.section}>Over time by {DIMENSION_LABEL[splitDim].toLowerCase()}</h3>
-            <Loaded api={{ data: chart, error: split.error }}>
+            <Loaded query={{ data: chart, isError: split.isError }}>
               {(c) => <TimeChart buckets={c.buckets} bucket={c.bucket} layers={c.layers} metric={metric} theme={lookup.theme} />}
             </Loaded>
-            <ShareSection dim={splitDim} api={split} metric={metric} lookup={lookup} />
-            <ShareSection dim={otherDim} api={other} metric={metric} lookup={lookup} />
+            <ShareSection dim={splitDim} query={split} metric={metric} lookup={lookup} />
+            <ShareSection dim={otherDim} query={other} metric={metric} lookup={lookup} />
             <h3 className={s.section}>Token mix</h3>
             <div className={s.tokenMix}>
               <span>Input {fmtCompact(cur.input_tokens)}</span>
@@ -164,29 +161,29 @@ function Foot({ sub, change }: { sub: string; change: Change }) {
 
 function ShareSection({
   dim,
-  api,
+  query,
   metric,
   lookup,
 }: {
   dim: Dimension;
-  api: { data: BreakdownResponse | null; error: string | null };
+  query: { data: BreakdownResponse | undefined; isError: boolean };
   metric: Metric;
   lookup: EntityLookup;
 }) {
   const items = useMemo<ShareItem[]>(
     () =>
-      (api.data?.rows ?? []).map((r) => ({
+      (query.data?.rows ?? []).map((r) => ({
         key: r.key,
         label: r.label,
         value: metricValue(r.current, metric),
         slot: lookup.entity(dim, r.key).slot,
       })),
-    [api.data, dim, metric, lookup],
+    [query.data, dim, metric, lookup],
   );
   return (
     <>
       <h3 className={s.section}>By {DIMENSION_LABEL[dim].toLowerCase()}</h3>
-      <Loaded api={api}>{() => <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} />}</Loaded>
+      <Loaded query={query}>{() => <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} />}</Loaded>
     </>
   );
 }
