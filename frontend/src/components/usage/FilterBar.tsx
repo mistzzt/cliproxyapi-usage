@@ -6,6 +6,7 @@ import type { Bucket, Entity, OptionsResponse } from '@/types/api';
 import {
   dayRange,
   isValidCustomRange,
+  pickDay,
   PRESETS,
   rangeDays,
   rangeLabel,
@@ -94,6 +95,7 @@ function RangePicker({
   const [custom, setCustom] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [anchor, setAnchor] = useState<Date | null>(null);
 
   const handleOpen = (next: boolean) => {
     setOpen(next);
@@ -101,14 +103,17 @@ function RangePicker({
     setFrom(toLocalInput(win.start ?? win.end - 30 * DAY));
     setTo(toLocalInput(win.end));
     setCustom(value.kind === 'custom');
+    setAnchor(null);
   };
 
   const valid = isValidCustomRange(from, to);
   const selected = rangeDays(from, to);
   const toDate = selected?.to ?? new Date(now);
-  const onCalendar = (r: DateRange | undefined) => {
-    if (!r?.from) return;
-    const days = dayRange(r.from, r.to ?? r.from, now);
+  // Uses the clicked day rather than DayPicker's range, which would extend the shown window.
+  const onCalendar = (_: DateRange | undefined, day: Date) => {
+    const pick = pickDay(anchor, day);
+    const days = dayRange(pick.first, pick.last, now);
+    setAnchor(pick.anchor);
     setFrom(days.start);
     setTo(days.end);
   };

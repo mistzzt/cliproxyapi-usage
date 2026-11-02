@@ -63,6 +63,12 @@ export function dayRange(first: Date, last: Date, now: number): { start: string;
   };
 }
 
+/** Calendar click: the first click starts a new range on that day, the next one completes it. */
+export function pickDay(anchor: Date | null, day: Date): { anchor: Date | null; first: Date; last: Date } {
+  if (anchor === null) return { anchor: day, first: day, last: day };
+  return day < anchor ? { anchor: null, first: day, last: anchor } : { anchor: null, first: anchor, last: day };
+}
+
 /** Days a custom range covers on the calendar; an end at midnight excludes that day. */
 export function rangeDays(start: string, end: string): { from: Date; to: Date } | undefined {
   const s = parseLocalInput(start);

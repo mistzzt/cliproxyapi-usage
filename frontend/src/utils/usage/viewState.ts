@@ -48,10 +48,10 @@ export interface GranularityOption {
   title?: string;
 }
 
-/** Granularity buttons labeled with the bucket the server used (`effective`), which may coarsen a fixed choice. */
+/** Granularity buttons labeled with the bucket the server used (`effective`), which may coarsen a fixed choice; only a selected Auto names it. */
 export function granularityOptions(selected: Granularity, effective: FixedGranularity | null): GranularityOption[] {
   return GRANULARITIES.map((value): GranularityOption => {
-    if (value === 'auto') return { value, label: effective ? `Auto (${SHORT[effective]})` : 'Auto' };
+    if (value === 'auto') return { value, label: selected === 'auto' && effective ? `Auto (${SHORT[effective]})` : 'Auto' };
     if (value !== selected || !effective || effective === value) return { value, label: SHORT[value] };
     return {
       value,
