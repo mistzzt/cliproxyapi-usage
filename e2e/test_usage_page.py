@@ -11,7 +11,6 @@ PANELS = Counter(
         ("summary", None),
         ("breakdown", "person"),
         ("breakdown", "model"),
-        ("matrix", None),
     ]
 )
 _TODAY = date.today()
@@ -47,6 +46,10 @@ def kpis(page: Page) -> Locator:
 
 def tab_panel(page: Page) -> Locator:
     return page.locator("section").filter(has=page.get_by_role("tablist"))
+
+
+def banner(page: Page) -> Locator:
+    return page.get_by_role("alert").locator("li")
 
 
 def open_usage(page: Page, api: ApiLog, query: str = "range=30d") -> list[ApiCall]:
@@ -129,15 +132,29 @@ def test_tab_switch_fetches_only_unseen_tabs(page: Page, api: ApiLog) -> None:
     assert api.settle() == []
 
 
-def test_failed_panel_shows_its_failure_only(page: Page, api: ApiLog) -> None:
+def fail_breakdown(page: Page, dim: str) -> None:
     page.route(
-        "**/api/usage/matrix?*",
+        lambda url: "/api/usage/breakdown?" in url and f"dim={dim}" in url,
         lambda route: route.fulfill(status=500, body='{"detail": "boom"}'),
     )
+
+
+def test_failed_panel_shows_its_failure_only(page: Page) -> None:
+    fail_breakdown(page, "model")
     page.goto("/usage?range=30d")
-    expect(heatmap(page)).to_contain_text("Failed to load.")
-    expect(page.get_by_text("Heatmap: boom")).to_be_visible()
+    expect(tab_panel(page)).to_contain_text("Failed to load.")
+    expect(banner(page)).to_have_text(["Models: boom"])
     expect(people(page).locator("tbody tr").first).to_be_visible()
+    expect(heatmap(page).locator("tbody tr").first).to_be_visible()
+    expect(kpis(page)).to_contain_text("Requests")
+
+
+def test_failed_person_breakdown_fails_people_and_heatmap(page: Page) -> None:
+    fail_breakdown(page, "person")
+    page.goto("/usage?range=30d")
+    expect(people(page)).to_contain_text("Failed to load.")
+    expect(heatmap(page)).to_contain_text("Failed to load.")
+    expect(banner(page)).to_have_text(["People: boom"])
     expect(tab_panel(page).locator("tbody tr").first).to_be_visible()
     expect(kpis(page)).to_contain_text("Requests")
 
@@ -162,8 +179,9 @@ def test_slow_panels_keep_previous_rows_until_their_response(
 
     [person] = [r for r in held if "dim=person" in r.request.url]
     person.continue_()
-    expect(people(page)).to_have_attribute("aria-busy", "false")
-    for p in shown[1:]:
+    for p in shown[:2]:
+        expect(p).to_have_attribute("aria-busy", "false")
+    for p in shown[2:]:
         expect(p).to_have_attribute("aria-busy", "true")
 
     for r in held:

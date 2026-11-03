@@ -112,30 +112,6 @@ class BreakdownResponse(BaseModel):
     rows: list[BreakdownRow]
 
 
-class MatrixCell(BaseModel):
-    """One (row entity, column entity) cell of the usage matrix."""
-
-    model_config = ConfigDict(frozen=True)
-
-    row: str
-    col: str
-    cost: float | None
-    input_tokens: int
-    output_tokens: int
-    cached_tokens: int
-    requests: int
-
-
-class MatrixResponse(BaseModel):
-    """``GET /api/usage/matrix``: sparse cross tabulation of two dimensions."""
-
-    model_config = ConfigDict(frozen=True)
-
-    rows: list[str]
-    cols: list[str]
-    cells: list[MatrixCell]  # sparse; absent means zero
-
-
 class Entity(BaseModel):
     """A filterable entity with its stable color slot."""
 

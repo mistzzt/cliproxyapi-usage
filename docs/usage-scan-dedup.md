@@ -1,10 +1,8 @@
-# Plan: read usage from a rollup table and drop `/matrix`
+# Plan: read usage from a rollup table
 
 ## The problem
 
-Every usage endpoint gets its numbers from `_fetch_cells` in `src/cliproxy_usage_server/aggregate.py`. It groups every `requests` row in the window into priced cells, one per 15-minute UTC slot, API key, model and source. On a DB with 1.5M rows, each all-time request takes about 2.9 s. One page load sends `summary`, two `breakdown`s and `matrix`, and `/options` scans all history again. The cost grows with the number of rows, so it gets worse every day.
-
-`/matrix` also duplicates data. Each person row of `breakdown?dim=person` has a `mix` with one entry for every model that the person used in the window (not truncated), with `cost` and all token parts. The heatmap needs only that. `buildHeatmap` in `frontend/src/utils/usage/heatmap.ts` computes its own ordering and totals, so it never reads `MatrixResponse.rows` or `cols`.
+Every usage endpoint gets its numbers from `_fetch_cells` in `src/cliproxy_usage_server/aggregate.py`. It groups every `requests` row in the window into priced cells, one per 15-minute UTC slot, API key, model and source. On a DB with 1.5M rows, each all-time request takes about 2.9 s. One page load sends `summary` and two `breakdown`s, and `/options` scans all history again. The cost grows with the number of rows, so it gets worse every day.
 
 ## The idea
 
@@ -86,20 +84,13 @@ In `src/cliproxy_usage_collect/db.py`, which stays the authoritative schema:
 - Requests stay read-only (`open_ro`). When `usage.db` does not exist, startup behaves as today. When it exists, startup (on both lifespan paths, including `pricing_provider`) checks that the rollup and trigger exist and match the code's definitions. If they do not, it opens a separate writable connection, runs the shared rebuild, waits for it to finish and then serves. This is the only write the server ever does. If the file is not writable or the rebuild fails, the server exits with a message that names the path it could not write and says to run the collector or `cliproxy-usage-rebuild-rollup` once.
 - Totals, trends, mix and ranking keep running on cells as they do today.
 
-### 3. Delete `/matrix`; build the heatmap from the person breakdown
-
-- Remove the route, `query_matrix`, `MatrixCell`, `MatrixResponse`, their TS types in `frontend/src/types/api.ts`, `matrixKey`, and the `matrix` entry of `UsageResponses` in `frontend/src/utils/usage/queryKeys.ts`.
-- `Heatmap` takes the person `BreakdownResponse`. A pure function in `frontend/src/utils/usage/heatmap.ts`, with a bun test, turns the rows' `mix` entries into `HeatCellInput` (row = person key, col = model key, value = `metricValue` of the entry). `buildHeatmap`, the binning and the footer stay as they are.
-- On `UsagePage`, the heatmap panel renders from the `people` query. It is busy and failed exactly when the people panel is, and the failure banner has no "Heatmap" entry. A page load sends 3 panel requests plus `options`.
-
-### 4. Tests and docs
+### 3. Tests and docs
 
 - Collector tests on synthetic data: random sequences of new and duplicate inserts leave the rollup equal to a fresh rebuild; `insert_records` returns the new-row count; a changed table or trigger definition makes `open_db` rebuild; the rebuild command reproduces the incremental rollup exactly; `requests` and its indexes have the same `sqlite_master` entries as before.
 - Cost tests: `request_cost` in `tests/conftest.py` prices each request through both paths (a whole slot from the rollup and a partial edge slot from `requests`) and asserts they agree. `tests/test_pricing_ccusage.py` stays green with its current amounts. The plan-shape test from the schema section covers requests on both sides of each threshold.
 - Edge tests: in a window that starts and ends mid-slot, rows of the same slot just inside and just outside each edge are counted correctly.
-- Server startup: on a writable DB with the rollup missing or with a changed definition, the server rebuilds it and then serves correct responses; on a read-only DB with a stale rollup, it exits with the message. In `tests/test_routes_usage.py`, the matrix check becomes "person mix cells sum to the totals", and the `rows == cols` test goes away.
-- E2E (`e2e/test_usage_page.py`): `PANELS` drops `matrix`. The failure test fails the tab breakdown and checks that only the tab panel fails and that the banner names it. A new case checks that a failed person breakdown fails both the people panel and the heatmap. In the slow-response test, the heatmap leaves its busy state together with the people panel.
-- Update `AGENTS.md`: the rollup and how it stays current, the read path, the server being read-only for requests but able to rebuild the rollup at startup, the endpoint list, the heatmap source and the e2e summary. Update `README.md`: the endpoint list, the startup rebuild (the server needs write access to `usage.db` and its directory, where SQLite creates `usage.db-journal`), and the rebuild command as a one-off repair.
+- Server startup: on a writable DB with the rollup missing or with a changed definition, the server rebuilds it and then serves correct responses; on a read-only DB with a stale rollup, it exits with the message.
+- Update `AGENTS.md`: the rollup and how it stays current, the read path, and the server being read-only for requests but able to rebuild the rollup at startup. Update `README.md`: the startup rebuild (the server needs write access to `usage.db` and its directory, where SQLite creates `usage.db-journal`), and the rebuild command as a one-off repair.
 
 ## Reference responses and benchmark
 
@@ -118,5 +109,4 @@ Time the endpoints in-process through FastAPI's `TestClient`, on the same machin
 | Fast "All" page | the 3 all-time panel requests (`summary`, `breakdown?dim=person`, `breakdown?dim=model`) plus `options`, sent at once from four threads, finish within 0.5 s of wall time |
 | Other windows at least 2x faster | each 30-day, rolling 7h and filtered reference request takes at most 50% of its baseline time |
 | Collector cost | inserting 10,000 new rows into a copy of the test DB through `insert_records` takes at most 1.5 s; `cliproxy-usage-rebuild-rollup` on a copy takes at most 10 s |
-| `/matrix` gone | `rg -n -e usage/matrix -e query_matrix -e MatrixCell -e MatrixResponse -e matrixKey src frontend/src e2e tests README.md AGENTS.md` prints nothing |
 | `requests` unchanged | the `sqlite_master` rows for `requests` and its indexes on a DB opened by the new `open_db` match those from `1df36fe` |

@@ -4,8 +4,8 @@ Every endpoint is built from one grouped query: rows per (15-minute UTC slice,
 api_key, model, source). The query tiers each request with its model's
 ``CostPlan`` and sums the base-rate and above-rate tokens, so cells price
 exactly as the sum of per-request costs. Totals, per-entity rows, trends and
-the matrix are sums of the same priced cells, so they always agree, and cost
-is independent of the chosen bucket.
+mixes are sums of the same priced cells, so they always agree, and cost is
+independent of the chosen bucket.
 
 People are redacted API keys (raw keys that redact alike merge into one
 person); credentials are redacted sources. Responses carry only raw token
@@ -48,8 +48,6 @@ from cliproxy_usage_server.schemas import (
     Dimension,
     Entity,
     LongContextPrice,
-    MatrixCell,
-    MatrixResponse,
     MixEntry,
     ModelPrice,
     OptionsResponse,
@@ -571,43 +569,6 @@ def query_breakdown(
         )
     return BreakdownResponse(
         dim=dim, bucket=axis.bucket, buckets=axis.starts, rows=rows
-    )
-
-
-def query_matrix(
-    conn: sqlite3.Connection,
-    row_dim: Dimension,
-    col_dim: Dimension,
-    window: Window,
-    filters: Filters,
-    pricing: Mapping[str, ModelPricing],
-) -> MatrixResponse:
-    """Sparse cross tabulation; rows and columns ordered like ``_Acc.rank``."""
-    has_pricing = bool(pricing)
-    cells = _fetch_cells(conn, window, filters, pricing)
-    row_tot = _group(cells, lambda c: c.key(row_dim))
-    col_tot = _group(cells, lambda c: c.key(col_dim))
-    pairs = _group(cells, lambda c: f"{c.key(row_dim)}\0{c.key(col_dim)}")
-
-    out: list[MatrixCell] = []
-    for pair in sorted(pairs, key=lambda p: pairs[p].rank(p)):
-        row, col = pair.split("\0", 1)
-        acc = pairs[pair]
-        out.append(
-            MatrixCell(
-                row=row,
-                col=col,
-                cost=acc.cost_value(has_pricing),
-                input_tokens=acc.input_tokens,
-                output_tokens=acc.output_tokens,
-                cached_tokens=acc.cached_tokens,
-                requests=acc.requests,
-            )
-        )
-    return MatrixResponse(
-        rows=sorted(row_tot, key=lambda k: row_tot[k].rank(k)),
-        cols=sorted(col_tot, key=lambda k: col_tot[k].rank(k)),
-        cells=out,
     )
 
 

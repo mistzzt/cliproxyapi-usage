@@ -1,5 +1,23 @@
 import { expect, test } from 'bun:test';
-import { buildHeatmap, heatBin } from './heatmap';
+import type { MixEntry } from '@/types/api';
+import { buildHeatmap, heatBin, personModelCells } from './heatmap';
+
+function mix(key: string, cost: number | null, input: number, output: number): MixEntry {
+  return { key, label: key, cost, input_tokens: input, output_tokens: output, cached_tokens: 7 };
+}
+
+test('person mix entries become person x model cells valued by the metric', () => {
+  const people = [
+    { key: 'alice', mix: [mix('m1', 2.5, 100, 10), mix('m2', null, 5, 1)] },
+    { key: 'bob', mix: [mix('m1', 1, 20, 2)] },
+  ];
+  expect(personModelCells(people, 'cost')).toEqual([
+    { row: 'alice', col: 'm1', value: 2.5 },
+    { row: 'alice', col: 'm2', value: 0 },
+    { row: 'bob', col: 'm1', value: 1 },
+  ]);
+  expect(personModelCells(people, 'tokens').map((c) => c.value)).toEqual([110, 6, 22]);
+});
 
 test('top columns kept, the rest fold into +N more; values bin on a sqrt scale', () => {
   const h = buildHeatmap(

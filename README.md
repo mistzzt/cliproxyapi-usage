@@ -84,7 +84,7 @@ A local dashboard (`cliproxy-usage-server`) serves a read-only FastAPI backend p
 
 The usage page (`/usage`; `/` redirects there) answers how much each person uses and what share of the total that is; a person is one API key, shown redacted or by its alias from `USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average latency with the change against the previous period of equal length, a share bar and per-row trends for people, a people by model heatmap, and Models / Credentials tabs. Clicking a row opens a detail drawer with that entity's trend and mix. Tokens always mean input + output tokens (cached tokens excluded). Time buckets (hour, day, or week) follow the browser's timezone. Filters and view settings live in the URL, so links are shareable, and opening the page without them restores the last view. Entity colors are fixed by all-time spend, so they do not change with filters.
 
-The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage/matrix`, `/api/usage/options`, and the quota endpoints under `/api/quota/*`. The usage endpoints report only the raw token components (`input_tokens`, `output_tokens`, `cached_tokens`); the dashboard derives tokens from them.
+The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage/options`, and the quota endpoints under `/api/quota/*`. The usage endpoints report only the raw token components (`input_tokens`, `output_tokens`, `cached_tokens`); the dashboard derives tokens from them.
 
 ### Server environment variables
 

@@ -3,7 +3,6 @@ import { QueryClient } from '@tanstack/react-query';
 import {
   breakdownKey,
   computeWindow,
-  matrixKey,
   OPTIONS_KEY,
   requestParams,
   summaryKey,
@@ -50,17 +49,20 @@ test('keys carry each request exactly, and requestParams rebuilds its query', ()
     bucket: 'day',
   });
   expect(breakdownKey(w, s, 'model')[3]).toEqual({ people: 'a,b', bucket: 'day', dim: 'model' });
-  // The matrix has no time axis, so granularity does not change its key.
-  expect(matrixKey(w, s)).toEqual(matrixKey(w, { ...s, granularity: 'hour' }));
   const all = computeWindow(windowKey({ kind: 'preset', id: 'all' }, 'UTC'), now);
-  expect(requestParams(matrixKey(all, DEFAULT_VIEW_STATE))).toEqual({ end: all.end, tz: 'UTC', rows: 'person', cols: 'model' });
+  expect(requestParams(breakdownKey(all, DEFAULT_VIEW_STATE, 'person'))).toEqual({
+    end: all.end,
+    tz: 'UTC',
+    bucket: 'auto',
+    dim: 'person',
+  });
 });
 
 test('a window prefix selects exactly the requests inside that window', () => {
   const qc = new QueryClient();
   const all = computeWindow(windowKey({ kind: 'preset', id: 'all' }, 'UTC'), now);
   const later = computeWindow(windowKey({ kind: 'preset', id: 'all' }, 'UTC'), now + 1000);
-  for (const key of [summaryKey(all, DEFAULT_VIEW_STATE), matrixKey(later, DEFAULT_VIEW_STATE), OPTIONS_KEY]) {
+  for (const key of [summaryKey(all, DEFAULT_VIEW_STATE), breakdownKey(later, DEFAULT_VIEW_STATE, 'person'), OPTIONS_KEY]) {
     qc.setQueryData(key, {});
   }
   qc.setQueryData(windowKey({ kind: 'preset', id: 'all' }, 'UTC'), all);

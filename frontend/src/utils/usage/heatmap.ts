@@ -1,4 +1,7 @@
 // Heatmap layout: top-N columns grouped by family, a "+N more" column, sqrt-scaled color bins (pure).
+import type { BreakdownRow } from '@/types/api';
+import { metricValue } from './richRows';
+import type { Metric } from './viewState';
 
 export interface HeatCellInput {
   row: string;
@@ -26,6 +29,11 @@ export interface HeatmapLayout {
   grand: number;
   /** Largest displayed cell, the top of the color scale. */
   max: number;
+}
+
+/** People x models cells from the person breakdown's rows: one per mix entry of each row. */
+export function personModelCells(rows: readonly Pick<BreakdownRow, 'key' | 'mix'>[], metric: Metric): HeatCellInput[] {
+  return rows.flatMap((r) => r.mix.map((m) => ({ row: r.key, col: m.key, value: metricValue(m, metric) })));
 }
 
 export const HEATMAP_MAX_COLUMNS = 9;

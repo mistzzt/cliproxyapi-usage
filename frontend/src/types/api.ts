@@ -80,23 +80,6 @@ export interface BreakdownResponse {
   rows: BreakdownRow[];
 }
 
-export interface MatrixCell {
-  row: string;
-  col: string;
-  cost: number | null;
-  input_tokens: number;
-  output_tokens: number;
-  cached_tokens: number;
-  requests: number;
-}
-
-export interface MatrixResponse {
-  rows: string[];
-  cols: string[];
-  /** Sparse; an absent cell means zero. */
-  cells: MatrixCell[];
-}
-
 export interface Entity {
   key: string;
   label: string;

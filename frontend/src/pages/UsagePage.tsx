@@ -14,7 +14,7 @@ import { useUsageViewState } from '@/hooks/useUsageViewState';
 import { useThemeStore } from '@/stores/theme';
 import type { BreakdownResponse, Dimension } from '@/types/api';
 import { createLookup, type EntityLookup } from '@/utils/usage/entities';
-import { breakdownKey, matrixKey, summaryKey } from '@/utils/usage/queryKeys';
+import { breakdownKey, summaryKey } from '@/utils/usage/queryKeys';
 import { shareItems } from '@/utils/usage/share';
 import { METRIC_WORD, scopeToEntity, type Metric, type SecondaryTab } from '@/utils/usage/viewState';
 import s from './UsagePage.module.scss';
@@ -36,7 +36,6 @@ export default function UsagePage() {
   const summary = useUsage(summaryKey(win, state));
   const people = useUsage(breakdownKey(win, state, 'person'));
   const secondary = useUsage(breakdownKey(win, state, tabDim));
-  const matrix = useUsage(matrixKey(win, state));
 
   const lookup = useMemo(() => createLookup(options.data ?? null, theme), [options.data, theme]);
   const select = useCallback((dim: Dimension) => (k: string) => update({ drawer: { dim, key: k } }), [update]);
@@ -46,7 +45,6 @@ export default function UsagePage() {
     ['Filter options', options.error],
     ['Summary', summary.error],
     ['People', people.error],
-    ['Heatmap', matrix.error],
     [TABS.find((t) => t.value === state.tab)?.label ?? 'Breakdown', secondary.error],
   ];
   const anyFailed = failures.some(([, e]) => e !== null);
@@ -84,9 +82,9 @@ export default function UsagePage() {
               {(data) => <BreakdownSection data={data} metric={state.metric} lookup={lookup} onSelect={select('person')} />}
             </Loaded>
           </Panel>
-          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`} busy={matrix.isFetching}>
-            <Loaded query={matrix}>
-              {(data) => <Heatmap matrix={data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />}
+          <Panel title={`Who spends ${state.metric === 'cost' ? 'what' : 'tokens'} on which model`} busy={people.isFetching}>
+            <Loaded query={people}>
+              {(data) => <Heatmap people={data} metric={state.metric} lookup={lookup} onSelectRow={select('person')} />}
             </Loaded>
           </Panel>
           <Panel busy={secondary.isFetching}>

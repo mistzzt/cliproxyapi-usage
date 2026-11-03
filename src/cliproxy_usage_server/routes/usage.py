@@ -1,4 +1,4 @@
-"""Usage endpoints: /api/usage/summary, /breakdown, /matrix, /options.
+"""Usage endpoints: /api/usage/summary, /breakdown, /options.
 
 Range-consuming endpoints take ``start`` (optional; absent = all time) and
 ``end`` (defaults to server now) as ISO-8601 instants with an offset, ``tz`` (a
@@ -24,7 +24,6 @@ from cliproxy_usage_server.aggregate import (
     Filters,
     Window,
     query_breakdown,
-    query_matrix,
     query_options,
     query_summary,
     resolve_filter,
@@ -34,7 +33,6 @@ from cliproxy_usage_server.pricing import ModelPricing
 from cliproxy_usage_server.schemas import (
     BreakdownResponse,
     Dimension,
-    MatrixResponse,
     OptionsResponse,
     SummaryResponse,
 )
@@ -163,19 +161,6 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
             pricing,
             aliases,
         )
-
-    @r.get("/matrix", response_model=MatrixResponse)
-    def matrix(
-        conn: Annotated[sqlite3.Connection, Depends(get_conn)],
-        pricing: _Pricing,
-        rng: _Range,
-        rows: Annotated[Dimension, Query()] = "person",
-        cols: Annotated[Dimension, Query()] = "model",
-    ) -> MatrixResponse:
-        """Sparse ``rows`` x ``cols`` cross tabulation."""
-        if rows == cols:
-            raise HTTPException(status_code=422, detail="rows and cols must differ")
-        return query_matrix(conn, rows, cols, rng.window, rng.filters(conn), pricing)
 
     @r.get("/options", response_model=OptionsResponse)
     def options(

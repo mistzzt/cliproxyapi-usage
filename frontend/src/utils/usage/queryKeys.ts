@@ -1,5 +1,5 @@
 // Query keys for the usage page: the browser-computed window, and each API request made inside it (pure).
-import type { BreakdownResponse, Dimension, MatrixResponse, SummaryResponse } from '@/types/api';
+import type { BreakdownResponse, Dimension, SummaryResponse } from '@/types/api';
 import { resolveWindow, viewerTimeZone, type RangeSel } from './range';
 import { FILTER_FIELD, type ViewState } from './viewState';
 
@@ -16,7 +16,6 @@ export interface ResolvedWindow {
 export interface UsageResponses {
   summary: SummaryResponse;
   breakdown: BreakdownResponse;
-  matrix: MatrixResponse;
 }
 
 export type UsageEndpoint = keyof UsageResponses;
@@ -55,11 +54,6 @@ export function summaryKey(w: ResolvedWindow, s: ViewState): UsageQueryKey<'summ
 
 export function breakdownKey(w: ResolvedWindow, s: ViewState, dim: Dimension): UsageQueryKey<'breakdown'> {
   return ['usage', w, 'breakdown', { ...filterParams(s), bucket: s.granularity, dim }];
-}
-
-/** People x models; no `bucket` since the matrix has no time axis. */
-export function matrixKey(w: ResolvedWindow, s: ViewState): UsageQueryKey<'matrix'> {
-  return ['usage', w, 'matrix', { ...filterParams(s), rows: 'person', cols: 'model' }];
 }
 
 /** Query string params of the request that `key` names. */

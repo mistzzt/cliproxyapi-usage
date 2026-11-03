@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
-import type { MatrixResponse } from '@/types/api';
+import type { BreakdownResponse } from '@/types/api';
 import type { EntityLookup } from '@/utils/usage/entities';
 import { fmtMetric, fmtPct } from '@/utils/usage/format';
-import { buildHeatmap, HEAT_STEPS, heatBin, isNotable, type HeatColumn } from '@/utils/usage/heatmap';
+import { buildHeatmap, HEAT_STEPS, heatBin, isNotable, personModelCells, type HeatColumn } from '@/utils/usage/heatmap';
 import { modelFamily, shortModel } from '@/utils/usage/modelNames';
-import { metricValue } from '@/utils/usage/richRows';
 import { METRIC_WORD, type Metric } from '@/utils/usage/viewState';
 import shared from './Shared.module.scss';
 import s from './Heatmap.module.scss';
@@ -21,24 +20,17 @@ function columnLabel(c: HeatColumn): string {
 
 /** People x models with absolute values, model columns grouped by family, and a per-model footer. */
 export default function Heatmap({
-  matrix,
+  people,
   metric,
   lookup,
   onSelectRow,
 }: {
-  matrix: MatrixResponse;
+  people: BreakdownResponse;
   metric: Metric;
   lookup: EntityLookup;
   onSelectRow: (key: string) => void;
 }) {
-  const m = useMemo(
-    () =>
-      buildHeatmap(
-        matrix.cells.map((c) => ({ row: c.row, col: c.col, value: metricValue(c, metric) })),
-        { family: modelFamily },
-      ),
-    [matrix, metric],
-  );
+  const m = useMemo(() => buildHeatmap(personModelCells(people.rows, metric), { family: modelFamily }), [people, metric]);
   const maxCol = Math.max(0, ...m.columns.map((c) => c.total));
 
   return (

@@ -1,4 +1,4 @@
-"""Tests for /api/usage/{summary,breakdown,matrix,options} on the synthetic DB."""
+"""Tests for /api/usage/{summary,breakdown,options} on the synthetic DB."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def test_summary_totals_and_previous(client: TestClient) -> None:
     assert all_time["previous"] is None
 
 
-def test_breakdowns_and_matrix_sum_to_totals(client: TestClient) -> None:
+def test_breakdowns_and_person_mix_sum_to_totals(client: TestClient) -> None:
     for dim in ("person", "model", "credential"):
         rows = _get(client, f"/api/usage/breakdown?dim={dim}&{Q}")["rows"]
         assert sum(r["current"]["cost"] for r in rows) == pytest.approx(COST_TOTAL)
@@ -69,8 +69,10 @@ def test_breakdowns_and_matrix_sum_to_totals(client: TestClient) -> None:
             assert sum(m["cost"] for m in r["mix"]) == pytest.approx(
                 r["current"]["cost"]
             )
-    cells = _get(client, f"/api/usage/matrix?rows=person&cols=model&{Q}")["cells"]
-    assert sum(c["cost"] for c in cells) == pytest.approx(COST_TOTAL)
+    people = _get(client, f"/api/usage/breakdown?dim=person&{Q}")["rows"]
+    cells = [m for r in people for m in r["mix"]]
+    assert sum(c["input_tokens"] for c in cells) == 8300
+    assert sum(c["output_tokens"] for c in cells) == 1730
 
 
 def test_keys_that_redact_alike_are_one_person(client: TestClient) -> None:
@@ -182,7 +184,6 @@ def test_price_only_on_model_rows(client: TestClient) -> None:
         "/api/usage/summary?start=2026-11-02T00:00:00Z&end=2026-11-01T00:00:00Z&tz=UTC",
         f"/api/usage/summary?{Q}&bucket=month",
         f"/api/usage/breakdown?{Q}",
-        f"/api/usage/matrix?rows=model&cols=model&{Q}",
     ],
 )
 def test_invalid_requests_are_422(client: TestClient, path: str) -> None:
