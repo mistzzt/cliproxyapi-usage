@@ -1,13 +1,10 @@
 import { useMemo } from 'react';
 import { fmtMetric, fmtPct } from '@/utils/usage/format';
 import { inkOn } from '@/utils/usage/palette';
-import { shareSegments, type ShareInput } from '@/utils/usage/share';
+import { shareSegments, type ShareItem } from '@/utils/usage/share';
 import type { Metric } from '@/utils/usage/viewState';
+import shared from './Shared.module.scss';
 import s from './ShareBar.module.scss';
-
-export interface ShareItem extends ShareInput {
-  label: string;
-}
 
 /** 100% part-to-whole bar (top slots plus Other) with a legend; compact drops in-bar labels and legend values. */
 export default function ShareBar({
@@ -55,7 +52,7 @@ export default function ShareBar({
           <span key={sg.id} className={s.legendItem}>
             <i style={{ background: sg.color }} />
             <span className={s.legendName}>{sg.name}</span>
-            <span className={s.muted}>
+            <span className={shared.muted}>
               {fmtPct(sg.share)}
               {!compact && ` · ${fmtMetric(sg.value, metric)}`}
             </span>

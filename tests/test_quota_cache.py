@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import asyncio
 
+from cliproxy_usage_server.quota.cache import TtlCache
+
+
+def _ttl(_: object) -> float:
+    return 60
+
+
 # ---------------------------------------------------------------------------
 # Test 1: miss calls fetcher, result cached on subsequent call
 # ---------------------------------------------------------------------------
@@ -23,8 +30,8 @@ def test_miss_calls_fetcher_and_caches() -> None:
             return "v1"
 
         cache: TtlCache[str, str] = TtlCache()
-        result1 = await cache.get_or_fetch("k", fetch, ttl=60)
-        result2 = await cache.get_or_fetch("k", fetch, ttl=60)
+        result1 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
+        result2 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
 
         assert result1 == "v1"
         assert result2 == "v1"
@@ -60,12 +67,12 @@ def test_ttl_expiry_triggers_refetch() -> None:
         cache: TtlCache[str, str] = TtlCache(clock=fake_clock)
 
         # First call: clock=0, stale_at = 0+60 = 60
-        result1 = await cache.get_or_fetch("k", fetch, ttl=60)
+        result1 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
         assert result1 == "v1"
         assert call_count == 1
 
         # Second call: clock=200, which is > 60 → expired → re-fetch
-        result2 = await cache.get_or_fetch("k", fetch, ttl=60)
+        result2 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
         assert result2 == "v2"
         assert call_count == 2
 
@@ -97,8 +104,8 @@ def test_different_keys_are_independent() -> None:
             return "v-k2"
 
         cache: TtlCache[str, str] = TtlCache()
-        r1 = await cache.get_or_fetch("k1", fetch_k1, ttl=60)
-        r2 = await cache.get_or_fetch("k2", fetch_k2, ttl=60)
+        r1 = await cache.get_or_fetch("k1", fetch_k1, ttl=_ttl)
+        r2 = await cache.get_or_fetch("k2", fetch_k2, ttl=_ttl)
 
         # Each key hit its own fetcher exactly once
         assert r1 == "v-k1"
@@ -107,8 +114,8 @@ def test_different_keys_are_independent() -> None:
         assert k2_calls == 1
 
         # Re-fetch same keys → still only 1 call each
-        await cache.get_or_fetch("k1", fetch_k1, ttl=60)
-        await cache.get_or_fetch("k2", fetch_k2, ttl=60)
+        await cache.get_or_fetch("k1", fetch_k1, ttl=_ttl)
+        await cache.get_or_fetch("k2", fetch_k2, ttl=_ttl)
         assert k1_calls == 1
         assert k2_calls == 1
 
@@ -135,7 +142,7 @@ def test_concurrent_miss_dedups_fetcher_calls() -> None:
         cache: TtlCache[str, str] = TtlCache()
 
         tasks = [
-            asyncio.create_task(cache.get_or_fetch("k", slow_fetch, ttl=60))
+            asyncio.create_task(cache.get_or_fetch("k", slow_fetch, ttl=_ttl))
             for _ in range(10)
         ]
         results = await asyncio.gather(*tasks)
@@ -169,13 +176,13 @@ def test_fetcher_exception_not_cached() -> None:
         cache: TtlCache[str, str] = TtlCache()
 
         try:
-            await cache.get_or_fetch("k", flaky_fetch, ttl=60)
+            await cache.get_or_fetch("k", flaky_fetch, ttl=_ttl)
             raise AssertionError("Expected RuntimeError")
         except RuntimeError as exc:
             assert str(exc) == "boom"
 
         # Second call with a different fetcher that returns "ok"
-        result = await cache.get_or_fetch("k", flaky_fetch, ttl=60)
+        result = await cache.get_or_fetch("k", flaky_fetch, ttl=_ttl)
         assert result == "ok"
         assert attempt == 2
 
@@ -202,7 +209,7 @@ def test_concurrent_waiters_all_see_exception() -> None:
         cache: TtlCache[str, str] = TtlCache()
 
         tasks = [
-            asyncio.create_task(cache.get_or_fetch("k", boom_fetch, ttl=60))
+            asyncio.create_task(cache.get_or_fetch("k", boom_fetch, ttl=_ttl))
             for _ in range(5)
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -237,19 +244,19 @@ def test_invalidate_clears_entry() -> None:
 
         cache: TtlCache[str, str] = TtlCache()
 
-        r1 = await cache.get_or_fetch("k", fetch, ttl=60)
+        r1 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
         assert r1 == "v1"
         assert call_count == 1
 
         # After invalidation, next call must re-fetch
         cache.invalidate("k")
 
-        r2 = await cache.get_or_fetch("k", fetch, ttl=60)
+        r2 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
         assert r2 == "v2"
         assert call_count == 2
 
         # No invalidation → cached
-        r3 = await cache.get_or_fetch("k", fetch, ttl=60)
+        r3 = await cache.get_or_fetch("k", fetch, ttl=_ttl)
         assert r3 == "v2"
         assert call_count == 2
 
@@ -274,13 +281,30 @@ def test_invalidate_detaches_in_flight_fetch_and_blocks_stale_publish() -> None:
             return "fresh"
 
         cache: TtlCache[str, str] = TtlCache()
-        old_task = asyncio.create_task(cache.get_or_fetch("k", fetch, ttl=60))
+        old_task = asyncio.create_task(cache.get_or_fetch("k", fetch, ttl=_ttl))
         await first_started.wait()
         cache.invalidate("k")
-        assert await cache.get_or_fetch("k", fetch, ttl=60) == "fresh"
+        assert await cache.get_or_fetch("k", fetch, ttl=_ttl) == "fresh"
         release_first.set()
         assert await old_task == "stale"
-        assert await cache.get_or_fetch("k", fetch, ttl=60) == "fresh"
+        assert await cache.get_or_fetch("k", fetch, ttl=_ttl) == "fresh"
         assert calls == 2
+
+    asyncio.run(run())
+
+
+def test_ttl_depends_on_the_fetched_value() -> None:
+    times = iter([0.0, 1.0, 20.0, 21.0, 22.0])
+    cache: TtlCache[str, int] = TtlCache(clock=lambda: next(times))
+    values = iter([5, 100])
+
+    async def fetch() -> int:
+        return next(values)
+
+    async def run() -> None:
+        # 5 lives 5 s (stale_at 6), so the call at 20 refetches; 100 lives on.
+        assert await cache.get_or_fetch("k", fetch, ttl=float) == 5
+        assert await cache.get_or_fetch("k", fetch, ttl=float) == 100
+        assert await cache.get_or_fetch("k", fetch, ttl=float) == 100
 
     asyncio.run(run())

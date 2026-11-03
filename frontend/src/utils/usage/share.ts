@@ -1,10 +1,28 @@
 // 100% share bar segments: slotted entities get their own segment, the rest fold into "Other" (pure).
+import type { BreakdownResponse } from '@/types/api';
+import type { EntityLookup } from './entities';
+import { metricValue } from './richRows';
+import type { Metric } from './viewState';
 
 export interface ShareInput {
   key: string;
   value: number;
   /** Color slot from the options endpoint; null folds into Other. */
   slot: number | null;
+}
+
+export interface ShareItem extends ShareInput {
+  label: string;
+}
+
+/** One item per breakdown row, valued by the active metric and colored by its options slot. */
+export function shareItems(data: BreakdownResponse, metric: Metric, lookup: EntityLookup): ShareItem[] {
+  return data.rows.map((r) => ({
+    key: r.key,
+    label: r.label,
+    value: metricValue(r.current, metric),
+    slot: lookup.entity(data.dim, r.key).slot,
+  }));
 }
 
 export type ShareSegment =

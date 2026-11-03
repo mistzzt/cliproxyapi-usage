@@ -1,6 +1,6 @@
 // Number, cost, percentage, and change formatting for the usage dashboard (pure).
 
-export type FormatMetric = 'cost' | 'tokens' | 'requests';
+import type { Metric } from './viewState';
 
 // Two decimals below 10, one above; `toFixed` rounding can cross either boundary.
 function scaled(x: number): string {
@@ -35,7 +35,7 @@ export function fmtCost(v: number): string {
   return `$${v.toFixed(2)}`;
 }
 
-export function fmtMetric(v: number, metric: FormatMetric): string {
+export function fmtMetric(v: number, metric: Metric): string {
   return metric === 'cost' ? fmtCost(v) : fmtCompact(v);
 }
 

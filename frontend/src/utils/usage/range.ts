@@ -28,13 +28,6 @@ export interface RangeWindow {
   end: number;
 }
 
-/** Query parameters for range-consuming endpoints. */
-export interface ApiRange {
-  start?: string;
-  end: string;
-  tz: string;
-}
-
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const ROLLING: Partial<Record<PresetId, number>> = { '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY };
@@ -110,15 +103,6 @@ export function resolveWindow(sel: RangeSel, now: number): RangeWindow {
 
 export function viewerTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-export function toApiRange(w: RangeWindow, tz: string = viewerTimeZone()): ApiRange {
-  const end = new Date(w.end).toISOString();
-  return w.start === null ? { end, tz } : { start: new Date(w.start).toISOString(), end, tz };
-}
-
-export function resolveRange(sel: RangeSel, now: number, tz: string = viewerTimeZone()): ApiRange {
-  return toApiRange(resolveWindow(sel, now), tz);
 }
 
 /** Preset label, or `Aug 4 → Sep 3` (times shown unless both ends are midnight). */

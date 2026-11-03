@@ -6,7 +6,7 @@ Immutable pydantic models for request/response validation.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -191,7 +191,6 @@ class ManualResetCredit(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str
-    granted_at: datetime | None
     expires_at: datetime
 
 
@@ -216,7 +215,6 @@ class ProviderQuota(BaseModel):
     plan_type: str | None
     windows: list[QuotaWindow]
     manual_resets: ManualResetSummary | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class QuotaError(BaseModel):

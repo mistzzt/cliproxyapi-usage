@@ -27,9 +27,7 @@ from cliproxy_usage_server.aggregate import (
     query_matrix,
     query_options,
     query_summary,
-    resolve_model_keys,
-    resolve_redacted_api_keys,
-    resolve_redacted_sources,
+    resolve_filter,
 )
 from cliproxy_usage_server.db import Bucket, open_ro
 from cliproxy_usage_server.pricing import ModelPricing
@@ -106,23 +104,11 @@ class _RangeParams:
         self.credentials = _parse_list(credentials)
 
     def filters(self, conn: sqlite3.Connection) -> Filters:
-        """Resolve redacted people/credential filters to raw values."""
+        """Resolve the display-key filters to raw column values."""
         return Filters(
-            api_keys=(
-                resolve_redacted_api_keys(conn, self.people)
-                if self.people is not None
-                else None
-            ),
-            models=(
-                resolve_model_keys(conn, self.models)
-                if self.models is not None
-                else None
-            ),
-            sources=(
-                resolve_redacted_sources(conn, self.credentials)
-                if self.credentials is not None
-                else None
-            ),
+            api_keys=resolve_filter(conn, "api_key", self.people),
+            models=resolve_filter(conn, "model", self.models),
+            sources=resolve_filter(conn, "source", self.credentials),
         )
 
 

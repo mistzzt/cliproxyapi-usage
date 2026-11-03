@@ -101,7 +101,7 @@ def test_parse_extracts_primary_and_secondary_windows(
     codex_api_call_fixture: dict,  # type: ignore[type-arg]
 ) -> None:
     body_dict = json.loads(codex_api_call_fixture["body"])
-    result = CodexProvider().parse(body_dict, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body_dict, auth_name="codex.json")
 
     assert result.provider == "codex"
     assert result.auth_name == "codex.json"
@@ -127,7 +127,7 @@ def test_parse_handles_additional_rate_limits() -> None:
             {"limit_name": "daily_sonnet", "used_percent": 10, "reset_at": 1777017720},
         ],
     }
-    result = CodexProvider().parse(body, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body, auth_name="codex.json")
     assert {w.id for w in result.windows} == {
         "additional:weekly_opus",
         "additional:daily_sonnet",
@@ -144,10 +144,9 @@ def test_parse_handles_additional_rate_limits() -> None:
 
 def test_parse_handles_codex_pro_nested_additional_rate_limits_from_draft() -> None:
     body = _codex_pro_body()
-    result = CodexProvider().parse(body, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body, auth_name="codex.json")
 
     assert result.plan_type == "pro"
-    assert result.extra["email"] == "codex-user@example.test"
     assert {w.id for w in result.windows} == {
         "primary",
         "secondary",
@@ -172,10 +171,9 @@ def test_parse_handles_codex_pro_nested_additional_rate_limits_from_draft() -> N
 
 def test_parse_handles_codex_team_draft_without_additional_rate_limits() -> None:
     body = _codex_team_body()
-    result = CodexProvider().parse(body, 200, auth_name="team.json")
+    result = CodexProvider().parse(body, auth_name="team.json")
 
     assert result.plan_type == "team"
-    assert result.extra["email"] == "chatgpt-team@example.test"
     assert {w.id for w in result.windows} == {"primary", "secondary"}
 
     secondary = next(w for w in result.windows if w.id == "secondary")
@@ -183,24 +181,16 @@ def test_parse_handles_codex_team_draft_without_additional_rate_limits() -> None
     assert secondary.resets_at == datetime.fromtimestamp(1779847646, tz=UTC)
 
 
-def test_parse_surfaces_email_in_extra(
-    codex_api_call_fixture: dict,  # type: ignore[type-arg]
-) -> None:
-    body_dict = json.loads(codex_api_call_fixture["body"])
-    result = CodexProvider().parse(body_dict, 200, auth_name="codex.json")
-    assert result.extra["email"] == "user@example.com"
-
-
 def test_parse_raises_schema_error_on_garbage() -> None:
     with pytest.raises(QuotaSchemaError):
-        CodexProvider().parse(42, 200, auth_name="codex.json")
+        CodexProvider().parse(42, auth_name="codex.json")
 
 
 def test_parse_weekly_primary_windows_and_manual_resets(
     codex_weekly_only_api_call_fixture: dict,  # type: ignore[type-arg]
 ) -> None:
     body = json.loads(codex_weekly_only_api_call_fixture["body"])
-    result = CodexProvider().parse(body, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body, auth_name="codex.json")
 
     assert [window.label for window in result.windows] == [
         "Weekly limit",
@@ -219,7 +209,7 @@ def test_parse_uses_duration_in_either_window_position(key: str) -> None:
             other: {"used_percent": 2, "limit_window_seconds": 18000, "reset_at": 2},
         }
     }
-    result = CodexProvider().parse(body, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body, auth_name="codex.json")
     labels = {window.id: window.label for window in result.windows}
     assert labels[key.removesuffix("_window")] == "Weekly limit"
     assert labels[other.removesuffix("_window")] == "5-hour limit"
@@ -236,7 +226,7 @@ def test_parse_unknown_duration_uses_neutral_labels(duration: int | None) -> Non
             {"limit_name": "Spark", "rate_limit": {"primary_window": window}}
         ],
     }
-    result = CodexProvider().parse(body, 200, auth_name="codex.json")
+    result = CodexProvider().parse(body, auth_name="codex.json")
     assert [item.label for item in result.windows] == ["Account limit", "Spark limit"]
 
 
@@ -244,7 +234,6 @@ def test_parse_unknown_duration_uses_neutral_labels(duration: int | None) -> Non
 def test_parse_non_negative_manual_reset_count(count: int) -> None:
     result = CodexProvider().parse(
         {"rate_limit_reset_credits": {"available_count": count}},
-        200,
         auth_name="codex.json",
     )
     assert result.manual_resets is not None
@@ -288,7 +277,7 @@ def test_parse_reset_credits_filters_and_sorts_by_expiry() -> None:
     body = {
         "available_count": 3,
         "credits": [
-            _credit("later", "2026-06-15T00:00:00Z", granted_at="2026-05-01T00:00:00Z"),
+            _credit("later", "2026-06-15T00:00:00Z"),
             _credit("consumed", "2026-06-01T00:00:00Z", status="consumed"),
             _credit("other-type", "2026-06-01T00:00:00Z", reset_type="other"),
             _credit("no-expiry", None),
@@ -301,8 +290,6 @@ def test_parse_reset_credits_filters_and_sorts_by_expiry() -> None:
 
     assert result.available_count == 3
     assert [c.id for c in result.credits] == ["sooner", "later"]
-    assert result.credits[0].granted_at is None
-    assert result.credits[1].granted_at == datetime(2026, 5, 1, tzinfo=UTC)
 
 
 def test_parse_reset_credits_without_count_uses_credit_length() -> None:

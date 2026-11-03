@@ -1,38 +1,16 @@
 import type { QuotaAccountsResponse, QuotaProvider, QuotaResponse } from '@/types/api';
-import { apiPath } from './runtimeConfig';
+import { apiFetch, getJson } from './api';
 
-export class QuotaFetchError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
+const accountPath = (provider: QuotaProvider, authName: string) => `/quota/${provider}/${encodeURIComponent(authName)}`;
+
+export function fetchQuotaAccounts(signal: AbortSignal): Promise<QuotaAccountsResponse> {
+  return getJson('/quota/accounts', signal);
 }
 
-async function quotaRequest<T>(path: string): Promise<T> {
-  const resp = await fetch(path);
-
-  if (!resp.ok) {
-    throw new QuotaFetchError(resp.status, (await resp.text()) || resp.statusText);
-  }
-
-  return resp.json() as Promise<T>;
-}
-
-export function fetchQuotaAccounts(): Promise<QuotaAccountsResponse> {
-  return quotaRequest<QuotaAccountsResponse>(apiPath('/quota/accounts'));
-}
-
-export function fetchQuota(provider: QuotaProvider, authName: string): Promise<QuotaResponse> {
-  return quotaRequest<QuotaResponse>(apiPath(`/quota/${provider}/${encodeURIComponent(authName)}`));
+export function fetchQuota(provider: QuotaProvider, authName: string, signal: AbortSignal): Promise<QuotaResponse> {
+  return getJson(accountPath(provider, authName), signal);
 }
 
 export async function resetQuota(provider: QuotaProvider, authName: string): Promise<void> {
-  const resp = await fetch(
-    apiPath(`/quota/${provider}/${encodeURIComponent(authName)}/reset`),
-    { method: 'POST' },
-  );
-  if (!resp.ok) {
-    throw new QuotaFetchError(resp.status, (await resp.text()) || resp.statusText);
-  }
+  await apiFetch(`${accountPath(provider, authName)}/reset`, { method: 'POST' });
 }

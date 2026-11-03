@@ -163,6 +163,47 @@ def test_fetch_refreshes_after_ttl(tmp_path: Path) -> None:
     assert "fresh-model" in on_disk
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503, json={"error": "unavailable"}),
+        httpx.Response(200, json={"error": "not pricing"}),
+    ],
+)
+def test_failed_download_keeps_the_cache(
+    tmp_path: Path, response: httpx.Response
+) -> None:
+    """An error status or a body without pricing never overwrites a good cache."""
+    cache_path = tmp_path / "pricing.json"
+    cache_path.write_text(json.dumps(_SAMPLE_PAYLOAD))
+    stale_time = time.time() - 99999
+    os.utime(cache_path, (stale_time, stale_time))
+
+    result = fetch_pricing(
+        url="http://test.local/pricing.json",
+        cache_path=cache_path,
+        ttl_seconds=60,
+        client=_make_client(lambda _: response),
+        now=datetime.now(UTC),
+    )
+
+    assert result["model-a"].input_cost_per_token == 1e-6
+    assert json.loads(cache_path.read_text()) == _SAMPLE_PAYLOAD
+
+
+def test_malformed_url_falls_back_to_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "pricing.json"
+    cache_path.write_text(json.dumps(_SAMPLE_PAYLOAD))
+    stale_time = time.time() - 99999
+    os.utime(cache_path, (stale_time, stale_time))
+
+    result = fetch_pricing(
+        url="http://:abc/pricing.json", cache_path=cache_path, ttl_seconds=60
+    )
+
+    assert result["model-a"].input_cost_per_token == 1e-6
+
+
 def test_fetch_falls_back_to_cache_on_network_error(tmp_path: Path) -> None:
     """Cache present, network raises ConnectError → returns cache (ignores TTL)."""
     cache_path = tmp_path / "pricing.json"

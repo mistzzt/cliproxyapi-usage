@@ -163,32 +163,6 @@
   margin-top: $space-3;
 }
 
-.btnPrimary,
-.btnGhost {
-  padding: 6px 14px;
-  border-radius: 6px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.btnPrimary {
-  border: 0;
-  background: var(--color-accent);
-  color: #fff;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
-.btnGhost {
-  border: 1px solid var(--color-border);
-  background: none;
-  color: var(--color-text);
-}
-
 .search {
   box-sizing: border-box;
   width: 100%;

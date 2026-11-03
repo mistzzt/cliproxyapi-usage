@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import ClassVar, Literal
 from uuid import uuid4
 
 from cliproxy_usage_server.quota.errors import QuotaSchemaError
@@ -53,7 +52,6 @@ def _parse_credit(entry: object) -> ManualResetCredit | None:
         return None
     return ManualResetCredit(
         id=str(entry.get("id", "")),
-        granted_at=_parse_instant(entry.get("granted_at")),
         expires_at=expires_at,
     )
 
@@ -114,9 +112,6 @@ def _append_window_from_rate_limit(
 class CodexProvider:
     """Quota provider for the OpenAI Codex API (chatgpt.com)."""
 
-    provider_id: ClassVar[Literal["claude", "codex"]] = "codex"
-    auth_type: ClassVar[str] = "codex"
-
     def build_api_call_payload(self, auth_name: str) -> dict[str, object]:
         return {
             "authIndex": auth_name,
@@ -170,9 +165,7 @@ class CodexProvider:
             available_count=len(credits) if count is None else count, credits=credits
         )
 
-    def parse(
-        self, upstream_body: object, upstream_status: int, *, auth_name: str
-    ) -> ProviderQuota:
+    def parse(self, upstream_body: object, *, auth_name: str) -> ProviderQuota:
         if not isinstance(upstream_body, dict):
             raise QuotaSchemaError(
                 "Expected a dict for Codex quota body, "
@@ -180,16 +173,8 @@ class CodexProvider:
             )
 
         windows: list[QuotaWindow] = []
-        extra: dict[str, object] = {}
-
-        # Extract plan_type
         plan_type = upstream_body.get("plan_type")
         plan_type_str = str(plan_type) if plan_type is not None else None
-
-        # Extract email into extra
-        email = upstream_body.get("email")
-        if email is not None:
-            extra["email"] = email
 
         # Parse primary/secondary windows from rate_limit
         rate_limit = upstream_body.get("rate_limit")
@@ -262,5 +247,4 @@ class CodexProvider:
             plan_type=plan_type_str,
             windows=windows,
             manual_resets=manual_resets,
-            extra=extra,
         )

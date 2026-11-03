@@ -1,63 +1,38 @@
-import { useEffect } from 'react';
-import { useQuotaStore } from '@/stores';
-import type { QuotaProvider } from '@/types/api';
+import { useState } from 'react';
 import QuotaCard from '@/components/quota/QuotaCard';
+import { useQuota, useQuotaAccounts, useQuotaReset } from '@/hooks/useQuotaQueries';
+import { ApiError } from '@/services/api';
+import type { QuotaAccount, QuotaProvider } from '@/types/api';
+import { PROVIDER_LABEL, resetState } from '@/utils/quota';
+import b from '@/components/ui/Banner.module.scss';
 import styles from './QuotaPage.module.scss';
 
-const PROVIDERS: { id: QuotaProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-];
+const PROVIDERS = Object.keys(PROVIDER_LABEL) as QuotaProvider[];
+
+const info = `${b.banner} ${b.info} ${styles.banner}`;
 
 export default function QuotaPage() {
-  const {
-    accounts,
-    slots,
-    resets,
-    loadAccounts,
-    loadQuota,
-    slotKey,
-    requestResetConfirmation,
-    cancelReset,
-    submitReset,
-  } = useQuotaStore();
-
-  useEffect(() => {
-    void loadAccounts().then(() => {
-      const current = useQuotaStore.getState();
-      if (current.accounts.status === 'success' && current.accounts.data !== undefined) {
-        for (const acct of current.accounts.data) {
-          void current.loadQuota({ provider: acct.provider, authName: acct.auth_name });
-        }
-      }
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function handleRefresh(provider: QuotaProvider, authName: string) {
-    void loadQuota({ provider, authName });
-  }
+  const accounts = useQuotaAccounts();
 
   function renderBanner() {
-    if (accounts.status === 'error') {
-      const status = accounts.error?.status ?? 0;
-      if (status === 503) {
+    if (accounts.isError) {
+      if (accounts.error instanceof ApiError && accounts.error.status === 503) {
         return (
-          <div className={`${styles.banner} ${styles.bannerInfo}`}>
+          <div className={info}>
             Quota display is disabled. Set `CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` on the server.
           </div>
         );
       }
       return (
-        <div className={`${styles.banner} ${styles.bannerError}`}>
-          Upstream proxy is unavailable. Try again shortly.
+        <div className={`${b.banner} ${b.error} ${styles.banner}`} role="alert">
+          Couldn&apos;t load accounts: {accounts.error.message}
         </div>
       );
     }
 
-    if (accounts.status === 'success' && (accounts.data === undefined || accounts.data.length === 0)) {
+    if (accounts.data?.accounts.length === 0) {
       return (
-        <div className={`${styles.banner} ${styles.bannerInfo}`}>
+        <div className={info}>
           No OAuth accounts found. Claude and Codex auth-files registered with CLIProxyAPI will appear here.
         </div>
       );
@@ -74,32 +49,19 @@ export default function QuotaPage() {
 
       {renderBanner()}
 
-      {accounts.status === 'success' && accounts.data !== undefined && (
+      {accounts.data && (
         <div className={styles.providers}>
-          {PROVIDERS.map(({ id: providerId, label }) => {
-            const providerAccounts = accounts.data!.filter((a) => a.provider === providerId);
+          {PROVIDERS.map((providerId) => {
+            const providerAccounts = accounts.data.accounts.filter((a) => a.provider === providerId);
             if (providerAccounts.length === 0) return null;
 
             return (
               <section key={providerId} className={styles.providerSection}>
-                <h2 className={styles.providerTitle}>{label}</h2>
+                <h2 className={styles.providerTitle}>{PROVIDER_LABEL[providerId]}</h2>
                 <div className={styles.grid}>
-                  {providerAccounts.map((acct) => {
-                    const key = slotKey({ provider: acct.provider, authName: acct.auth_name });
-                    const slot = slots[key] ?? { status: 'loading' as const };
-                    return (
-                      <QuotaCard
-                        key={key}
-                        account={acct}
-                        slot={slot}
-                        reset={resets[key] ?? { status: 'idle' }}
-                        onRefresh={() => handleRefresh(acct.provider, acct.auth_name)}
-                        onRequestReset={() => requestResetConfirmation({ provider: acct.provider, authName: acct.auth_name })}
-                        onCancelReset={() => cancelReset({ provider: acct.provider, authName: acct.auth_name })}
-                        onConfirmReset={() => { void submitReset({ provider: acct.provider, authName: acct.auth_name }); }}
-                      />
-                    );
-                  })}
+                  {providerAccounts.map((acct) => (
+                    <AccountQuota key={`${acct.provider}/${acct.auth_name}`} account={acct} />
+                  ))}
                 </div>
               </section>
             );
@@ -107,5 +69,29 @@ export default function QuotaPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function AccountQuota({ account }: { account: QuotaAccount }) {
+  const quota = useQuota(account);
+  const reset = useQuotaReset(account);
+  // The quota response a confirmation was opened against; any refetch cancels it.
+  const [confirmedAt, setConfirmedAt] = useState<number | null>(null);
+  return (
+    <QuotaCard
+      account={account}
+      query={quota}
+      reset={resetState(confirmedAt === quota.dataUpdatedAt, reset)}
+      onRefresh={() => void quota.refetch()}
+      onRequestReset={() => {
+        reset.reset();
+        setConfirmedAt(quota.dataUpdatedAt);
+      }}
+      onCancelReset={() => setConfirmedAt(null)}
+      onConfirmReset={() => {
+        setConfirmedAt(null);
+        reset.mutate();
+      }}
+    />
   );
 }

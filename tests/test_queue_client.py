@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -67,9 +66,7 @@ def test_gets_usage_queue_with_count_and_bearer_token():
         "http://proxy.example:8317/v0/management/usage-queue?count=37"
     )
     assert request.headers["authorization"] == "Bearer secret"
-    assert records == [
-        json.dumps({"timestamp": "2026-01-01T00:00:00Z"}, separators=(",", ":"))
-    ]
+    assert records == [{"timestamp": "2026-01-01T00:00:00Z"}]
 
 
 @pytest.mark.parametrize(

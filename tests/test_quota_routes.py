@@ -67,14 +67,18 @@ class _FakeService:
         quota_response: QuotaResponse | None = None,
         raise_on_get_quota: Exception | None = None,
         raise_on_reset: Exception | None = None,
+        raise_on_accounts: Exception | None = None,
     ) -> None:
         self._accounts = accounts or []
+        self._raise_on_accounts = raise_on_accounts
         self._quota_response = quota_response
         self._raise_on_get_quota = raise_on_get_quota
         self._raise_on_reset = raise_on_reset
         self.reset_calls: list[tuple[str, str]] = []
 
     async def list_accounts(self) -> list[QuotaAccount]:
+        if self._raise_on_accounts is not None:
+            raise self._raise_on_accounts
         return self._accounts
 
     async def get_quota(self, provider_id: str, auth_name: str) -> QuotaResponse:
@@ -170,6 +174,13 @@ def test_get_quota_endpoint_mgmt_unreachable_returns_502() -> None:
 
     assert resp.status_code == 502
     assert "detail" in resp.json()
+
+
+def test_accounts_endpoint_mgmt_unreachable_returns_502() -> None:
+    service = _FakeService(raise_on_accounts=QuotaUpstreamError("unreachable"))
+    resp = _make_client(service).get("/api/quota/accounts")
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "unreachable"
 
 
 def test_path_params_rejected_with_bad_provider() -> None:

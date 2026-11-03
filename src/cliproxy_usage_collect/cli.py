@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from cliproxy_usage_collect.config import Config, ConfigError, load_config
 from cliproxy_usage_collect.db import insert_records, open_db
@@ -14,18 +15,14 @@ from cliproxy_usage_collect.queue_client import (
     pop_usage_records,
 )
 
-QueueClient = Callable[[Config], Sequence[str | bytes]]
+QueueClient = Callable[[Config], Sequence[Mapping[str, Any]]]
 
 
-def main(
-    argv: list[str] | None = None, *, queue_client: QueueClient = pop_usage_records
-) -> int:
+def main(*, queue_client: QueueClient = pop_usage_records) -> int:
     """Collect usage data and insert into the local SQLite database.
 
     Parameters
     ----------
-    argv:
-        Accepted for future-proofing; not parsed.
     queue_client:
         Callable that drains one batch of raw queue elements. Tests can inject
         a fake callable to avoid touching CLIProxyAPI.

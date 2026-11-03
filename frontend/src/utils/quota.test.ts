@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { QuotaResponse } from '@/types/api';
-import { beginReset, canStartReset, manualResetCount } from './quotaResetState';
+import { canStartReset, manualResetCount, resetState } from './quota';
 
 describe('quota reset state', () => {
   test('shared backend fixture exposes the typed manual reset capability', async () => {
@@ -19,14 +19,17 @@ describe('quota reset state', () => {
       plan_type: null,
       windows: [],
       manual_resets: { available_count: 0, credits: [], credits_error: null },
-      extra: {},
     };
     expect(manualResetCount(quota)).toBe(0);
     expect(canStartReset(quota)).toBe(false);
   });
 
-  test('confirmation cannot replace a running action', () => {
-    expect(beginReset({ status: 'idle' })).toEqual({ status: 'confirming' });
-    expect(beginReset({ status: 'loading' })).toEqual({ status: 'loading' });
+  test('a running reset wins over confirmation, which hides the last outcome', () => {
+    const idle = { status: 'idle', error: null } as const;
+    expect(resetState(true, { status: 'pending', error: null })).toEqual({ status: 'loading' });
+    expect(resetState(true, { status: 'error', error: new Error('no credit') })).toEqual({ status: 'confirming' });
+    expect(resetState(false, { status: 'error', error: new Error('no credit') })).toEqual({ status: 'error', message: 'no credit' });
+    expect(resetState(false, { status: 'success', error: null })).toEqual({ status: 'success', message: 'Manual reset consumed.' });
+    expect(resetState(false, idle)).toEqual({ status: 'idle' });
   });
 });

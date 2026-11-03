@@ -1,8 +1,6 @@
-"""Shared schemas used by the collector and (eventually) the webapp.
+"""The row shape the collector writes, which the server reads back from SQLite.
 
-These are the user-facing shapes — the wire format the webapp exposes and
-the row shape the collector writes. Keep ingestion-only validation models
-(the ones that mirror the proxy's queue JSON) private to ``parser``.
+Ingestion-only models that mirror the proxy's queue JSON stay private to ``parser``.
 """
 
 from __future__ import annotations
@@ -11,11 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class RequestRecord(BaseModel):
-    """A single request row.
-
-    Immutable. Used by the parser (yield), the DB layer (insert), and the
-    webapp (FastAPI response models can embed or subclass this).
-    """
+    """One request row: yielded by the parser, inserted by the DB layer."""
 
     model_config = ConfigDict(frozen=True)
 

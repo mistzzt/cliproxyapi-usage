@@ -30,7 +30,7 @@
           outputHashMode = "recursive";
           outputHash =
             {
-              x86_64-linux = "sha256-UpM/RNZjGnV84tlr+lsATuzub2O91kpPEebIJ3zydTw=";
+              x86_64-linux = "sha256-a9KwVNMOUeYNFiEfnJ3/f4qv20boHpJdwxI+Hahi8kk=";
               aarch64-linux = pkgs.lib.fakeHash;
               x86_64-darwin = pkgs.lib.fakeHash;
               aarch64-darwin = pkgs.lib.fakeHash;
@@ -116,10 +116,12 @@
       default = with pkgs;
         mkShell {
           buildInputs = [
-            python314
+            (python314.withPackages (ps: [ps.pytest ps.playwright]))
             uv
             bun
           ];
+          PLAYWRIGHT_BROWSERS_PATH = "${playwright-driver.browsers}";
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
         };
     });
   };

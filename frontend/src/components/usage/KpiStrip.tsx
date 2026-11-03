@@ -4,6 +4,7 @@ import type { SummaryResponse } from '@/types/api';
 import { change, fmtCompact, fmtPct } from '@/utils/usage/format';
 import { failureRate, fmtLatency, fmtSpend, SPEND_LOWER_BOUND_NOTE, tokenSeries, tokens } from '@/utils/usage/totals';
 import ChangeBadge from './ChangeBadge';
+import shared from './Shared.module.scss';
 import s from './KpiStrip.module.scss';
 
 export default function KpiStrip({ summary, accent, busy }: { summary: SummaryResponse; accent: string; busy: boolean }) {
@@ -39,7 +40,7 @@ export default function KpiStrip({ summary, accent, busy }: { summary: SummaryRe
             t.change !== null && (
               <>
                 <ChangeBadge value={t.change} />
-                <span className={s.muted}>vs prev. period</span>
+                <span className={shared.muted}>vs prev. period</span>
               </>
             )
           }

@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { cacheHitRate, tokens } from './totals';
 
 test('tokens are input + output, cached excluded', () => {
-  expect(tokens({ input_tokens: 300, output_tokens: 30, cached_tokens: 5000 })).toBe(330);
+  const totals = { input_tokens: 300, output_tokens: 30, cached_tokens: 5000 };
+  expect(tokens(totals)).toBe(330);
 });
 
 test('cache hit rate follows the model accounting the API reports', () => {

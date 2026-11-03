@@ -44,36 +44,46 @@ class Config(BaseSettings):
 
 
 def load_config() -> Config:
-    """Load configuration from environment variables.
+    """Load the collector's configuration from environment variables."""
+    return load_settings(Config)
 
-    Raises ConfigError, with env-var names in the message, if required
-    variables are missing or values are invalid.
+
+def load_settings[T: BaseSettings](cls: type[T]) -> T:
+    """Instantiate settings from the environment.
+
+    Raises ConfigError naming the env vars (not fields) that are missing or invalid.
     """
     try:
-        return Config()  # pyright: ignore[reportCallIssue]  # fields come from env
+        return cls()  # pyright: ignore[reportCallIssue]  # fields come from env
     except ValidationError as exc:
+        errors = exc.errors()
         missing = [
-            _env_name(str(err["loc"][0]))
-            for err in exc.errors()
-            if err.get("type") == "missing"
+            _env_name(cls, err["loc"][0]) for err in errors if err["type"] == "missing"
         ]
         if missing:
             raise ConfigError(
                 f"Missing required environment variable: {', '.join(missing)}"
             ) from exc
-        invalid = list(
-            dict.fromkeys(_env_name(str(err["loc"][0])) for err in exc.errors())
-        )
+        invalid = dict.fromkeys(_env_name(cls, err["loc"][0]) for err in errors)
         raise ConfigError(
-            f"Invalid environment variable: {', '.join(invalid)}\n{exc}"
+            f"Invalid value for environment variable: {', '.join(invalid)}\n{exc}"
         ) from exc
 
 
-def _env_name(field_name: str) -> str:
-    """Return the env-var alias for a Config field, falling back to the field name."""
-    field = Config.model_fields.get(field_name)
+def _env_name(cls: type[BaseSettings], field_name: object) -> str:
+    """Return a settings field's upper-case env-var alias, else the field name."""
+    field = cls.model_fields.get(str(field_name))
     if field is not None and isinstance(field.validation_alias, AliasChoices):
         for choice in field.validation_alias.choices:
             if isinstance(choice, str) and choice.isupper():
                 return choice
-    return field_name
+    return str(field_name)
+
+
+_MANAGEMENT_PATH = "/v0/management"
+
+
+def management_url(base_url: str, path: str) -> str:
+    """URL of management API `path`, from the CLIProxyAPI origin or management base."""
+    base = base_url.rstrip("/").removesuffix(_MANAGEMENT_PATH)
+    return f"{base}{_MANAGEMENT_PATH}/{path}"

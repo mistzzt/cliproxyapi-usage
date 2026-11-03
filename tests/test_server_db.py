@@ -12,8 +12,8 @@ import pytest
 from cliproxy_usage_server.db import effective_bucket, open_ro
 
 
-def test_open_ro_read_only_rejects_write(seeded_db_path: Path) -> None:
-    conn = open_ro(seeded_db_path)
+def test_open_ro_read_only_rejects_write(synthetic_db_path: Path) -> None:
+    conn = open_ro(synthetic_db_path)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         conn.execute(
             "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
