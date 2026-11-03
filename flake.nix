@@ -116,7 +116,6 @@
       default = with pkgs;
         mkShell {
           buildInputs = [
-            # Runs the e2e browser tests: PyPI's Playwright driver cannot start on NixOS.
             (python314.withPackages (ps: [ps.pytest ps.playwright]))
             uv
             bun
