@@ -291,7 +291,7 @@ def fetch_pricing(
         pricing_map = _parse_pricing_map(raw)
         if not pricing_map:
             raise ValueError("response holds no usable pricing entries")
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
         # A failed download never replaces the cache with an error body.
         _log.warning("Failed to fetch pricing from %s: %s", url, exc)
         return _load_cache(cache_path) if cache_path.exists() else {}

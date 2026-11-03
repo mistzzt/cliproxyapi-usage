@@ -229,3 +229,13 @@ def test_unusable_management_responses_raise_upstream_error(respond: Any) -> Non
             await client.api_call({"method": "GET"})
 
     asyncio.run(run())
+
+
+def test_malformed_base_url_raises_upstream_error() -> None:
+    async def run() -> None:
+        client = CliProxyClient("http://:abc", _KEY)
+        with pytest.raises(QuotaUpstreamError):
+            await client.list_auth_files()
+        await client.aclose()
+
+    asyncio.run(run())

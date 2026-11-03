@@ -191,6 +191,19 @@ def test_failed_download_keeps_the_cache(
     assert json.loads(cache_path.read_text()) == _SAMPLE_PAYLOAD
 
 
+def test_malformed_url_falls_back_to_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "pricing.json"
+    cache_path.write_text(json.dumps(_SAMPLE_PAYLOAD))
+    stale_time = time.time() - 99999
+    os.utime(cache_path, (stale_time, stale_time))
+
+    result = fetch_pricing(
+        url="http://:abc/pricing.json", cache_path=cache_path, ttl_seconds=60
+    )
+
+    assert result["model-a"].input_cost_per_token == 1e-6
+
+
 def test_fetch_falls_back_to_cache_on_network_error(tmp_path: Path) -> None:
     """Cache present, network raises ConnectError → returns cache (ignores TTL)."""
     cache_path = tmp_path / "pricing.json"

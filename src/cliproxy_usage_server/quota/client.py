@@ -109,7 +109,7 @@ class CliProxyClient:
             response = await self._client.request(
                 method, url, headers=self._headers, **kwargs
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
             raise QuotaUpstreamError(f"{path} request failed: {exc}") from exc
         if response.status_code >= 300:
             raise QuotaUpstreamError(

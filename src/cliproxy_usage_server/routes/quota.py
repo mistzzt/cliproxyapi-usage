@@ -23,8 +23,11 @@ def build_router(service: QuotaService) -> APIRouter:
     @r.get("/quota/accounts", response_model=QuotaAccountsResponse)
     async def accounts_endpoint() -> QuotaAccountsResponse:
         """Return all known quota accounts across configured providers."""
-        accs = await service.list_accounts()
-        return QuotaAccountsResponse(accounts=accs)
+        try:
+            accounts = await service.list_accounts()
+        except QuotaUpstreamError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return QuotaAccountsResponse(accounts=accounts)
 
     @r.get("/quota/{provider}/{auth_name}", response_model=QuotaResponse)
     async def get_quota_endpoint(provider: str, auth_name: str) -> QuotaResponse:

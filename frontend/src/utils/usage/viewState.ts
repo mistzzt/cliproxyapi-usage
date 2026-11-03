@@ -1,6 +1,5 @@
 // Dashboard view state: URL query string round-trip plus the localStorage fallback (pure).
 import type { Bucket, Dimension } from '@/types/api';
-import type { SegmentedOption } from '@/components/usage/Segmented';
 import { isPresetId, isValidCustomRange, type RangeSel } from './range';
 
 export type Metric = 'cost' | 'tokens';
@@ -45,7 +44,11 @@ const GRANULARITIES: readonly Granularity[] = ['auto', 'hour', 'day', 'week'];
 
 const SHORT: Record<Bucket, string> = { hour: '1h', day: '1d', week: '1w' };
 
-export type GranularityOption = SegmentedOption<Granularity>;
+export interface GranularityOption {
+  value: Granularity;
+  label: string;
+  title?: string;
+}
 
 /** Granularity buttons labeled with the bucket the server used (`effective`), which may coarsen a fixed choice; only a selected Auto names it. */
 export function granularityOptions(selected: Granularity, effective: Bucket | null): GranularityOption[] {
