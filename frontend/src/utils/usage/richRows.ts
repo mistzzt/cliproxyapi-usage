@@ -2,7 +2,8 @@
 import type { BreakdownRow, MixEntry, ModelPrice, Totals } from '@/types/api';
 import { type Change, change, fmtPct } from './format';
 import { cacheHitRate, failureRate, tokenSeries, tokens } from './totals';
-import type { Dimension, Metric } from './viewState';
+import type { Dimension } from '@/types/api';
+import type { Metric } from './viewState';
 
 export type MetricValues = Pick<Totals, 'cost' | 'input_tokens' | 'output_tokens'>;
 
@@ -66,8 +67,7 @@ export interface RichRow {
   key: string;
   label: string;
   totals: Totals;
-  /** Active metric value and its fraction of the sum over all rows. */
-  value: number;
+  /** Active metric value's fraction of the sum over all rows. */
   share: number;
   change: Change;
   trend: number[];
@@ -92,7 +92,6 @@ export function buildRichRows(rows: readonly RichRowInput[], dim: Dimension, met
       key: r.key,
       label: r.label,
       totals: r.current,
-      value,
       share: total > 0 ? value / total : 0,
       change: change(value, r.previous ? metricValue(r.previous, metric) : null),
       trend,

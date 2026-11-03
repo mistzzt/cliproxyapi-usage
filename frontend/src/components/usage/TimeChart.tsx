@@ -7,13 +7,8 @@ import type { Bucket } from '@/types/api';
 import { bucketLabel, tickLabel } from '@/utils/usage/dates';
 import { fmtMetric } from '@/utils/usage/format';
 import type { Theme } from '@/utils/usage/palette';
+import type { ChartLayer } from '@/utils/usage/stack';
 import type { Metric } from '@/utils/usage/viewState';
-
-export interface ChartLayer {
-  label: string;
-  color: string;
-  values: number[];
-}
 
 /** Stacked bars over time; `theme` only forces theme colors to be re-read. */
 export default function TimeChart({

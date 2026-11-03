@@ -131,7 +131,6 @@ export interface QuotaWindow {
 
 export interface ManualResetCredit {
   id: string;
-  granted_at: string | null; // ISO-8601
   expires_at: string; // ISO-8601
 }
 
@@ -148,7 +147,6 @@ export interface ProviderQuota {
   plan_type: string | null;
   windows: QuotaWindow[];
   manual_resets: ManualResetSummary | null;
-  extra: Record<string, unknown>;
 }
 
 export type QuotaErrorKind = 'auth' | 'rate_limited' | 'upstream' | 'schema' | 'transient';

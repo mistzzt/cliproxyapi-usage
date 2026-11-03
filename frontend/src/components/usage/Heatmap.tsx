@@ -5,7 +5,8 @@ import { fmtMetric, fmtPct } from '@/utils/usage/format';
 import { buildHeatmap, HEAT_STEPS, heatBin, isNotable, type HeatColumn } from '@/utils/usage/heatmap';
 import { modelFamily, shortModel } from '@/utils/usage/modelNames';
 import { metricValue } from '@/utils/usage/richRows';
-import type { Metric } from '@/utils/usage/viewState';
+import { METRIC_WORD, type Metric } from '@/utils/usage/viewState';
+import shared from './Shared.module.scss';
 import s from './Heatmap.module.scss';
 
 const DEEP_BIN = 3;
@@ -48,7 +49,7 @@ export default function Heatmap({
           <i key={b} style={{ background: fill(b) }} />
         ))}
         <span>More</span>
-        <span className={s.legendNote}>{metric === 'cost' ? 'spend' : 'tokens'}, sqrt scale. Hover a cell for its value.</span>
+        <span className={s.legendNote}>{METRIC_WORD[metric]}, sqrt scale. Hover a cell for its value.</span>
       </div>
       <div className={s.scroll}>
         <table className={s.grid}>
@@ -113,7 +114,7 @@ export default function Heatmap({
                     <span style={{ width: `${maxCol ? (c.total / maxCol) * 100 : 0}%` }} />
                   </span>
                   {fmtMetric(c.total, metric)}
-                  <span className={s.muted}> {fmtPct(m.grand ? c.total / m.grand : 0)}</span>
+                  <span className={shared.muted}> {fmtPct(m.grand ? c.total / m.grand : 0)}</span>
                 </td>
               ))}
             </tr>

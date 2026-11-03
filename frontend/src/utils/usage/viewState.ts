@@ -1,9 +1,13 @@
 // Dashboard view state: URL query string round-trip plus the localStorage fallback (pure).
+import type { Bucket, Dimension } from '@/types/api';
+import type { SegmentedOption } from '@/components/usage/Segmented';
 import { isPresetId, isValidCustomRange, type RangeSel } from './range';
 
-export type Dimension = 'person' | 'model' | 'credential';
 export type Metric = 'cost' | 'tokens';
-export type Granularity = 'auto' | 'hour' | 'day' | 'week';
+
+/** How labels name the active metric's quantity. */
+export const METRIC_WORD: Record<Metric, string> = { cost: 'spend', tokens: 'tokens' };
+export type Granularity = 'auto' | Bucket;
 export type SecondaryTab = 'models' | 'credentials';
 
 export interface DrawerTarget {
@@ -39,17 +43,12 @@ export const DEFAULT_VIEW_STATE: ViewState = {
 const DIMENSIONS: readonly Dimension[] = ['person', 'model', 'credential'];
 const GRANULARITIES: readonly Granularity[] = ['auto', 'hour', 'day', 'week'];
 
-type FixedGranularity = Exclude<Granularity, 'auto'>;
-const SHORT: Record<FixedGranularity, string> = { hour: '1h', day: '1d', week: '1w' };
+const SHORT: Record<Bucket, string> = { hour: '1h', day: '1d', week: '1w' };
 
-export interface GranularityOption {
-  value: Granularity;
-  label: string;
-  title?: string;
-}
+export type GranularityOption = SegmentedOption<Granularity>;
 
 /** Granularity buttons labeled with the bucket the server used (`effective`), which may coarsen a fixed choice; only a selected Auto names it. */
-export function granularityOptions(selected: Granularity, effective: FixedGranularity | null): GranularityOption[] {
+export function granularityOptions(selected: Granularity, effective: Bucket | null): GranularityOption[] {
   return GRANULARITIES.map((value): GranularityOption => {
     if (value === 'auto') return { value, label: selected === 'auto' && effective ? `Auto (${SHORT[effective]})` : 'Auto' };
     if (value !== selected || !effective || effective === value) return { value, label: SHORT[value] };
@@ -60,6 +59,7 @@ export function granularityOptions(selected: Granularity, effective: FixedGranul
     };
   });
 }
+
 const LIST_FIELDS = ['people', 'models', 'credentials'] as const;
 
 /** The filter list holding each dimension's selected keys. */

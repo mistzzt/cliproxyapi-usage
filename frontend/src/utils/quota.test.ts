@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { QuotaResponse } from '@/types/api';
-import { canStartReset, manualResetCount, resetState } from './quotaReset';
+import { canStartReset, manualResetCount, resetState } from './quota';
 
 describe('quota reset state', () => {
   test('shared backend fixture exposes the typed manual reset capability', async () => {
@@ -19,7 +19,6 @@ describe('quota reset state', () => {
       plan_type: null,
       windows: [],
       manual_resets: { available_count: 0, credits: [], credits_error: null },
-      extra: {},
     };
     expect(manualResetCount(quota)).toBe(0);
     expect(canStartReset(quota)).toBe(false);

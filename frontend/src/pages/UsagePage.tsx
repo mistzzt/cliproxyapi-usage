@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import FailureBanner from '@/components/ui/FailureBanner';
 import Loaded from '@/components/ui/Loaded';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import DetailDrawer from '@/components/usage/DetailDrawer';
@@ -7,15 +8,15 @@ import Heatmap from '@/components/usage/Heatmap';
 import KpiStrip from '@/components/usage/KpiStrip';
 import { Panel, Tabs } from '@/components/usage/Panel';
 import RichRows from '@/components/usage/RichRows';
-import ShareBar, { type ShareItem } from '@/components/usage/ShareBar';
+import ShareBar from '@/components/usage/ShareBar';
 import { useOptions, useUsage, useUsageWindow } from '@/hooks/useUsageQueries';
 import { useUsageViewState } from '@/hooks/useUsageViewState';
-import { useThemeStore } from '@/stores';
+import { useThemeStore } from '@/stores/theme';
 import type { BreakdownResponse, Dimension } from '@/types/api';
 import { createLookup, type EntityLookup } from '@/utils/usage/entities';
 import { breakdownKey, matrixKey, summaryKey } from '@/utils/usage/queryKeys';
-import { metricValue } from '@/utils/usage/richRows';
-import { scopeToEntity, type Metric, type SecondaryTab } from '@/utils/usage/viewState';
+import { shareItems } from '@/utils/usage/share';
+import { METRIC_WORD, scopeToEntity, type Metric, type SecondaryTab } from '@/utils/usage/viewState';
 import s from './UsagePage.module.scss';
 
 const TABS: readonly { value: SecondaryTab; label: string }[] = [
@@ -48,8 +49,7 @@ export default function UsagePage() {
     ['Heatmap', matrix.error],
     [TABS.find((t) => t.value === state.tab)?.label ?? 'Breakdown', secondary.error],
   ];
-  const errors = failures.flatMap(([what, e]) => (e === null ? [] : [`${what}: ${e.message}`]));
-  const metricWord = state.metric === 'cost' ? 'spend' : 'tokens';
+  const anyFailed = failures.some(([, e]) => e !== null);
   const totals = summary.isError ? undefined : summary.data;
   // The placeholder while a newly picked tab loads is the other tab's breakdown.
   const secondaryData = secondary.data?.dim === tabDim ? secondary.data : undefined;
@@ -67,18 +67,9 @@ export default function UsagePage() {
         options={options.data ?? null}
         onRefresh={refresh}
       />
-      {errors.length > 0 && (
-        <div className={s.error}>
-          <strong>API error</strong>
-          <ul>
-            {[...new Set(errors)].map((e) => (
-              <li key={e}>{e}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <FailureBanner failures={failures} className={s.error} />
       {!totals ? (
-        errors.length === 0 && (
+        !anyFailed && (
           <div className={s.stack}>
             <LoadingSpinner />
           </div>
@@ -88,7 +79,7 @@ export default function UsagePage() {
       ) : (
         <div className={s.stack}>
           <KpiStrip summary={totals} accent={lookup.accent} busy={summary.isFetching} />
-          <Panel title={`People by ${metricWord}`} busy={people.isFetching}>
+          <Panel title={`People by ${METRIC_WORD[state.metric]}`} busy={people.isFetching}>
             <Loaded query={people}>
               {(data) => <BreakdownSection data={data} metric={state.metric} lookup={lookup} onSelect={select('person')} />}
             </Loaded>
@@ -136,16 +127,7 @@ function BreakdownSection({
   onSelect: (key: string) => void;
   compact?: boolean;
 }) {
-  const items = useMemo<ShareItem[]>(
-    () =>
-      data.rows.map((r) => ({
-        key: r.key,
-        label: r.label,
-        value: metricValue(r.current, metric),
-        slot: lookup.entity(data.dim, r.key).slot,
-      })),
-    [data, metric, lookup],
-  );
+  const items = useMemo(() => shareItems(data, metric, lookup), [data, metric, lookup]);
   return (
     <>
       <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} onSelect={onSelect} compact={compact} />

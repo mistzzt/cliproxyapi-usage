@@ -2,6 +2,7 @@
 
 from collections import Counter
 
+from conftest import wait_until
 from playwright.sync_api import Page, Route, expect
 
 ACCOUNT = {"provider": "codex", "auth_name": "e2e.json", "display_name": "E2E account"}
@@ -67,10 +68,7 @@ def test_reset_refetches_quota_and_each_visit_reloads(page: Page) -> None:
     page.get_by_role("link", name="Usage").click()
     page.get_by_role("link", name="Limits").click()
     page.wait_for_function("() => location.pathname.endsWith('/limits')")
-    for _ in range(40):
-        if fake.calls["quota"] == 3:
-            break
-        page.wait_for_timeout(50)
+    wait_until(page, lambda: fake.calls["quota"] == 3)
     page.wait_for_timeout(300)
     assert fake.calls == Counter(accounts=2, quota=3, reset=1)
     expect(count).to_have_text("1")

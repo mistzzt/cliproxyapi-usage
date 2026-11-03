@@ -1,4 +1,4 @@
-import { useThemeStore } from '@/stores';
+import { useThemeStore } from '@/stores/theme';
 import styles from './ThemeToggle.module.scss';
 
 export default function ThemeToggle() {

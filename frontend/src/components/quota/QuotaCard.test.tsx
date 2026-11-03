@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderQuota, QuotaAccount } from '@/types/api';
-import type { ResetActionState } from '@/utils/quotaReset';
+import type { ResetActionState } from '@/utils/quota';
 import { formatAbsolute } from '@/utils/time';
 import QuotaCard from './QuotaCard';
 
@@ -28,7 +28,7 @@ describe('QuotaCard manual reset capability', () => {
   test('renders count and action from a non-Codex response capability', () => {
     const markup = render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 2, credits: [], credits_error: null }, extra: {},
+      manual_resets: { available_count: 2, credits: [], credits_error: null },
     });
     expect(markup).toContain('Manual resets');
     expect(markup).toMatch(/data-testid="manual-reset-count">2</);
@@ -38,20 +38,20 @@ describe('QuotaCard manual reset capability', () => {
   test('shows zero without an action', () => {
     const markup = render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 0, credits: [], credits_error: null }, extra: {},
+      manual_resets: { available_count: 0, credits: [], credits_error: null },
     });
     expect(markup).toMatch(/data-testid="manual-reset-count">0</);
     expect(markup).not.toContain('Reset quota');
     expect(render({
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 0, credits: [], credits_error: null }, extra: {},
+      manual_resets: { available_count: 0, credits: [], credits_error: null },
     }, { status: 'confirming' })).not.toContain('Consume one manual reset?');
   });
 
   test('renders confirmation and account-local feedback states', () => {
     const quota: ProviderQuota = {
       provider: 'claude', auth_name: 'other.json', plan_type: null, windows: [],
-      manual_resets: { available_count: 1, credits: [], credits_error: null }, extra: {},
+      manual_resets: { available_count: 1, credits: [], credits_error: null },
     };
     expect(render(quota, { status: 'confirming' })).toContain('Consume one manual reset?');
     expect(render(quota, { status: 'loading' })).toContain('disabled');
@@ -62,11 +62,11 @@ describe('QuotaCard manual reset capability', () => {
 describe('QuotaCard manual reset credits', () => {
   const base: ProviderQuota = {
     provider: 'codex', auth_name: 'codex.json', plan_type: 'pro', windows: [],
-    manual_resets: { available_count: 2, credits: [], credits_error: null }, extra: {},
+    manual_resets: { available_count: 2, credits: [], credits_error: null },
   };
   const credits = [
-    { id: 'a', granted_at: '2026-04-01T00:00:00Z', expires_at: '2026-06-01T00:00:00Z' },
-    { id: 'b', granted_at: null, expires_at: '2026-06-15T00:00:00Z' },
+    { id: 'a', expires_at: '2026-06-01T00:00:00Z' },
+    { id: 'b', expires_at: '2026-06-15T00:00:00Z' },
   ];
 
   test('renders one expiry row per credit and points the confirmation at the first', () => {
@@ -90,7 +90,7 @@ describe('QuotaCard manual reset credits', () => {
       ...base,
       manual_resets: {
         available_count: 2,
-        credits: [{ id: 'a', granted_at: null, expires_at: soon }, { id: 'b', granted_at: null, expires_at: far }],
+        credits: [{ id: 'a', expires_at: soon }, { id: 'b', expires_at: far }],
         credits_error: null,
       },
     });

@@ -1,0 +1,26 @@
+@use '../../styles/tokens' as *;
+
+// Message boxes; callers add their own placement.
+.banner {
+  padding: $space-3 $space-4;
+  border: 1px solid;
+  border-radius: $radius-md;
+  font-size: 0.875rem;
+
+  ul {
+    margin: $space-2 0 0;
+    padding-left: $space-5;
+  }
+}
+
+.error {
+  background: var(--color-error-surface);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.info {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-text-muted);
+}

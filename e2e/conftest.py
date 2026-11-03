@@ -5,7 +5,7 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -57,6 +57,17 @@ def _wait_until_up(url: str, server: subprocess.Popen[bytes]) -> None:
         except OSError:
             time.sleep(0.2)
     raise TimeoutError(f"usage server did not answer {url}")
+
+
+def wait_until(
+    page: Page, condition: Callable[[], bool], timeout_ms: int = 5000
+) -> None:
+    """Polls a Python-side condition (e.g. a request count) while the page runs."""
+    for _ in range(timeout_ms // 50):
+        if condition():
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError("condition not met in time")
 
 
 @pytest.fixture(scope="session")

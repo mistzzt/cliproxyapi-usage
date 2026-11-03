@@ -15,8 +15,9 @@ import {
   type SortState,
 } from '@/utils/usage/richRows';
 import { fmtLatency, fmtSpend, tokens } from '@/utils/usage/totals';
-import type { Metric } from '@/utils/usage/viewState';
+import { METRIC_WORD, type Metric } from '@/utils/usage/viewState';
 import ChangeBadge from './ChangeBadge';
+import shared from './Shared.module.scss';
 import s from './RichRows.module.scss';
 
 const FAIL_HIGHLIGHT = 0.1;
@@ -55,7 +56,7 @@ export default function RichRows({
         <thead>
           <tr>
             {th('name', DIMENSION_LABEL[dim], false)}
-            {th('share', `Share of ${metric === 'cost' ? 'spend' : 'tokens'}`)}
+            {th('share', `Share of ${METRIC_WORD[metric]}`)}
             {th('cost', 'Spend')}
             {th('tokens', 'Tokens')}
             {hasPrevious && th('change', 'Δ vs prev.')}
@@ -139,7 +140,7 @@ function Row({
     <tr className={s.clickRow} onClick={() => onSelect(r.key)}>
       <td>
         <span className={s.nameCell}>
-          <i className={s.swatch} style={{ background: color }} />
+          <i className={shared.swatch} style={{ background: color }} />
           <span title={r.key}>{displayName(dim, r.label)}</span>
         </span>
       </td>

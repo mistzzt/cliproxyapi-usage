@@ -31,15 +31,4 @@
 
 .error {
   margin: $space-4 var(--page-gutter) 0;
-  padding: $space-3 $space-4;
-  background: var(--color-error-surface);
-  border: 1px solid var(--color-error);
-  border-radius: $radius-md;
-  color: var(--color-error);
-  font-size: 0.875rem;
-
-  ul {
-    margin: $space-2 0 0;
-    padding-left: $space-5;
-  }
 }

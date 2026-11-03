@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "bun test",
-    "type-check:test": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -1,4 +1,8 @@
-import type { ProviderQuota } from '@/types/api';
+// Quota page helpers: provider labels and the manual reset control's state (pure).
+import type { ProviderQuota, QuotaProvider } from '@/types/api';
+
+/** Display names, in the order the Limits page lists providers. */
+export const PROVIDER_LABEL: Record<QuotaProvider, string> = { claude: 'Claude', codex: 'Codex' };
 
 export type ResetActionState =
   | { status: 'idle' }

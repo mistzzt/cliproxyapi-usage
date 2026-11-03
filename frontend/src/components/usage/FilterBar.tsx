@@ -2,6 +2,7 @@ import { useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { DayPicker, type DateRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
+import Button from '@/components/ui/Button';
 import type { Bucket, Entity, OptionsResponse } from '@/types/api';
 import type { ResolvedWindow } from '@/utils/usage/queryKeys';
 import {
@@ -172,12 +173,10 @@ function RangePicker({
                 </label>
               </div>
               <div className={s.popoverActions}>
-                <button type="button" className={s.btnGhost} onClick={() => setCustom(false)}>
+                <Button variant="secondary" onClick={() => setCustom(false)}>
                   ‹ Presets
-                </button>
-                <button
-                  type="button"
-                  className={s.btnPrimary}
+                </Button>
+                <Button
                   disabled={!valid}
                   onClick={() => {
                     onChange({ kind: 'custom', start: from, end: to });
@@ -185,7 +184,7 @@ function RangePicker({
                   }}
                 >
                   Apply
-                </button>
+                </Button>
               </div>
             </div>
           )}

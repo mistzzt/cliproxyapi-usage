@@ -1,10 +1,13 @@
-import type { ProviderQuota, QuotaAccount, QuotaProvider, QuotaResponse } from '@/types/api';
-import { canStartReset, manualResetCount, type ResetActionState } from '@/utils/quotaReset';
+import type { ProviderQuota, QuotaAccount, QuotaResponse } from '@/types/api';
+import { canStartReset, manualResetCount, PROVIDER_LABEL, type ResetActionState } from '@/utils/quota';
 import { expiresSoon, formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import QuotaWindowBar from './QuotaWindowBar';
+import b from '@/components/ui/Banner.module.scss';
 import styles from './QuotaCard.module.scss';
+
+const errorBanner = `${b.banner} ${b.error} ${styles.errorRow}`;
 
 interface QuotaCardProps {
   account: QuotaAccount;
@@ -17,15 +20,9 @@ interface QuotaCardProps {
   onConfirmReset: () => void;
 }
 
-const PROVIDER_LABELS: Record<QuotaProvider, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-};
-
 const ERROR_MESSAGES = {
   auth: 'OAuth token expired — re-link this account in CLIProxyAPI.',
   rate_limited: 'Vendor rate-limited this request. Try again in a moment.',
-  upstream: 'Upstream vendor error.',
   schema: "Couldn't parse vendor response.",
   transient: 'Temporary error talking to CLIProxyAPI.',
   unknown: 'An unknown error occurred.',
@@ -54,7 +51,7 @@ export default function QuotaCard({
   onCancelReset,
   onConfirmReset,
 }: QuotaCardProps) {
-  const title = account.display_name ?? PROVIDER_LABELS[account.provider];
+  const title = account.display_name ?? PROVIDER_LABEL[account.provider];
 
   const response = query.data;
   const planPill =
@@ -68,7 +65,7 @@ export default function QuotaCard({
     if (response === undefined) {
       const msg = query.error?.message || ERROR_MESSAGES.unknown;
       return (
-        <div className={styles.errorBanner}>
+        <div className={errorBanner}>
           <span>{msg}</span>
           <Button variant="secondary" onClick={onRefresh}>
             Retry
@@ -84,7 +81,7 @@ export default function QuotaCard({
           ? `Upstream vendor error (${response.error.upstream_status ?? '?'}).`
           : ERROR_MESSAGES[kind];
       return (
-        <div className={styles.errorBanner}>
+        <div className={errorBanner}>
           <span>{msg}</span>
         </div>
       );
@@ -192,22 +189,11 @@ export default function QuotaCard({
   }
 
   function renderFooter() {
-    if (response === undefined) {
-      return (
-        <div className={styles.footer}>
-          <span />
-          <Button variant="secondary" onClick={onRefresh} disabled={reset.status === 'loading'}>
-            Refresh
-          </Button>
-        </div>
-      );
-    }
-
-    const { fetched_at, stale_at } = response;
     return (
       <div className={styles.footer}>
         <span className={styles.footerMeta}>
-          Last checked {formatRelative(fetched_at)} · Next refresh {formatRelative(stale_at)}
+          {response &&
+            `Last checked ${formatRelative(response.fetched_at)} · Next refresh ${formatRelative(response.stale_at)}`}
         </span>
         <Button variant="secondary" onClick={onRefresh} disabled={reset.status === 'loading'}>
           Refresh

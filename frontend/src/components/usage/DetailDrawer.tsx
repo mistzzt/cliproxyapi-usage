@@ -1,20 +1,23 @@
 import { useEffect, useMemo } from 'react';
 import b from '@/components/ui/Busy.module.scss';
+import Button from '@/components/ui/Button';
+import FailureBanner from '@/components/ui/FailureBanner';
 import Loaded from '@/components/ui/Loaded';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { useUsage } from '@/hooks/useUsageQueries';
 import type { BreakdownResponse, Dimension, Totals } from '@/types/api';
-import { displayName, DIMENSION_LABEL, DRAWER_DIMENSIONS, type EntityLookup } from '@/utils/usage/entities';
+import { DIMENSION_LABEL, DRAWER_DIMENSIONS, type EntityLookup } from '@/utils/usage/entities';
 import { type Change, change, fmtCompact, fmtPct } from '@/utils/usage/format';
 import { breakdownKey, summaryKey, type ResolvedWindow } from '@/utils/usage/queryKeys';
-import { metricSeries, metricValue } from '@/utils/usage/richRows';
-import { stackLayers } from '@/utils/usage/stack';
+import { shareItems } from '@/utils/usage/share';
+import { breakdownChart } from '@/utils/usage/stack';
 import { failureRate, fmtSpend, tokens } from '@/utils/usage/totals';
 import { scopeToEntity, type DrawerTarget, type Metric, type ViewState } from '@/utils/usage/viewState';
 import ChangeBadge from './ChangeBadge';
 import { StatTile } from './KpiStrip';
-import ShareBar, { type ShareItem } from './ShareBar';
+import ShareBar from './ShareBar';
 import TimeChart from './TimeChart';
+import shared from './Shared.module.scss';
 import s from './DetailDrawer.module.scss';
 
 const share = (part: number | null, whole: number | null | undefined) => (whole ? (part ?? 0) / whole : 0);
@@ -54,22 +57,13 @@ export default function DetailDrawer({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const chart = useMemo(() => {
-    if (!split.data) return undefined;
-    const d = split.data;
-    const layers = stackLayers(
-      d.rows.map((r) => ({
-        key: r.key,
-        label: displayName(splitDim, r.label),
-        slot: lookup.entity(splitDim, r.key).slot,
-        values: metricSeries(r.trend, metric),
-      })),
-      d.buckets.length,
-    ).map((l) => ({ label: l.label, color: lookup.slotColor(l.slot), values: l.values }));
-    return { buckets: d.buckets.map((b) => Date.parse(b)), bucket: d.bucket, layers };
-  }, [split.data, splitDim, metric, lookup]);
-
-  const error = (summary.error ?? split.error ?? other.error)?.message;
+  const chart = useMemo(() => split.data && breakdownChart(split.data, metric, lookup), [split.data, metric, lookup]);
+  const failures = [
+    ['Summary', summary.error],
+    [`By ${DIMENSION_LABEL[splitDim].toLowerCase()}`, split.error],
+    [`By ${DIMENSION_LABEL[otherDim].toLowerCase()}`, other.error],
+  ] as const;
+  const anyFailed = failures.some(([, e]) => e !== null);
   const busy = summary.isFetching || split.isFetching || other.isFetching;
   const cur = summary.isError ? undefined : summary.data?.current;
   const prev = summary.data?.previous ?? null;
@@ -80,24 +74,24 @@ export default function DetailDrawer({
       <aside className={s.drawer} aria-label={`${DIMENSION_LABEL[dim]} details`}>
         <div className={s.head}>
           <div>
-            <div className={s.muted}>{DIMENSION_LABEL[dim]}</div>
+            <div className={shared.muted}>{DIMENSION_LABEL[dim]}</div>
             <h2 className={s.title} title={key}>
-              <i className={s.swatch} style={{ background: lookup.color(dim, key) }} />
+              <i className={shared.swatch} style={{ background: lookup.color(dim, key) }} />
               {entity.label}
             </h2>
           </div>
           <div className={s.actions}>
-            <button type="button" className={s.btnGhost} onClick={onFilter}>
+            <Button variant="secondary" onClick={onFilter}>
               Filter page to this
-            </button>
+            </Button>
             <button type="button" className={s.iconBtn} aria-label="Close" onClick={onClose}>
               ×
             </button>
           </div>
         </div>
-        {error && <div className={s.error}>{error}</div>}
+        <FailureBanner failures={failures} />
         {!cur ? (
-          !error && <LoadingSpinner />
+          !anyFailed && <LoadingSpinner />
         ) : (
           <div className={busy ? `${s.body} ${b.busy}` : s.body} aria-busy={busy}>
             <div className={s.tiles}>
@@ -153,7 +147,7 @@ export default function DetailDrawer({
 function Foot({ sub, change }: { sub: string; change: Change }) {
   return (
     <>
-      <span className={s.muted}>{sub}</span>
+      <span className={shared.muted}>{sub}</span>
       <ChangeBadge value={change} />
     </>
   );
@@ -170,20 +164,12 @@ function ShareSection({
   metric: Metric;
   lookup: EntityLookup;
 }) {
-  const items = useMemo<ShareItem[]>(
-    () =>
-      (query.data?.rows ?? []).map((r) => ({
-        key: r.key,
-        label: r.label,
-        value: metricValue(r.current, metric),
-        slot: lookup.entity(dim, r.key).slot,
-      })),
-    [query.data, dim, metric, lookup],
-  );
   return (
     <>
       <h3 className={s.section}>By {DIMENSION_LABEL[dim].toLowerCase()}</h3>
-      <Loaded query={query}>{() => <ShareBar items={items} metric={metric} slotColor={lookup.slotColor} />}</Loaded>
+      <Loaded query={query}>
+        {(data) => <ShareBar items={shareItems(data, metric, lookup)} metric={metric} slotColor={lookup.slotColor} />}
+      </Loaded>
     </>
   );
 }

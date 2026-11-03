@@ -3,7 +3,7 @@
 from collections import Counter
 from datetime import date, timedelta
 
-from conftest import ApiCall, ApiLog
+from conftest import ApiCall, ApiLog, wait_until
 from playwright.sync_api import Locator, Page, Route, expect
 
 PANELS = Counter(
@@ -150,11 +150,7 @@ def test_slow_panels_keep_previous_rows_until_their_response(
     held: list[Route] = []
     page.route("**/api/usage/**", lambda route: held.append(route))
     pick_range(page, "Last 30 days", "Last 7 days")
-    for _ in range(100):
-        if len(held) == len(PANELS):
-            break
-        page.wait_for_timeout(50)
-    assert len(held) == len(PANELS)
+    wait_until(page, lambda: len(held) == len(PANELS))
 
     tables = [people(page), heatmap(page), tab_panel(page)]
     shown = [*tables, kpis(page)]

@@ -40,33 +40,11 @@
   word-break: break-all;
 }
 
-.swatch {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-}
-
 .actions {
   display: flex;
   align-items: center;
   gap: $space-2;
   flex: none;
-}
-
-.btnGhost {
-  padding: 6px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: none;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--color-text-muted);
-  }
 }
 
 .iconBtn {
@@ -116,15 +94,3 @@
   font-variant-numeric: tabular-nums;
 }
 
-.muted {
-  color: var(--color-text-muted);
-}
-
-.error {
-  padding: $space-3;
-  border: 1px solid var(--color-error);
-  border-radius: $radius-md;
-  background: var(--color-error-surface);
-  color: var(--color-error);
-  font-size: 13px;
-}

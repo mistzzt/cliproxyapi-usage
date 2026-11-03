@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 
-export type ResolvedTheme = 'light' | 'dark';
+import type { Theme } from '@/utils/usage/palette';
 
 interface ThemeState {
-  theme: ResolvedTheme;
+  theme: Theme;
   toggle: () => void;
 }
 
@@ -13,7 +13,7 @@ const STORAGE_KEY = 'cliproxy-theme';
 export const useThemeStore = create<ThemeState>((set, get) => ({
   theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   toggle(): void {
-    const next: ResolvedTheme = get().theme === 'dark' ? 'light' : 'dark';
+    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     try {
       sessionStorage.setItem(STORAGE_KEY, next);

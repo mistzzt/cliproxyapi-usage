@@ -1,8 +1,7 @@
 // Entity lookup by dimension (labels and color slots from the options endpoint) and dimension pairings (pure).
-import type { Entity, OptionsResponse } from '@/types/api';
+import type { Dimension, Entity, OptionsResponse } from '@/types/api';
 import { shortModel } from './modelNames';
-import { ACCENT_COLOR, OTHER_COLOR, slotColor, type Theme } from './palette';
-import type { Dimension } from './viewState';
+import { ACCENT_COLOR, slotColor, type Theme } from './palette';
 
 export type EntityIndex = Record<Dimension, ReadonlyMap<string, Entity>>;
 
@@ -28,8 +27,8 @@ export function indexOptions(options: OptionsResponse | null): EntityIndex {
 }
 
 /** Unknown keys (e.g. first seen after options loaded) fall back to the key with no slot. */
-export function entityOf(index: EntityIndex, dim: Dimension, key: string, label = key): Entity {
-  return index[dim].get(key) ?? { key, label, slot: null };
+export function entityOf(index: EntityIndex, dim: Dimension, key: string): Entity {
+  return index[dim].get(key) ?? { key, label: key, slot: null };
 }
 
 /** Models read as short names (`opus-4.6`); people and credentials use their label as-is. */
@@ -40,7 +39,6 @@ export function displayName(dim: Dimension, label: string): string {
 /** Theme-bound entity lookup shared by the dashboard components. */
 export interface EntityLookup {
   theme: Theme;
-  other: string;
   accent: string;
   entity(dim: Dimension, key: string): Entity;
   color(dim: Dimension, key: string): string;
@@ -51,7 +49,6 @@ export function createLookup(options: OptionsResponse | null, theme: Theme): Ent
   const index = indexOptions(options);
   return {
     theme,
-    other: OTHER_COLOR[theme],
     accent: ACCENT_COLOR[theme],
     entity: (dim, key) => entityOf(index, dim, key),
     color: (dim, key) => slotColor(entityOf(index, dim, key).slot, theme),
