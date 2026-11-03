@@ -40,7 +40,6 @@ class TestQuotaResponse:
                     auth_name="test-auth",
                     plan_type="free",
                     windows=[],
-                    extra={},
                 ),
                 error=QuotaError(
                     kind="transient",
@@ -60,7 +59,6 @@ class TestQuotaResponse:
                 auth_name="test-auth",
                 plan_type="free",
                 windows=[],
-                extra={},
             ),
             error=None,
             fetched_at=now,
@@ -186,20 +184,6 @@ class TestQuotaAccountsResponse:
             ]
         )
         assert len(response.accounts) == 2
-
-
-class TestProviderQuotaExtraDefault:
-    """Tests for ProviderQuota extra field default."""
-
-    def test_extra_defaults_to_empty_dict(self) -> None:
-        """ProviderQuota.extra defaults to empty dict when not provided."""
-        quota = ProviderQuota(
-            provider="claude",
-            auth_name="test-auth",
-            plan_type="pro",
-            windows=[],
-        )
-        assert quota.extra == {}
 
 
 def test_shared_manual_reset_response_fixture_validates() -> None:

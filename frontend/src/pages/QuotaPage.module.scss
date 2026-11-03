@@ -1,15 +1,7 @@
 @use '../styles/tokens' as *;
 
 .page {
-  min-height: 100vh;
-  background: var(--color-bg);
-  color: var(--color-text);
-  padding: $space-5;
-  box-sizing: border-box;
-
-  @media (max-width: 768px) {
-    padding: $space-4;
-  }
+  padding: 0 var(--page-gutter) var(--page-gutter);
 }
 
 .header {
@@ -28,22 +20,7 @@
 }
 
 .banner {
-  padding: $space-3 $space-5;
-  border-radius: $radius-md;
-  font-size: 14px;
   margin-bottom: $space-5;
-}
-
-.bannerError {
-  background: var(--color-error-surface);
-  border: 1px solid var(--color-error);
-  color: var(--color-error);
-}
-
-.bannerInfo {
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  color: var(--color-text-muted);
 }
 
 .providers {

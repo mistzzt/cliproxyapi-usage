@@ -38,9 +38,11 @@ class TtlCache[K, V]:
         key: K,
         fetch: Callable[[], Awaitable[V]],
         *,
-        ttl: float,
+        ttl: Callable[[V], float],
     ) -> V:
         """Return the cached value for *key*, fetching it if missing or stale.
+
+        A fetched value stays fresh for ``ttl(value)`` seconds.
 
         Concurrent callers for the same key share a single in-flight fetch;
         only one coroutine runs *fetch* at a time per key.
@@ -87,7 +89,7 @@ class TtlCache[K, V]:
 
         async with self._lock:
             if self._generations.get(key, 0) == generation:
-                self._store[key] = _Entry(value=value, stale_at=self._clock() + ttl)
+                self._store[key] = _Entry(value, stale_at=self._clock() + ttl(value))
             if self._in_flight.get(key) is fut:
                 self._in_flight.pop(key, None)
 

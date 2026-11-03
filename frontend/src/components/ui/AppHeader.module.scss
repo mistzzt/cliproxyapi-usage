@@ -1,10 +1,14 @@
 @use '../../styles/tokens' as *;
 
+.header {
+  padding: var(--page-gutter) var(--page-gutter) 0;
+  margin-bottom: $space-5;
+}
+
 .nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: $space-5;
   border-bottom: 1px solid var(--color-border);
   padding-bottom: $space-3;
 }

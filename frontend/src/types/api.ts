@@ -1,131 +1,96 @@
-/**
- * The user's time-range *selection*. Resolved into concrete UTC instants by
- * `resolveRange` (src/utils/rangeResolver.ts) before being sent to the API.
- */
-export type RangeSpec =
-  | { kind: 'rolling'; preset: '7h' | '24h' }
-  | { kind: 'all' }
-  // `anchor` is a local calendar date (YYYY-MM-DD) somewhere inside the period.
-  | { kind: 'calendar'; unit: 'day' | 'week' | 'month'; anchor: string }
-  // `startDate`/`endDate` are local calendar dates (YYYY-MM-DD), inclusive.
-  | { kind: 'custom'; startDate: string; endDate: string };
+// Usage DTOs, hand-mirrored from src/cliproxy_usage_server/schemas.py.
 
-export type Bucket = 'hour' | 'day';
-export type Metric = 'requests' | 'tokens' | 'cost';
-
+export type Dimension = 'person' | 'model' | 'credential';
+export type Bucket = 'hour' | 'day' | 'week';
 export type CostStatus = 'live' | 'partial_missing' | 'missing';
 
 export interface Totals {
   requests: number;
-  tokens: number;
-  cost: number | null;
-  cost_status: CostStatus;
-  rpm: number;
-  tpm: number;
-}
-
-export interface SparklinePoint {
-  ts: string;
-  value: number;
-}
-
-export interface Sparklines {
-  requests: SparklinePoint[];
-  tokens: SparklinePoint[];
-  rpm: SparklinePoint[];
-  tpm: SparklinePoint[];
-  cost: SparklinePoint[];
-}
-
-export interface OverviewResponse {
-  totals: Totals;
-  sparklines: Sparklines;
-}
-
-export interface TimeseriesResponse {
-  /** Effective bucket used by the server (may be coarsened hour -> day). */
-  bucket: Bucket;
-  buckets: string[];
-  series: Record<string, number[]>;
-  series_status: Record<string, CostStatus>;
-}
-
-export interface TokenBreakdownResponse {
-  /** Effective bucket used by the server (may be coarsened hour -> day). */
-  bucket: Bucket;
-  buckets: string[];
-  input: number[];
-  output: number[];
-  cached: number[];
-  reasoning: number[];
-}
-
-export interface ApiStat {
-  api_key: string;
-  requests: number;
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  cost: number | null;
-  cost_status: CostStatus;
   failed: number;
-  avg_latency_ms: number;
-}
-
-export interface ModelStat {
-  model: string;
-  requests: number;
   input_tokens: number;
   output_tokens: number;
   cached_tokens: number;
   reasoning_tokens: number;
-  total_tokens: number;
   cost: number | null;
   cost_status: CostStatus;
   avg_latency_ms: number;
-  failed: number;
+  last_used: string | null; // ISO-8601
 }
 
-export interface CredentialStat {
-  source: string;
-  requests: number;
-  total_tokens: number;
-  failed: number;
+/** Raw token components; derived "tokens" lives in `utils/usage/totals.ts`. */
+export type TokenPart = 'input_tokens' | 'output_tokens' | 'cached_tokens';
+
+export interface SummaryResponse {
+  /** Effective bucket after auto selection or coarsening. */
+  bucket: Bucket;
+  buckets: string[]; // ISO-8601 bucket starts, dense
+  current: Totals;
+  /** Null when the window has no start (all time). */
+  previous: Totals | null;
+  series: Record<'cost' | TokenPart | 'requests', number[]>;
+}
+
+export interface MixEntry {
+  key: string;
+  label: string;
   cost: number | null;
-  cost_status: CostStatus;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
 }
 
-export interface LatencyPercentiles {
-  p50: number;
-  p95: number;
-  p99: number;
+/** USD per 1M tokens of each type. */
+export interface UnitPrices {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
 }
 
-export interface HealthResponse {
-  total_requests: number;
-  failed: number;
-  failed_rate: number;
-  latency: LatencyPercentiles;
+/** Rates past `threshold` tokens, for the whole request or each type's excess. */
+export interface LongContextPrice extends UnitPrices {
+  threshold: number;
+  whole_request: boolean;
 }
 
-export interface ModelsResponse {
-  models: string[];
+/** The rates cost is computed with (base tier, no speed multiplier). */
+export interface ModelPrice extends UnitPrices {
+  long_context: LongContextPrice | null;
+  /** OpenAI accounting: cached tokens are a subset of input. */
+  cached_in_input: boolean;
 }
 
-export interface ApiKeysResponse {
-  api_keys: string[];
+export interface BreakdownRow {
+  key: string;
+  label: string;
+  current: Totals;
+  previous: Totals | null;
+  /** Aligned with the response buckets. */
+  trend: Record<'cost' | TokenPart, number[]>;
+  /** Paired dimension: person -> model, model and credential -> person. */
+  mix: MixEntry[];
+  /** Model rows only; null when unpriced or not a model row. */
+  price: ModelPrice | null;
 }
 
-export interface PricingEntry {
-  input: number | null;
-  output: number | null;
-  cache_read: number | null;
-  cache_creation: number | null;
-  tiered: boolean;
+export interface BreakdownResponse {
+  dim: Dimension;
+  bucket: Bucket;
+  buckets: string[];
+  rows: BreakdownRow[];
 }
 
-export interface PricingResponse {
-  pricing: Record<string, PricingEntry>;
+export interface Entity {
+  key: string;
+  label: string;
+  /** Color slot 0..6 by all-time spend; null folds into Other. */
+  slot: number | null;
+}
+
+export interface OptionsResponse {
+  people: Entity[];
+  models: Entity[];
+  credentials: Entity[];
 }
 
 export type QuotaProvider = 'claude' | 'codex';
@@ -149,7 +114,6 @@ export interface QuotaWindow {
 
 export interface ManualResetCredit {
   id: string;
-  granted_at: string | null; // ISO-8601
   expires_at: string; // ISO-8601
 }
 
@@ -166,7 +130,6 @@ export interface ProviderQuota {
   plan_type: string | null;
   windows: QuotaWindow[];
   manual_resets: ManualResetSummary | null;
-  extra: Record<string, unknown>;
 }
 
 export type QuotaErrorKind = 'auth' | 'rate_limited' | 'upstream' | 'schema' | 'transient';

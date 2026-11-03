@@ -10,16 +10,15 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 
 import uvicorn
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from cliproxy_usage_server.config import ServerConfig, load_config
+from cliproxy_usage_server.config import ServerConfig, load_config, load_key_aliases
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
 from cliproxy_usage_server.quota.client import CliProxyClient
 from cliproxy_usage_server.quota.providers import PROVIDERS
 from cliproxy_usage_server.quota.service import QuotaService
-from cliproxy_usage_server.routes.pricing import build_router as build_pricing_router
 from cliproxy_usage_server.routes.quota import build_router as build_quota_router
 from cliproxy_usage_server.routes.usage import build_router as build_usage_router
 
@@ -51,11 +50,6 @@ async def _refresh_loop(app: FastAPI, config: ServerConfig) -> None:
             )
         except Exception as exc:
             _log.warning("Failed to refresh pricing: %s", exc)
-
-
-def _default_pricing_provider() -> dict[str, ModelPricing]:
-    """Placeholder; replaced by monkeypatch in tests that call run()."""
-    return {}  # pragma: no cover
 
 
 def _default_quota_service_factory(config: ServerConfig) -> QuotaService:
@@ -144,6 +138,8 @@ def create_app(
         factory = quota_service_factory or _default_quota_service_factory
         service = factory(config)
 
+    aliases = load_key_aliases(config.key_aliases)
+
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if pricing_provider is not None:
@@ -175,8 +171,7 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(_api, prefix=api_prefix)
-    app.include_router(build_usage_router(config.db_path), prefix=api_prefix)
-    app.include_router(build_pricing_router(), prefix=api_prefix)
+    app.include_router(build_usage_router(config.db_path, aliases), prefix=api_prefix)
 
     @app.get(_prefixed(config.base_path, "/usage-config.js"), include_in_schema=False)
     async def _runtime_config() -> Response:
@@ -216,6 +211,8 @@ def create_app(
             maps to one; otherwise render the SPA shell so client-side routes
             resolve. Deep routes request root files relative to the route, so
             fall back to matching by basename."""
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404)
             for candidate in (full_path, Path(full_path).name):
                 if not candidate or candidate == "index.html":
                     continue

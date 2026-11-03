@@ -1,0 +1,34 @@
+import { expect, test } from 'bun:test';
+import type { Totals } from '@/types/api';
+import { buildRichRows, sortRichRows, type RichRowInput } from './richRows';
+
+function row(key: string, cost: number, output_tokens: number): RichRowInput {
+  const current: Totals = {
+    requests: 1,
+    failed: 0,
+    input_tokens: 0,
+    output_tokens,
+    cached_tokens: 0,
+    reasoning_tokens: 0,
+    cost,
+    cost_status: 'live',
+    avg_latency_ms: 0,
+    last_used: null,
+  };
+  const trend = { cost: [cost], input_tokens: [0], output_tokens: [output_tokens], cached_tokens: [0] };
+  return { key, label: key, current, previous: null, trend, mix: [], price: null };
+}
+
+test('rows take share from the active metric and sort by it', () => {
+  const inputs = [row('alice', 1, 30), row('bob', 3, 10)];
+  const sorted = (metric: 'cost' | 'tokens') =>
+    sortRichRows(buildRichRows(inputs, 'person', metric), { key: 'share', desc: true }).map((r) => [r.key, r.share]);
+  expect(sorted('cost')).toEqual([
+    ['bob', 0.75],
+    ['alice', 0.25],
+  ]);
+  expect(sorted('tokens')).toEqual([
+    ['alice', 0.75],
+    ['bob', 0.25],
+  ]);
+});

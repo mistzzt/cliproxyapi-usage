@@ -1,0 +1,12 @@
+// Small pieces of text and color styling shared by the usage components.
+.muted {
+  color: var(--color-text-muted);
+}
+
+// A color legend square; the component sets its background.
+.swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}

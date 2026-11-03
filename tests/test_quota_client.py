@@ -190,3 +190,52 @@ def test_api_call_parses_body_string_as_json_when_possible() -> None:
 def test_init_requires_base_url_and_key() -> None:
     with pytest.raises(QuotaConfigError):
         CliProxyClient(base_url="", management_key="x")
+
+
+def test_origin_base_url_reaches_the_management_api() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"files": []})
+
+    async def run() -> None:
+        client = CliProxyClient(
+            "http://test.local/", _KEY, http_client=_make_async_client(handler)
+        )
+        await client.list_auth_files()
+
+    asyncio.run(run())
+    assert seen == ["http://test.local/v0/management/auth-files"]
+
+
+@pytest.mark.parametrize(
+    "respond",
+    [
+        lambda: (_ for _ in ()).throw(httpx.ConnectError("refused")),
+        lambda: httpx.Response(200, text="<html>not json</html>"),
+        lambda: httpx.Response(200, json={"unexpected": True}),
+    ],
+    ids=["unreachable", "not-json", "wrong-shape"],
+)
+def test_unusable_management_responses_raise_upstream_error(respond: Any) -> None:
+    async def run() -> None:
+        client = CliProxyClient(
+            _BASE_URL, _KEY, http_client=_make_async_client(lambda _: respond())
+        )
+        with pytest.raises(QuotaUpstreamError):
+            await client.list_auth_files()
+        with pytest.raises(QuotaUpstreamError):
+            await client.api_call({"method": "GET"})
+
+    asyncio.run(run())
+
+
+def test_malformed_base_url_raises_upstream_error() -> None:
+    async def run() -> None:
+        client = CliProxyClient("http://:abc", _KEY)
+        with pytest.raises(QuotaUpstreamError):
+            await client.list_auth_files()
+        await client.aclose()
+
+    asyncio.run(run())

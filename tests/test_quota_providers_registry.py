@@ -9,6 +9,5 @@ def test_registry_contains_claude_and_codex():
 
 
 def test_every_registered_entry_implements_protocol():
-    for key, provider in PROVIDERS.items():
+    for provider in PROVIDERS.values():
         assert isinstance(provider, Provider)
-        assert provider.provider_id == key

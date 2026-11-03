@@ -1,14 +1,11 @@
-// Resolve the theme-driven Chart.js palette from CSS custom properties on
-// <html>. Must be called inside a memo keyed on the current theme so it
-// recomputes when the user toggles. Returns already-trimmed strings safe to
-// pass straight to Chart.js options.
+// Chart.js colors read from the theme's CSS custom properties on <html>.
+// Call it in a memo keyed on the theme, so a toggle reads them again.
 export interface ChartThemeColors {
   grid: string;
   tick: string;
   surface: string;
   text: string;
-  // --color-text-muted doubles as tooltip border so the tooltip reads clearly
-  // against the page background (--color-border is too faint for that role).
+  // The muted text color: --color-border is too faint to outline a tooltip.
   tooltipBorder: string;
 }
 
@@ -24,22 +21,10 @@ export function readThemeColors(): ChartThemeColors {
   };
 }
 
-// Fully theme-wired Chart.js tooltip config. Spread into
-// `options.plugins.tooltip` so the three chart files stay in lock-step.
-export interface ChartTooltipConfig {
-  enabled: true;
-  backgroundColor: string;
-  titleColor: string;
-  bodyColor: string;
-  borderColor: string;
-  borderWidth: 1;
-  padding: 10;
-  cornerRadius: 6;
-}
-
-export function buildTooltipConfig(colors: ChartThemeColors): ChartTooltipConfig {
+/** Theme-colored Chart.js tooltip options; spread into `options.plugins.tooltip`. */
+export function buildTooltipConfig(colors: ChartThemeColors) {
   return {
-    enabled: true,
+    enabled: true as const,
     backgroundColor: colors.surface,
     titleColor: colors.text,
     bodyColor: colors.text,

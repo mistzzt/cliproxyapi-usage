@@ -32,6 +32,10 @@ dev = [
     "ruff>=0.15.11",
 ]
 
+[tool.pytest.ini_options]
+# e2e/ runs only under the flake dev shell's Python; see AGENTS.md.
+testpaths = ["tests"]
+
 [tool.ruff]
 target-version = "py314"
 line-length = 88

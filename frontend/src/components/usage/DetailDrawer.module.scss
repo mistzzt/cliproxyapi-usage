@@ -1,0 +1,96 @@
+@use '../../styles/tokens' as *;
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--color-overlay);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+  width: min(560px, 100vw);
+  padding: $space-5;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $space-3;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  font-size: 20px;
+  word-break: break-all;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  flex: none;
+}
+
+.iconBtn {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-text);
+    background: var(--color-accent-hover);
+  }
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $space-3;
+}
+
+.tile {
+  padding: $space-3;
+  border: 1px solid var(--color-border);
+  border-radius: $radius-md;
+}
+
+.section {
+  margin: $space-3 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tokenMix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-4;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+

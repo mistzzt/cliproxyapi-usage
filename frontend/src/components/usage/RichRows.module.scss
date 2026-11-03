@@ -1,0 +1,158 @@
+@use '../../styles/tokens' as *;
+
+.wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th,
+  td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  th {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.sortBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.clickRow {
+  cursor: pointer;
+
+  &:hover td {
+    background: var(--color-accent-hover);
+  }
+}
+
+.nameCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.shareCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  b {
+    min-width: 36px;
+    font-weight: 600;
+  }
+}
+
+.shareTrack {
+  display: inline-block;
+  width: 90px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--color-border);
+}
+
+.shareFill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.trendHead {
+  width: 200px;
+  min-width: 200px;
+
+  b {
+    color: var(--color-text);
+    font-weight: 600;
+  }
+}
+
+.table .trendCell {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+
+.caption,
+.mixCaption {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.caption {
+  height: 14px;
+}
+
+.mixCaption {
+  margin-top: 3px;
+}
+
+.mini {
+  display: block;
+}
+
+.miniBase {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.miniHover {
+  fill: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.mixBar {
+  display: flex;
+  gap: 2px;
+  width: 200px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 3px;
+
+  span {
+    flex-basis: 0;
+    min-width: 2px;
+  }
+}
+
+.table .failHigh {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.tieredTag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  vertical-align: 1px;
+}

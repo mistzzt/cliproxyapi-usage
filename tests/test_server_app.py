@@ -170,6 +170,7 @@ def test_prefixed_spa_and_assets_use_configured_base_path(
         asset = client.get("/api-usage/assets/app.js")
         unprefixed_shell = client.get("/limits")
         unprefixed_asset = client.get("/assets/app.js")
+        unknown_api = client.get("/api-usage/api/overview")
 
     assert redirect.status_code == 307
     assert redirect.headers["location"] == "/api-usage/"
@@ -181,6 +182,7 @@ def test_prefixed_spa_and_assets_use_configured_base_path(
     assert asset.text == "console.log('ok')"
     assert unprefixed_shell.status_code == 404
     assert unprefixed_asset.status_code == 404
+    assert unknown_api.status_code == 404
 
 
 def test_root_level_static_files_served(
@@ -204,6 +206,7 @@ def test_root_level_static_files_served(
         nested_favicon = client.get("/limits/favicon.svg")
         shell = client.get("/limits")
         traversal = client.get("/../etc/passwd")
+        unknown_api = client.get("/api/overview")
 
     assert favicon.status_code == 200
     assert favicon.text == "<svg/>"
@@ -214,6 +217,8 @@ def test_root_level_static_files_served(
     assert shell.text == "<html>usage app</html>"
     # Path traversal is not served as a file; it falls back to the shell.
     assert traversal.text == "<html>usage app</html>"
+    # Unknown API paths 404 instead of rendering the shell.
+    assert unknown_api.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +244,6 @@ def test_run_invokes_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
     import cliproxy_usage_server.main as main_mod
 
     monkeypatch.setattr(main_mod.uvicorn, "run", mock_uvicorn_run)
-
-    monkeypatch.setattr(main_mod, "_default_pricing_provider", lambda: {})
 
     from cliproxy_usage_server.main import run
 

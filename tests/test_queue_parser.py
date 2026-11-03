@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import copy
 from collections.abc import Iterator
 from typing import Any
 
@@ -34,13 +34,13 @@ VALID_PAYLOAD: dict[str, Any] = {
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
-    payload = json.loads(json.dumps(VALID_PAYLOAD))
+    payload = copy.deepcopy(VALID_PAYLOAD)
     payload.update(overrides)
     return payload
 
 
 def _record_from(payload: dict[str, Any]) -> RequestRecord:
-    return next(iter_records([json.dumps(payload)]))
+    return next(iter_records([payload]))
 
 
 def test_valid_single_queue_json_object_maps_to_request_record():
@@ -62,25 +62,11 @@ def test_valid_single_queue_json_object_maps_to_request_record():
     )
 
 
-def test_valid_queue_json_bytes_map_to_request_record():
-    record = next(iter_records([json.dumps(VALID_PAYLOAD).encode()]))
-
-    assert record.api_key == "sk-test"
-    assert record.model == "gpt-5.4"
-    assert record.total_tokens == 163
-
-
 def test_iter_records_returns_iterator_not_list():
-    result = iter_records([json.dumps(VALID_PAYLOAD)])
+    result = iter_records([VALID_PAYLOAD])
 
     assert isinstance(result, Iterator)
     assert not isinstance(result, list)
-
-
-@pytest.mark.parametrize("queue_element", ["{", b"{"])
-def test_invalid_json_string_and_bytes_raise_schema_error(queue_element: str | bytes):
-    with pytest.raises(SchemaError):
-        list(iter_records([queue_element]))
 
 
 @pytest.mark.parametrize(
@@ -101,7 +87,7 @@ def test_missing_required_top_level_fields_raise_schema_error(field: str):
     del payload[field]
 
     with pytest.raises(SchemaError):
-        list(iter_records([json.dumps(payload)]))
+        list(iter_records([payload]))
 
 
 @pytest.mark.parametrize(
@@ -119,7 +105,7 @@ def test_missing_token_fields_raise_schema_error(field: str):
     del payload["tokens"][field]
 
     with pytest.raises(SchemaError):
-        list(iter_records([json.dumps(payload)]))
+        list(iter_records([payload]))
 
 
 @pytest.mark.parametrize(
@@ -133,7 +119,7 @@ def test_wrong_top_level_types_raise_schema_error(field: str, value: Any):
     payload = _payload(**{field: value})
 
     with pytest.raises(SchemaError):
-        list(iter_records([json.dumps(payload)]))
+        list(iter_records([payload]))
 
 
 def test_wrong_token_type_raises_schema_error():
@@ -141,14 +127,14 @@ def test_wrong_token_type_raises_schema_error():
     payload["tokens"]["total_tokens"] = "163"
 
     with pytest.raises(SchemaError):
-        list(iter_records([json.dumps(payload)]))
+        list(iter_records([payload]))
 
 
 def test_schema_error_identifies_batch_element_index():
     bad_payload = _payload(latency_ms="1234")
 
     with pytest.raises(SchemaError, match="Queue element 1 failed validation"):
-        list(iter_records([json.dumps(VALID_PAYLOAD), json.dumps(bad_payload)]))
+        list(iter_records([VALID_PAYLOAD, bad_payload]))
 
 
 def test_unstored_queue_fields_are_accepted_but_ignored():
@@ -189,31 +175,3 @@ def test_unstored_queue_fields_are_accepted_but_ignored():
         "total_tokens",
         "failed",
     }
-
-
-def test_old_nested_usage_export_shape_raises_schema_error():
-    old_export = {
-        "usage": {
-            "apis": {
-                "sk-test": {
-                    "models": {
-                        "gpt-5.4": {
-                            "details": [
-                                {
-                                    "timestamp": "2026-05-04T12:34:56.789Z",
-                                    "source": "codex-user@example.com",
-                                    "auth_index": "auth-1",
-                                    "latency_ms": 1234,
-                                    "failed": False,
-                                    "tokens": VALID_PAYLOAD["tokens"],
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    with pytest.raises(SchemaError):
-        list(iter_records([json.dumps(old_export)]))

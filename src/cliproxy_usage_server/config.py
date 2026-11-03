@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, ValidationError, field_validator
+from pydantic import AliasChoices, Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cliproxy_usage_collect.config import ConfigError, load_settings
+
+_log = logging.getLogger(__name__)
+
 LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
-
-
-class ConfigError(Exception):
-    """Raised when required configuration is missing or invalid."""
 
 
 class ServerConfig(BaseSettings):
@@ -63,6 +65,10 @@ class ServerConfig(BaseSettings):
             "cliproxy_management_key", "CLIPROXY_MANAGEMENT_KEY"
         ),
     )
+    key_aliases: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("key_aliases", "USAGE_KEY_ALIASES"),
+    )
     quota_cache_ttl_seconds: int = Field(
         default=300,
         validation_alias=AliasChoices(
@@ -86,38 +92,29 @@ class ServerConfig(BaseSettings):
 
 
 def load_config() -> ServerConfig:
-    """Load configuration from environment variables.
+    """Load the server's configuration from environment variables."""
+    return load_settings(ServerConfig)
 
-    Raises ConfigError, with env-var names in the message, if required
-    variables are missing or values are invalid.
+
+_ALIASES_ADAPTER = TypeAdapter(dict[str, str])
+
+
+def load_key_aliases(path: Path | None) -> dict[str, str]:
+    """Load the redacted-key to display-name map from the ``USAGE_KEY_ALIASES`` file.
+
+    An unset or absent file yields an empty map; malformed content raises ConfigError.
     """
+    if path is None:
+        return {}
     try:
-        return ServerConfig()  # pyright: ignore[reportCallIssue]  # fields come from env
-    except ValidationError as exc:
-        errors = exc.errors()
-        missing = [
-            _env_name(str(err["loc"][0]))
-            for err in errors
-            if err.get("type") == "missing"
-        ]
-        if missing:
-            raise ConfigError(
-                f"Missing required environment variable: {', '.join(missing)}"
-            ) from exc
-        # Handle other validation errors (e.g. int_parsing for bad port)
-        invalid = [_env_name(str(err["loc"][0])) for err in errors if err.get("loc")]
-        if invalid:
-            raise ConfigError(
-                f"Invalid value for environment variable: {', '.join(invalid)}"
-            ) from exc
-        raise ConfigError(str(exc)) from exc
-
-
-def _env_name(field_name: str) -> str:
-    """Return the env-var alias for a ServerConfig field, falling back to field name."""
-    field = ServerConfig.model_fields.get(field_name)
-    if field is not None and isinstance(field.validation_alias, AliasChoices):
-        for choice in field.validation_alias.choices:
-            if isinstance(choice, str) and choice.isupper():
-                return choice
-    return field_name
+        raw = path.read_text()
+    except FileNotFoundError:
+        _log.warning("USAGE_KEY_ALIASES file %s not found; using redacted keys", path)
+        return {}
+    try:
+        return _ALIASES_ADAPTER.validate_python(json.loads(raw))
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ConfigError(
+            "Invalid value for environment variable: USAGE_KEY_ALIASES "
+            f"({path} must hold a JSON object of string to string)"
+        ) from exc

@@ -1,0 +1,64 @@
+@use '../../styles/tokens' as *;
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+}
+
+.bar {
+  display: flex;
+  gap: 2px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.compact {
+  height: 12px;
+}
+
+.segment {
+  flex-basis: 0;
+  min-width: 2px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:enabled {
+    filter: brightness(1.08);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-1 $space-4;
+  font-size: 12px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  i {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+}
+
+.legendName {
+  color: var(--color-text);
+}
+

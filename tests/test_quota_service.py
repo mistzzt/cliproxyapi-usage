@@ -37,8 +37,10 @@ class FakeCliProxyClient:
         self._api_call_response = api_call_response
         self._api_call_side_effect = api_call_side_effect
         self.api_call_count = 0
+        self.list_count = 0
 
     async def list_auth_files(self) -> list[AuthFileEntry]:
+        self.list_count += 1
         return self._auth_files
 
     async def api_call(self, payload: Mapping[str, object]) -> ApiCallResponse:
@@ -608,5 +610,37 @@ def test_codex_without_any_reset_count_keeps_manual_resets_none() -> None:
 
         assert result.quota is not None
         assert result.quota.manual_resets is None
+
+    asyncio.run(run())
+
+
+def test_auth_files_are_listed_once_per_ttl(
+    claude_api_call_fixture: dict[str, Any],
+) -> None:
+    async def run() -> None:
+        fake = FakeCliProxyClient(
+            auth_files=_KNOWN_AUTH_FILES,
+            api_call_response=_claude_200_response(claude_api_call_fixture),
+        )
+        service = _make_service(fake)
+        await service.list_accounts()
+        await service.get_quota("claude", "claude.json")
+        await service.get_quota("claude", "claude.json")
+        assert fake.list_count == 1
+
+    asyncio.run(run())
+
+
+def test_unreachable_proxy_is_a_transient_error_for_that_account() -> None:
+    async def run() -> None:
+        fake = FakeCliProxyClient(
+            auth_files=[AuthFileEntry(name="claude.json", type="claude")],
+            api_call_side_effect=QuotaUpstreamError("api-call request failed"),
+        )
+        result = await _make_service(fake).get_quota("claude", "claude.json")
+        assert result.quota is None
+        assert result.error is not None
+        assert result.error.kind == "transient"
+        assert result.error.upstream_status is None
 
     asyncio.run(run())

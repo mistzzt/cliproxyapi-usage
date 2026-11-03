@@ -1,0 +1,100 @@
+"""Per-request cost semantics ported from ccusage (cost.rs and the Codex adapter).
+
+Each case prices one request through the production query (``request_cost``)
+and compares it with a fixed, hand-checked dollar amount.
+
+TODO: check these cases against ccusage itself (e.g. run its Rust cost
+calculator on the same inputs) instead of hand-checked amounts.
+"""
+
+from __future__ import annotations
+
+import pytest
+from conftest import request_cost
+
+from cliproxy_usage_server.pricing import ModelPricing, cost_plan
+
+CLAUDE = ModelPricing(
+    litellm_provider="anthropic",
+    input_cost_per_token=3e-6,
+    output_cost_per_token=15e-6,
+    cache_read_input_token_cost=3e-7,
+    input_cost_per_token_above_200k_tokens=6e-6,
+    output_cost_per_token_above_200k_tokens=22.5e-6,
+    cache_read_input_token_cost_above_200k_tokens=6e-7,
+)
+GPT_LONG = ModelPricing(
+    litellm_provider="openai",
+    input_cost_per_token=5e-6,
+    output_cost_per_token=3e-5,
+    cache_read_input_token_cost=5e-7,
+    input_cost_per_token_above_272k_tokens=1e-5,
+    output_cost_per_token_above_272k_tokens=4.5e-5,
+    cache_read_input_token_cost_above_272k_tokens=1e-6,
+)
+
+
+def test_flat_rates() -> None:
+    p = ModelPricing(
+        input_cost_per_token=3e-6,
+        output_cost_per_token=15e-6,
+        cache_read_input_token_cost=3e-7,
+    )
+    assert request_cost(p, 1_000, 500, 200) == pytest.approx(0.01056)
+
+
+@pytest.mark.parametrize(
+    ("inp", "expected"),
+    [(200_000, 0.6), (200_001, 0.600006), (250_000, 0.9)],
+)
+def test_200k_tier_charges_only_the_excess(inp: int, expected: float) -> None:
+    assert request_cost(CLAUDE, inp, 0, 0) == pytest.approx(expected)
+
+
+def test_200k_tier_applies_per_token_type() -> None:
+    # 150k input + 150k cache read is 300k combined, but neither type crosses 200k.
+    assert request_cost(CLAUDE, 150_000, 1_000, 150_000) == pytest.approx(0.51)
+
+
+@pytest.mark.parametrize(("inp", "expected"), [(272_000, 0.97), (272_001, 1.91001)])
+def test_openai_long_context_bills_whole_request(inp: int, expected: float) -> None:
+    # Raw OpenAI input includes the 100k cached tokens; it alone picks the tier.
+    assert request_cost(GPT_LONG, inp, 2_000, 100_000) == pytest.approx(expected)
+
+
+def test_openai_cached_tokens_are_clamped_to_input() -> None:
+    # Cached beyond input is not billed: all 1k input tokens are cache reads.
+    assert request_cost(GPT_LONG, 1_000, 0, 5_000) == pytest.approx(0.0005)
+
+
+def test_openai_without_long_rates_is_flat() -> None:
+    p = ModelPricing(
+        litellm_provider="openai", input_cost_per_token=2e-6, output_cost_per_token=0
+    )
+    assert request_cost(p, 500_000, 0, 0) == pytest.approx(1.0)
+
+
+def test_272k_only_rates_switch_on_whole_context() -> None:
+    p = GPT_LONG.model_copy(update={"litellm_provider": "xai"})
+    plan = cost_plan(p)
+    assert (plan.switch, plan.threshold) == (True, 272_000)
+    # Non-OpenAI input excludes cache reads: 100k + 200k = 300k context bills long.
+    assert request_cost(p, 100_000, 1_000, 200_000) == pytest.approx(1.245)
+
+
+def test_missing_cache_rates_fall_back_like_ccusage() -> None:
+    claude = ModelPricing(
+        litellm_provider="anthropic", input_cost_per_token=1e-6, output_cost_per_token=0
+    )
+    assert request_cost(claude, 0, 0, 1_000) == pytest.approx(0.0001)
+    assert cost_plan(claude).base.cache_creation == pytest.approx(1.25e-6)
+
+    gpt = GPT_LONG.model_copy(update={"cache_read_input_token_cost": None})
+    assert request_cost(gpt, 1_000, 0, 1_000) == pytest.approx(0.005)
+    # Codex bills unpriced cache reads of long requests at the long input rate.
+    assert request_cost(gpt, 300_000, 0, 300_000) == pytest.approx(3.0)
+
+
+def test_missing_above_rate_falls_back_to_base() -> None:
+    p = CLAUDE.model_copy(update={"output_cost_per_token_above_200k_tokens": None})
+    assert request_cost(p, 0, 300_000, 0) == pytest.approx(4.5)
