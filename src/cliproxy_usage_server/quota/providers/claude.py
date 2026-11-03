@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import ClassVar, Literal
 
 from cliproxy_usage_server.quota.errors import QuotaSchemaError
 from cliproxy_usage_server.schemas import ProviderQuota, QuotaWindow
@@ -21,10 +20,7 @@ _WINDOW_LABELS: dict[str, str] = {
     "seven_day_fable": "7-day Fable 5",
 }
 
-_EXTRA_KEYS = {"extra_usage"}
 _FABLE_WINDOW_ID = "seven_day_fable"
-# Legacy top-level key that Anthropic used for the Fable window before limits[].
-_LEGACY_FABLE_KEY = "iguana_necktie"
 _FABLE_NAMES = {"fable", "fable 5"}
 
 
@@ -51,10 +47,14 @@ def _is_window_shape(value: object) -> bool:
 
 def _parse_window(key: str, value: dict[str, object]) -> QuotaWindow:
     resets_at_raw = value.get("resets_at")
-    if resets_at_raw is None:
-        resets_at: datetime | None = None
-    else:
-        resets_at = datetime.fromisoformat(str(resets_at_raw))
+    try:
+        resets_at = (
+            None
+            if resets_at_raw is None
+            else datetime.fromisoformat(str(resets_at_raw))
+        )
+    except ValueError as exc:
+        raise QuotaSchemaError(f"Bad resets_at for Claude window '{key}'") from exc
 
     return QuotaWindow(
         id=key,
@@ -81,12 +81,12 @@ def _fable_limit_window(limit: object) -> QuotaWindow | None:
         return None
     try:
         return _parse_window(_FABLE_WINDOW_ID, shape)
-    except ValueError:
+    except QuotaSchemaError:
         return None
 
 
 def _fable_window(upstream_body: dict[object, object]) -> QuotaWindow | None:
-    """Prefer the active limits[] Fable entry, then the first one, then legacy key."""
+    """Prefer the active limits[] Fable entry, then the first one."""
     limits = upstream_body.get("limits")
     if isinstance(limits, list):
         found = [
@@ -98,17 +98,11 @@ def _fable_window(upstream_body: dict[object, object]) -> QuotaWindow | None:
         found.sort(key=lambda item: item[0].get("is_active") is not True)
         if found:
             return found[0][1]
-    legacy = upstream_body.get(_LEGACY_FABLE_KEY)
-    if _is_window_shape(legacy):
-        return _parse_window(_FABLE_WINDOW_ID, legacy)  # type: ignore[arg-type]
     return None
 
 
 class ClaudeProvider:
     """Quota provider for the Anthropic Claude API."""
-
-    provider_id: ClassVar[Literal["claude", "codex"]] = "claude"
-    auth_type: ClassVar[str] = "oauth"
 
     def build_api_call_payload(self, auth_name: str) -> dict[str, object]:
         return {
@@ -121,9 +115,7 @@ class ClaudeProvider:
             },
         }
 
-    def parse(
-        self, upstream_body: object, upstream_status: int, *, auth_name: str
-    ) -> ProviderQuota:
+    def parse(self, upstream_body: object, *, auth_name: str) -> ProviderQuota:
         if not isinstance(upstream_body, dict):
             raise QuotaSchemaError(
                 "Expected a dict for Claude quota body, "
@@ -131,16 +123,9 @@ class ClaudeProvider:
             )
 
         windows: list[QuotaWindow] = []
-        extra: dict[str, object] = {}
-
         for key, value in upstream_body.items():
-            # Collect known extra blocks
-            if key in _EXTRA_KEYS:
-                extra[key] = value
-                continue
-
-            # Fable is handled separately (limits[] first, legacy key as fallback).
-            if key in (_LEGACY_FABLE_KEY, "limits") or value is None:
+            # Fable comes from limits[], handled separately.
+            if key == "limits" or value is None:
                 continue
 
             # Accept any dict whose shape matches a window
@@ -156,5 +141,4 @@ class ClaudeProvider:
             auth_name=auth_name,
             plan_type=None,
             windows=windows,
-            extra=extra,
         )

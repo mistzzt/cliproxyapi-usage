@@ -26,7 +26,7 @@ def test_parse_extracts_populated_windows(
     claude_api_call_fixture: dict,  # type: ignore[type-arg]
 ) -> None:
     body_dict = json.loads(claude_api_call_fixture["body"])
-    result = ClaudeProvider().parse(body_dict, 200, auth_name="claude-zw.json")
+    result = ClaudeProvider().parse(body_dict, auth_name="claude-zw.json")
 
     assert result.provider == "claude"
     assert result.auth_name == "claude-zw.json"
@@ -49,33 +49,24 @@ def test_parse_extracts_populated_windows(
     assert omelette.resets_at is None
 
 
-def test_parse_includes_extra_usage(
-    claude_api_call_fixture: dict,  # type: ignore[type-arg]
-) -> None:
-    body_dict = json.loads(claude_api_call_fixture["body"])
-    result = ClaudeProvider().parse(body_dict, 200, auth_name="claude-zw.json")
-
-    extra_usage = result.extra["extra_usage"]
-    assert isinstance(extra_usage, dict)
-    assert extra_usage["currency"] == "USD"
-    assert extra_usage["monthly_limit"] == 10000
-    assert extra_usage["used_credits"] == 10151.0
-    assert extra_usage["utilization"] == 100.0
-    assert extra_usage["is_enabled"] is True
-
-
 def test_parse_unknown_keys_are_ignored() -> None:
     body = {
         "five_hour": {"utilization": 1.0, "resets_at": "2026-01-01T00:00:00+00:00"},
         "mystery_window": {"utilization": 99, "resets_at": "2026-01-01T00:00:00+00:00"},
     }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
     assert {w.id for w in result.windows} == {"five_hour", "mystery_window"}
+
+
+def test_parse_raises_schema_error_on_bad_reset_time() -> None:
+    body = {"five_hour": {"utilization": 1.0, "resets_at": "not-a-date"}}
+    with pytest.raises(QuotaSchemaError):
+        ClaudeProvider().parse(body, auth_name="test")
 
 
 def test_parse_raises_schema_error_on_garbage() -> None:
     with pytest.raises(QuotaSchemaError):
-        ClaudeProvider().parse("not-a-dict", 200, auth_name="test")
+        ClaudeProvider().parse("not-a-dict", auth_name="test")
 
 
 def _fable_limit(percent: object = 64.0, **overrides: object) -> dict[str, object]:
@@ -94,32 +85,17 @@ _FIVE_HOUR = {"utilization": 17.0, "resets_at": "2026-04-24T04:30:00+00:00"}
 
 def test_parse_emits_fable_row_from_limits_after_other_windows() -> None:
     body = {"five_hour": _FIVE_HOUR, "iguana_necktie": None, "limits": [_fable_limit()]}
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
 
     assert [w.id for w in result.windows] == ["five_hour", "seven_day_fable"]
     fable = result.windows[-1]
     assert fable.label == "7-day Fable 5"
     assert fable.used_percent == 64.0
     assert fable.resets_at == datetime(2026, 5, 1, tzinfo=UTC)
-    assert "limits" not in result.extra
 
 
-def test_parse_falls_back_to_legacy_fable_key() -> None:
+def test_parse_prefers_active_fable_limit_over_others() -> None:
     body = {
-        "five_hour": _FIVE_HOUR,
-        "iguana_necktie": {"utilization": 30, "resets_at": None},
-    }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
-
-    assert [w.id for w in result.windows] == ["five_hour", "seven_day_fable"]
-    assert result.windows[-1].label == "7-day Fable 5"
-    assert result.windows[-1].used_percent == 30.0
-    assert result.windows[-1].resets_at is None
-
-
-def test_parse_prefers_active_fable_limit_over_others_and_legacy() -> None:
-    body = {
-        "iguana_necktie": {"utilization": 30, "resets_at": None},
         "limits": [
             _fable_limit(10, is_active=False),
             _fable_limit(
@@ -128,7 +104,7 @@ def test_parse_prefers_active_fable_limit_over_others_and_legacy() -> None:
             _fable_limit(90, is_active=False),
         ],
     }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
     assert [(w.used_percent, w.resets_at) for w in result.windows] == [(55.0, None)]
 
 
@@ -136,7 +112,7 @@ def test_parse_uses_first_fable_limit_when_none_active() -> None:
     body = {
         "limits": [_fable_limit(10, is_active=False), _fable_limit(20, is_active=None)]
     }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
     assert [w.used_percent for w in result.windows] == [10.0]
 
 
@@ -152,18 +128,17 @@ def test_parse_ignores_malformed_and_non_fable_limits() -> None:
             "garbage",
         ],
     }
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
     assert [w.id for w in result.windows] == ["five_hour"]
-    assert "limits" not in result.extra
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"five_hour": _FIVE_HOUR, "iguana_necktie": None},
-        {"five_hour": _FIVE_HOUR, "iguana_necktie": None, "limits": []},
+        {"five_hour": _FIVE_HOUR},
+        {"five_hour": _FIVE_HOUR, "limits": []},
     ],
 )
 def test_parse_emits_no_fable_row_without_any_source(body: dict[str, object]) -> None:
-    result = ClaudeProvider().parse(body, 200, auth_name="test")
+    result = ClaudeProvider().parse(body, auth_name="test")
     assert [w.id for w in result.windows] == ["five_hour"]
