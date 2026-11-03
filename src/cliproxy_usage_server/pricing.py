@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -20,7 +20,6 @@ import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 __all__ = [
-    "PREFIX_CANDIDATES",
     "CostPlan",
     "CostStatus",
     "ModelPricing",
@@ -112,21 +111,11 @@ def resolve(
     return None, "missing"
 
 
-def rollup_cost_status(statuses: list[PricingResolution]) -> CostStatus:
-    """Roll up a list of per-component statuses into one row-level CostStatus.
-
-    - empty list           -> "missing" (no components contribute)
-    - all "live"           -> "live"
-    - all "missing"        -> "missing"
-    - mix of live + missing -> "partial_missing"
-    """
-    if not statuses:
-        return "missing"
-    has_live = any(s == "live" for s in statuses)
-    has_miss = any(s == "missing" for s in statuses)
-    if has_live and has_miss:
-        return "partial_missing"
-    return "live" if has_live else "missing"
+def rollup_cost_status(statuses: Collection[PricingResolution]) -> CostStatus:
+    """Roll per-component statuses into one; no components means nothing is unpriced."""
+    if "missing" not in statuses:
+        return "live"
+    return "partial_missing" if "live" in statuses else "missing"
 
 
 class Rates(NamedTuple):
@@ -297,22 +286,23 @@ def fetch_pricing(
 
     try:
         response = client.get(url)
+        response.raise_for_status()
         raw = response.json()
-    except Exception as exc:
+        pricing_map = _parse_pricing_map(raw)
+        if not pricing_map:
+            raise ValueError("response holds no usable pricing entries")
+    except (httpx.HTTPError, ValueError) as exc:
+        # A failed download never replaces the cache with an error body.
         _log.warning("Failed to fetch pricing from %s: %s", url, exc)
-        if cache_path.exists():
-            return _load_cache(cache_path)
-        return {}
+        return _load_cache(cache_path) if cache_path.exists() else {}
     finally:
         if _own_client:
             client.close()  # type: ignore[union-attr]
 
-    pricing_map = _parse_pricing_map(raw)
-
     # Atomic write: persist the raw JSON (not the parsed map) so all original
     # fields are preserved for future reads.
     try:
-        _write_cache_atomic(cache_path, raw if isinstance(raw, dict) else {})
+        _write_cache_atomic(cache_path, raw)
     except Exception as exc:
         _log.warning("Failed to write pricing cache to %s: %s", cache_path, exc)
 

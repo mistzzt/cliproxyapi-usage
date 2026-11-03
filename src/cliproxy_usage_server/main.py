@@ -52,11 +52,6 @@ async def _refresh_loop(app: FastAPI, config: ServerConfig) -> None:
             _log.warning("Failed to refresh pricing: %s", exc)
 
 
-def _default_pricing_provider() -> dict[str, ModelPricing]:
-    """Placeholder; replaced by monkeypatch in tests that call run()."""
-    return {}  # pragma: no cover
-
-
 def _default_quota_service_factory(config: ServerConfig) -> QuotaService:
     """Production factory: builds a real CliProxyClient + QuotaService."""
     assert config.cliproxy_base_url is not None  # guarded by caller

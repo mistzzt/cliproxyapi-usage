@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 
-from cliproxy_usage_collect.config import Config
+from cliproxy_usage_collect.config import Config, management_url
 
 
 class AuthError(Exception):
@@ -21,17 +20,14 @@ class TransientError(Exception):
 
 HttpClientFactory = Callable[..., httpx.Client]
 
-_USAGE_QUEUE_PATH = "/v0/management/usage-queue"
-_MANAGEMENT_PREFIX = "/v0/management"
-
 
 def pop_usage_records(
     cfg: Config,
     *,
     http_client_factory: HttpClientFactory = httpx.Client,
-) -> list[str]:
+) -> list[dict[str, Any]]:
     """Pop one configured batch of raw queue records from CLIProxyAPI."""
-    url = _usage_queue_url(cfg.base_url)
+    url = management_url(cfg.base_url, "usage-queue")
     headers = {"Authorization": f"Bearer {cfg.management_key}"}
 
     try:
@@ -57,13 +53,6 @@ def pop_usage_records(
     return _normalize_payload(payload)
 
 
-def _usage_queue_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith(_MANAGEMENT_PREFIX):
-        return f"{normalized}/usage-queue"
-    return f"{normalized}{_USAGE_QUEUE_PATH}"
-
-
 def _response_message(response: httpx.Response) -> str:
     text = response.text.strip()
     if text:
@@ -71,11 +60,11 @@ def _response_message(response: httpx.Response) -> str:
     return f"HTTP {response.status_code}"
 
 
-def _normalize_payload(payload: Any) -> list[str]:
+def _normalize_payload(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         raise TransientError(
             f"Unexpected usage queue response type: {type(payload).__name__}"
         )
     if not all(isinstance(item, dict) for item in payload):
         raise TransientError("Usage queue response must be an array of objects")
-    return [json.dumps(item, separators=(",", ":")) for item in payload]
+    return payload

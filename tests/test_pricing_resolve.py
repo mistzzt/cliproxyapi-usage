@@ -59,4 +59,4 @@ def test_rollup_mixed_is_partial_missing() -> None:
 
 def test_rollup_empty_is_missing() -> None:
     """A row with zero component models is treated as missing."""
-    assert rollup_cost_status([]) == "missing"
+    assert rollup_cost_status([]) == "live"

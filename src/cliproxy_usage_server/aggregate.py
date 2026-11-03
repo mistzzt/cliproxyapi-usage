@@ -21,6 +21,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from cliproxy_usage_server.db import (
@@ -148,10 +149,9 @@ class _Acc:
             self.last_used = c.last_used
 
     def cost_status(self, has_pricing: bool) -> CostStatus:
-        # No cells means nothing is unpriced; only an absent pricing map is "missing".
         if not has_pricing:
             return "missing"
-        return rollup_cost_status(sorted(self.statuses)) if self.statuses else "live"
+        return rollup_cost_status(self.statuses)
 
     def cost_value(self, has_pricing: bool) -> float | None:
         return None if self.cost_status(has_pricing) == "missing" else self.cost
@@ -382,31 +382,28 @@ def _label(dim: Dimension, key: str, aliases: Mapping[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def resolve_redacted_api_keys(
+type FilterColumn = Literal["api_key", "model", "source"]
+
+# Display key of each filterable column's raw values.
+_FILTER_KEY: dict[FilterColumn, Callable[[str], str]] = {
+    "api_key": redact_key,
+    "model": model_key,
+    "source": redact_source,
+}
+
+
+def resolve_filter(
     conn: sqlite3.Connection,
-    redacted: list[str],
-) -> list[str]:
-    """Return the raw api keys whose ``redact_key`` value is in *redacted*."""
-    target = set(redacted)
-    rows = conn.execute("SELECT DISTINCT api_key FROM requests").fetchall()
-    return [r[0] for r in rows if redact_key(r[0]) in target]
-
-
-def resolve_model_keys(conn: sqlite3.Connection, keys: list[str]) -> list[str]:
-    """Return the raw model ids whose ``model_key`` value is in *keys*."""
+    column: FilterColumn,
+    keys: list[str] | None,
+) -> list[str] | None:
+    """Raw *column* values whose display key is in *keys*; None means no filter."""
+    if keys is None:
+        return None
+    key_of = _FILTER_KEY[column]
     target = set(keys)
-    rows = conn.execute("SELECT DISTINCT model FROM requests").fetchall()
-    return [r[0] for r in rows if model_key(r[0]) in target]
-
-
-def resolve_redacted_sources(
-    conn: sqlite3.Connection,
-    redacted: list[str],
-) -> list[str]:
-    """Return the raw sources whose ``redact_source`` value is in *redacted*."""
-    target = set(redacted)
-    rows = conn.execute("SELECT DISTINCT source FROM requests").fetchall()
-    return [r[0] for r in rows if redact_source(r[0]) in target]
+    rows = conn.execute(f"SELECT DISTINCT {column} FROM requests").fetchall()
+    return [r[0] for r in rows if key_of(r[0]) in target]
 
 
 # ---------------------------------------------------------------------------

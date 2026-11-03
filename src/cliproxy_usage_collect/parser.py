@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -34,14 +35,16 @@ class _QueuePayload(BaseModel):
     tokens: _Tokens
 
 
-def iter_records(queue_elements: Iterable[str | bytes]) -> Iterator[RequestRecord]:
+def iter_records(
+    queue_elements: Iterable[Mapping[str, Any]],
+) -> Iterator[RequestRecord]:
     """Yield one RequestRecord per queue payload element.
 
     Raises SchemaError if required fields are absent or have wrong types.
     """
     for index, element in enumerate(queue_elements):
         try:
-            payload = _QueuePayload.model_validate_json(element)
+            payload = _QueuePayload.model_validate(element)
         except ValidationError as exc:
             msg = f"Queue element {index} failed validation: {exc}"
             raise SchemaError(msg) from exc

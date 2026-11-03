@@ -245,8 +245,6 @@ def test_run_invokes_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(main_mod.uvicorn, "run", mock_uvicorn_run)
 
-    monkeypatch.setattr(main_mod, "_default_pricing_provider", lambda: {})
-
     from cliproxy_usage_server.main import run
 
     run()

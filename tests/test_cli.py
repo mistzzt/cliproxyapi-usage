@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
+from typing import Any
 
 import pytest
 
@@ -11,30 +11,30 @@ from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.queue_client import AuthError, TransientError
 
-
-def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> str:
-    return json.dumps(
-        {
-            "timestamp": timestamp,
-            "api_key": "api-key-1",
-            "model": model,
-            "source": "codex",
-            "auth_index": "0",
-            "latency_ms": 1234,
-            "failed": False,
-            "tokens": {
-                "input_tokens": 10,
-                "output_tokens": 20,
-                "reasoning_tokens": 3,
-                "cached_tokens": 4,
-                "total_tokens": 37,
-            },
-        }
-    )
+QueueRecord = dict[str, Any]
 
 
-def _queue_client(records: list[str]):
-    def pop_usage_records(cfg: Config) -> list[str]:
+def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> QueueRecord:
+    return {
+        "timestamp": timestamp,
+        "api_key": "api-key-1",
+        "model": model,
+        "source": "codex",
+        "auth_index": "0",
+        "latency_ms": 1234,
+        "failed": False,
+        "tokens": {
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "reasoning_tokens": 3,
+            "cached_tokens": 4,
+            "total_tokens": 37,
+        },
+    }
+
+
+def _queue_client(records: list[QueueRecord]):
+    def pop_usage_records(cfg: Config) -> list[QueueRecord]:
         assert cfg.queue_pop_count == 500
         return records
 
@@ -115,7 +115,7 @@ def test_missing_management_key(monkeypatch: pytest.MonkeyPatch, tmp_path, capsy
 
 
 def test_queue_auth_error_returns_3(env_vars, capsys):
-    def queue_client(cfg: Config) -> list[str]:
+    def queue_client(cfg: Config) -> list[QueueRecord]:
         raise AuthError("nope")
 
     result = main(queue_client=queue_client)
@@ -126,7 +126,7 @@ def test_queue_auth_error_returns_3(env_vars, capsys):
 
 
 def test_queue_transient_error_returns_1(env_vars, capsys):
-    def queue_client(cfg: Config) -> list[str]:
+    def queue_client(cfg: Config) -> list[QueueRecord]:
         raise TransientError("usage queue unavailable")
 
     result = main(queue_client=queue_client)
@@ -137,7 +137,7 @@ def test_queue_transient_error_returns_1(env_vars, capsys):
 
 
 def test_malformed_queued_payload_returns_4(env_vars, capsys):
-    result = main(queue_client=_queue_client([json.dumps({"timestamp": "only"})]))
+    result = main(queue_client=_queue_client([{"timestamp": "only"}]))
 
     assert result == 4
     captured = capsys.readouterr()
@@ -150,7 +150,7 @@ def test_queue_client_is_not_called_after_config_error(
     monkeypatch.delenv("CLIPROXY_MANAGEMENT_KEY", raising=False)
     monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "u.db"))
 
-    def queue_client(cfg: Config) -> list[str]:
+    def queue_client(cfg: Config) -> list[QueueRecord]:
         raise AssertionError("queue client should not be called")
 
     assert main(queue_client=queue_client) == 2
