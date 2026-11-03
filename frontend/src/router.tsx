@@ -1,17 +1,8 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
-import AppHeader from '@/components/ui/AppHeader';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import AppLayout from '@/components/ui/AppLayout';
 import UsagePage from '@/pages/UsagePage';
 import QuotaPage from '@/pages/QuotaPage';
 import { runtimeConfig } from '@/services/runtimeConfig';
-
-function AppLayout() {
-  return (
-    <>
-      <AppHeader />
-      <Outlet />
-    </>
-  );
-}
 
 export function AppRouter() {
   return (

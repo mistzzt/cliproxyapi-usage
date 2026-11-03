@@ -1,7 +1,7 @@
 @use '../styles/tokens' as *;
 
 .page {
-  padding: 0 var(--page-gutter) var(--page-gutter);
+  padding-bottom: var(--page-gutter);
 }
 
 .header {

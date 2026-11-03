@@ -1,7 +1,7 @@
 @use '../../styles/tokens' as *;
 
 .header {
-  padding: var(--page-gutter) var(--page-gutter) 0;
+  padding-top: var(--page-gutter);
   margin-bottom: $space-5;
 }
 
