@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderQuota, QuotaAccount } from '@/types/api';
-import type { ResetActionState } from '@/stores/quotaResetState';
+import type { ResetActionState } from '@/utils/quotaReset';
 import { formatAbsolute } from '@/utils/time';
 import QuotaCard from './QuotaCard';
 
@@ -11,14 +11,9 @@ function render(quota: ProviderQuota, reset: ResetActionState = { status: 'idle'
   return renderToStaticMarkup(
     <QuotaCard
       account={account}
-      slot={{
-        status: 'success',
-        response: {
-          quota,
-          error: null,
-          fetched_at: '2026-01-01T00:00:00Z',
-          stale_at: '2026-01-01T00:01:00Z',
-        },
+      query={{
+        data: { quota, error: null, fetched_at: '2026-01-01T00:00:00Z', stale_at: '2026-01-01T00:01:00Z' },
+        error: null,
       }}
       reset={reset}
       onRefresh={() => {}}

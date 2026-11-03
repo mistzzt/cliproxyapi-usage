@@ -1,6 +1,5 @@
-import type { ProviderQuota, QuotaAccount, QuotaProvider } from '@/types/api';
-import type { QuotaSlotState } from '@/stores/quotaStore';
-import { canStartReset, manualResetCount, type ResetActionState } from '@/stores/quotaResetState';
+import type { ProviderQuota, QuotaAccount, QuotaProvider, QuotaResponse } from '@/types/api';
+import { canStartReset, manualResetCount, type ResetActionState } from '@/utils/quotaReset';
 import { expiresSoon, formatAbsolute, formatRelative } from '@/utils/time';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -9,7 +8,8 @@ import styles from './QuotaCard.module.scss';
 
 interface QuotaCardProps {
   account: QuotaAccount;
-  slot: QuotaSlotState;
+  /** The account's quota query; a refetch keeps showing the last response. */
+  query: { data: QuotaResponse | undefined; error: Error | null };
   reset: ResetActionState;
   onRefresh: () => void;
   onRequestReset: () => void;
@@ -47,7 +47,7 @@ function SkeletonBars() {
 
 export default function QuotaCard({
   account,
-  slot,
+  query,
   reset,
   onRefresh,
   onRequestReset,
@@ -56,18 +56,17 @@ export default function QuotaCard({
 }: QuotaCardProps) {
   const title = account.display_name ?? PROVIDER_LABELS[account.provider];
 
+  const response = query.data;
   const planPill =
-    slot.status === 'success' && slot.response?.quota?.plan_type != null ? (
-      <span className={styles.planPill}>{slot.response.quota.plan_type}</span>
-    ) : null;
+    response?.quota?.plan_type != null ? <span className={styles.planPill}>{response.quota.plan_type}</span> : null;
 
   function renderBody() {
-    if ((slot.status === 'idle' || slot.status === 'loading') && slot.response === undefined) {
+    if (response === undefined && query.error === null) {
       return <SkeletonBars />;
     }
 
-    if (slot.status === 'error' && slot.response === undefined) {
-      const msg = slot.fetchError?.message ?? ERROR_MESSAGES.unknown;
+    if (response === undefined) {
+      const msg = query.error?.message || ERROR_MESSAGES.unknown;
       return (
         <div className={styles.errorBanner}>
           <span>{msg}</span>
@@ -77,9 +76,6 @@ export default function QuotaCard({
         </div>
       );
     }
-
-    const response = slot.response;
-    if (response === undefined) return null;
 
     if (response.error !== null) {
       const kind = response.error.kind;
@@ -196,7 +192,7 @@ export default function QuotaCard({
   }
 
   function renderFooter() {
-    if (slot.status !== 'success' || slot.response === undefined) {
+    if (response === undefined) {
       return (
         <div className={styles.footer}>
           <span />
@@ -207,7 +203,7 @@ export default function QuotaCard({
       );
     }
 
-    const { fetched_at, stale_at } = slot.response;
+    const { fetched_at, stale_at } = response;
     return (
       <div className={styles.footer}>
         <span className={styles.footerMeta}>
