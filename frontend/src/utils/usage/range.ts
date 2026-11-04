@@ -1,7 +1,7 @@
 // Range presets and custom date+time windows, resolved against an explicit `now`.
 import { addDays, format, startOfDay } from 'date-fns';
 
-export type PresetId = '24h' | '7d' | '30d' | '90d' | 'this_month' | 'last_month' | 'all';
+export type PresetId = '24h' | 'today' | '7d' | '30d' | '90d' | 'this_month' | 'last_month' | 'all';
 
 export type RangeSel =
   | { kind: 'preset'; id: PresetId }
@@ -10,6 +10,7 @@ export type RangeSel =
 
 export const PRESETS: readonly { id: PresetId; label: string }[] = [
   { id: '24h', label: 'Last 24 hours' },
+  { id: 'today', label: 'Today' },
   { id: '7d', label: 'Last 7 days' },
   { id: '30d', label: 'Last 30 days' },
   { id: '90d', label: 'Last 90 days' },
@@ -92,6 +93,8 @@ export function resolveWindow(sel: RangeSel, now: number): RangeWindow {
   const d = new Date(now);
   const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
   switch (sel.id) {
+    case 'today':
+      return { start: startOfDay(now).getTime(), end: now };
     case 'this_month':
       return { start: monthStart, end: now };
     case 'last_month':

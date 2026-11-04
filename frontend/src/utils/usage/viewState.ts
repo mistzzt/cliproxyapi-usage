@@ -29,7 +29,7 @@ export interface ViewState {
 export const VIEW_STORAGE_KEY = 'usage.view.v1';
 
 export const DEFAULT_VIEW_STATE: ViewState = {
-  range: { kind: 'preset', id: '30d' },
+  range: { kind: 'preset', id: 'today' },
   people: [],
   models: [],
   credentials: [],
