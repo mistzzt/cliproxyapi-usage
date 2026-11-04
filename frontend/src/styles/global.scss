@@ -7,11 +7,19 @@
 }
 
 :root {
+  --page-max-width: 1440px;
   --page-gutter: #{$space-5};
+  // Top gutter plus the nav row; sticky bars below the header offset by it.
+  --app-header-height: calc(var(--page-gutter) + 45px);
 
   @media (max-width: 768px) {
     --page-gutter: #{$space-4};
   }
+}
+
+// Always reserve the scrollbar so switching between short and long pages never shifts the layout.
+html {
+  scrollbar-gutter: stable;
 }
 
 html,

@@ -1,11 +1,17 @@
 @use '../../styles/tokens' as *;
 
 .header {
-  padding: var(--page-gutter) var(--page-gutter) 0;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  height: var(--app-header-height);
+  padding-top: var(--page-gutter);
   margin-bottom: $space-5;
+  background: var(--color-bg);
 }
 
 .nav {
+  height: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;

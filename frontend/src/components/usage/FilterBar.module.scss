@@ -2,13 +2,13 @@
 
 .bar {
   position: sticky;
-  top: 0;
+  top: var(--app-header-height);
   z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: $space-2;
-  padding: $space-3 var(--page-gutter);
+  padding: $space-3 0;
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
 }

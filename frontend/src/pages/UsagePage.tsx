@@ -54,9 +54,7 @@ export default function UsagePage() {
 
   return (
     <div className={s.page}>
-      <div className={s.titleRow}>
-        <h1 className={s.title}>Usage</h1>
-      </div>
+      <h1 className={s.title}>Usage</h1>
       <FilterBar
         state={state}
         update={update}
