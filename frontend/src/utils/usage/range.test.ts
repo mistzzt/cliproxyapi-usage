@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { dayRange, pickDay, rangeDays } from './range';
+import { dayRange, pickDay, rangeDays, resolveWindow } from './range';
 
 test('calendar picks cover whole local days and round-trip to the same days', () => {
   const day = (d: number) => new Date(2026, 7, d, 14, 23);
@@ -22,4 +22,9 @@ test('calendar clicks start a new range, then complete it in either order', () =
   expect(first).toEqual({ anchor: day(9), first: day(9), last: day(9) });
   expect(pickDay(first.anchor, day(5))).toEqual({ anchor: null, first: day(5), last: day(9) });
   expect(pickDay(first.anchor, day(12))).toEqual({ anchor: null, first: day(9), last: day(12) });
+});
+
+test('today runs from local midnight to now', () => {
+  const now = new Date(2026, 10, 4, 14, 23).getTime();
+  expect(resolveWindow({ kind: 'preset', id: 'today' }, now)).toEqual({ start: new Date(2026, 10, 4).getTime(), end: now });
 });
