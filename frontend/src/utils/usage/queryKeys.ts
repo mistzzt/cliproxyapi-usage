@@ -56,9 +56,19 @@ export function breakdownKey(w: ResolvedWindow, s: ViewState, dim: Dimension): U
   return ['usage', w, 'breakdown', { ...filterParams(s), bucket: s.granularity, dim }];
 }
 
+function windowParams(w: ResolvedWindow): Record<string, string> {
+  return { ...(w.start === null ? {} : { start: w.start }), end: w.end, tz: w.tz };
+}
+
 /** Query string params of the request that `key` names. */
 export function requestParams([, w, , params]: UsageQueryKey): Record<string, string> {
-  return { ...(w.start === null ? {} : { start: w.start }), end: w.end, tz: w.tz, ...params };
+  return { ...windowParams(w), ...params };
+}
+
+/** API path of the CSV export of the page's view in window `w`. */
+export function exportPath(w: ResolvedWindow, s: ViewState): string {
+  const params = new URLSearchParams({ ...windowParams(w), ...filterParams(s), bucket: s.granularity });
+  return `/usage/export?${params.toString()}`;
 }
 
 /** Prefix of every request key inside window `w`. */

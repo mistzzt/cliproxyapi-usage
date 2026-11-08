@@ -86,11 +86,31 @@
   font-weight: 600;
 }
 
-.tokenMix {
+.stripHead {
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+.note {
+  font-size: 12px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $space-3;
+}
+
+.fact {
   display: flex;
-  flex-wrap: wrap;
-  gap: $space-4;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+
+  b {
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
 }
 

@@ -4,6 +4,14 @@ export type Dimension = 'person' | 'model' | 'credential';
 export type Bucket = 'hour' | 'day' | 'week';
 export type CostStatus = 'live' | 'partial_missing' | 'missing';
 
+/** Spend split by token type; the parts add up to the total cost. */
+export interface CostByType {
+  input: number;
+  output: number;
+  cache_read: number;
+}
+
+/** Uncached input and cache read tokens follow each model's token accounting. */
 export interface Totals {
   requests: number;
   failed: number;
@@ -11,9 +19,18 @@ export interface Totals {
   output_tokens: number;
   cached_tokens: number;
   reasoning_tokens: number;
+  uncached_input_tokens: number;
+  cache_read_tokens: number;
   cost: number | null;
   cost_status: CostStatus;
-  avg_latency_ms: number;
+  /** These three are null exactly when cost is null. */
+  cost_by_type: CostByType | null;
+  long_context_cost: number | null;
+  cache_savings: number | null;
+  /** Sum over successful requests. */
+  latency_ms: number;
+  /** Successful requests with tokens billed at the long rate. */
+  long_context_requests: number;
   last_used: string | null; // ISO-8601
 }
 
@@ -27,7 +44,7 @@ export interface SummaryResponse {
   current: Totals;
   /** Null when the window has no start (all time). */
   previous: Totals | null;
-  series: Record<'cost' | TokenPart | 'requests', number[]>;
+  series: Record<'cost' | TokenPart | 'requests' | 'failed' | 'latency_ms', number[]>;
 }
 
 export interface MixEntry {

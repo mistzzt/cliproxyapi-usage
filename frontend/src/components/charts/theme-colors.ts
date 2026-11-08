@@ -5,6 +5,7 @@ export interface ChartThemeColors {
   tick: string;
   surface: string;
   text: string;
+  error: string;
   // The muted text color: --color-border is too faint to outline a tooltip.
   tooltipBorder: string;
 }
@@ -17,6 +18,7 @@ export function readThemeColors(): ChartThemeColors {
     tick: muted,
     surface: cs.getPropertyValue('--color-surface').trim(),
     text: cs.getPropertyValue('--color-text').trim(),
+    error: cs.getPropertyValue('--color-error').trim(),
     tooltipBorder: muted,
   };
 }

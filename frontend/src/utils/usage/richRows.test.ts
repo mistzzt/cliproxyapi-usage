@@ -10,9 +10,15 @@ function row(key: string, cost: number, output_tokens: number): RichRowInput {
     output_tokens,
     cached_tokens: 0,
     reasoning_tokens: 0,
+    uncached_input_tokens: 0,
+    cache_read_tokens: 0,
     cost,
     cost_status: 'live',
-    avg_latency_ms: 0,
+    cost_by_type: { input: 0, output: cost, cache_read: 0 },
+    long_context_cost: 0,
+    cache_savings: 0,
+    latency_ms: 0,
+    long_context_requests: 0,
     last_used: null,
   };
   const trend = { cost: [cost], input_tokens: [0], output_tokens: [output_tokens], cached_tokens: [0] };

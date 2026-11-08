@@ -1,7 +1,7 @@
 // Per-row derivations for the rich rows table: metric values, mix bars, trend peaks (pure).
 import type { BreakdownRow, MixEntry, ModelPrice, Totals } from '@/types/api';
 import { type Change, change, fmtPct } from './format';
-import { cacheHitRate, failureRate, tokenSeries, tokens } from './totals';
+import { avgLatency, cacheHitRate, failureRate, tokenSeries, tokens } from './totals';
 import type { Dimension } from '@/types/api';
 import type { Metric } from './viewState';
 
@@ -130,7 +130,7 @@ function sortValue(r: RichRow, key: Exclude<SortKey, 'name'>): number {
     case 'cacheHit':
       return r.cacheHit ?? -Infinity;
     case 'latency':
-      return r.totals.avg_latency_ms;
+      return avgLatency(r.totals) ?? -Infinity;
     case 'lastUsed':
       return r.lastUsed ?? -Infinity;
   }
