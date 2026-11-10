@@ -43,8 +43,8 @@ _OPENAI_LITELLM_PROVIDERS: frozenset[str] = frozenset(
 )
 
 
-def _uses_openai_token_accounting(pricing: ModelPricing) -> bool:
-    """Return True when cached input is reported as a subset of input tokens."""
+def _uses_codex_billing(pricing: ModelPricing) -> bool:
+    """Return True for models ccusage bills with its Codex (OpenAI) adapter."""
     provider = (pricing.litellm_provider or "").strip().lower()
     return provider in _OPENAI_LITELLM_PROVIDERS
 
@@ -146,8 +146,7 @@ class CostPlan(NamedTuple):
     ``aggregate._fetch_cells`` applies it per request in SQL; ``costs`` prices the sums.
     """
 
-    openai: bool  # cached tokens are reported inside input_tokens
-    # True: past the threshold the whole request bills at `above`.
+    # True: once input_tokens passes the threshold the whole request bills at `above`.
     # False: only each token type's excess over the threshold does.
     switch: bool
     threshold: int
@@ -185,9 +184,9 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
 
     LiteLLM ``*_above_200k_tokens`` rates are marginal per token type. Rates only
     published above 272k (the models.dev tier ccusage uses) switch the whole
-    request. OpenAI-accounting models always switch, as in ccusage's Codex adapter.
+    request. OpenAI models always switch, as in ccusage's Codex adapter.
     """
-    openai = _uses_openai_token_accounting(pricing)
+    openai = _uses_codex_billing(pricing)
     inp = pricing.input_cost_per_token
     cache_read = pricing.cache_read_input_token_cost
     base = Rates(
@@ -220,7 +219,7 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
     if openai and cache_read is None:
         # Codex bills unpriced cache reads of long requests at the long input rate.
         above = above._replace(cache_read=above.input)
-    return CostPlan(openai, switch, threshold, base, above)
+    return CostPlan(switch, threshold, base, above)
 
 
 def _or(value: float | None, default: float) -> float:

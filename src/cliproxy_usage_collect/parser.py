@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -14,17 +14,30 @@ class SchemaError(Exception):
     """Raised when a queue payload is malformed or has wrong types."""
 
 
-class _Tokens(BaseModel):
+class _Model(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
-    input_tokens: int
-    output_tokens: int
-    reasoning_tokens: int
-    cached_tokens: int
+
+
+class _InputBreakdown(_Model):
     total_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
 
 
-class _QueuePayload(BaseModel):
-    model_config = ConfigDict(extra="ignore", strict=True)
+class _OutputBreakdown(_Model):
+    total_tokens: int
+    reasoning_tokens: int
+
+
+class _TokenBreakdown(_Model):
+    schema_version: Literal[2]
+    quality: str
+    total_tokens: int
+    input: _InputBreakdown
+    output: _OutputBreakdown
+
+
+class _QueuePayload(_Model):
     timestamp: str
     api_key: str
     model: str
@@ -32,34 +45,49 @@ class _QueuePayload(BaseModel):
     auth_index: str
     latency_ms: int
     failed: bool
-    tokens: _Tokens
+    token_breakdown: _TokenBreakdown
 
 
-def iter_records(
-    queue_elements: Iterable[Mapping[str, Any]],
-) -> Iterator[RequestRecord]:
-    """Yield one RequestRecord per queue payload element.
+class ParsedBatch(NamedTuple):
+    records: list[RequestRecord]
+    incomplete: int  # records whose breakdown had no split, stored with 0 tokens
 
-    Raises SchemaError if required fields are absent or have wrong types.
+
+def _record(payload: _QueuePayload) -> RequestRecord:
+    tokens = payload.token_breakdown
+    complete = tokens.quality == "complete"
+    return RequestRecord(
+        timestamp=payload.timestamp,
+        api_key=payload.api_key,
+        model=payload.model,
+        source=payload.source,
+        auth_index=payload.auth_index,
+        latency_ms=payload.latency_ms,
+        input_tokens=tokens.input.total_tokens if complete else 0,
+        output_tokens=tokens.output.total_tokens if complete else 0,
+        reasoning_tokens=tokens.output.reasoning_tokens if complete else 0,
+        cache_read_tokens=tokens.input.cache_read_tokens if complete else 0,
+        cache_creation_tokens=tokens.input.cache_write_tokens if complete else 0,
+        total_tokens=tokens.total_tokens,
+        failed=payload.failed,
+    )
+
+
+def parse_records(queue_elements: Iterable[Mapping[str, Any]]) -> ParsedBatch:
+    """One RequestRecord per queue element, token columns from its ``token_breakdown``.
+
+    Raises SchemaError if required fields are absent or have wrong types, the
+    breakdown is missing, or its ``schema_version`` is not 2.
     """
+    records: list[RequestRecord] = []
+    incomplete = 0
     for index, element in enumerate(queue_elements):
         try:
             payload = _QueuePayload.model_validate(element)
         except ValidationError as exc:
             msg = f"Queue element {index} failed validation: {exc}"
             raise SchemaError(msg) from exc
-
-        yield RequestRecord(
-            timestamp=payload.timestamp,
-            api_key=payload.api_key,
-            model=payload.model,
-            source=payload.source,
-            auth_index=payload.auth_index,
-            latency_ms=payload.latency_ms,
-            input_tokens=payload.tokens.input_tokens,
-            output_tokens=payload.tokens.output_tokens,
-            reasoning_tokens=payload.tokens.reasoning_tokens,
-            cached_tokens=payload.tokens.cached_tokens,
-            total_tokens=payload.tokens.total_tokens,
-            failed=payload.failed,
-        )
+        if payload.token_breakdown.quality != "complete":
+            incomplete += 1
+        records.append(_record(payload))
+    return ParsedBatch(records, incomplete)

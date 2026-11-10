@@ -3,31 +3,57 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
-from cliproxy_usage_collect.parser import SchemaError, iter_records
+from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.schemas import RequestRecord
 
+# Shaped like CLIProxyAPI's queuedUsageDetail, legacy ``tokens`` included.
 VALID_PAYLOAD: dict[str, Any] = {
     "timestamp": "2026-05-04T12:34:56.789Z",
     "latency_ms": 1234,
+    "ttft_ms": 300,
     "source": "codex-user@example.com",
     "auth_index": "auth-1",
     "tokens": {
-        "input_tokens": 100,
+        "input_tokens": 900,
         "output_tokens": 20,
         "reasoning_tokens": 3,
         "cached_tokens": 40,
-        "total_tokens": 163,
+        "cache_read_tokens": 40,
+        "cache_read_tokens_present": True,
+        "cache_creation_tokens": 60,
+        "total_tokens": 1020,
     },
     "failed": False,
-    "provider": "openai",
-    "model": "gpt-5.4",
-    "endpoint": "/v1/responses",
-    "auth_type": "api_key",
+    "generate": True,
+    "stream": True,
+    "fail": {"status_code": 0, "body": ""},
+    "accounting_version": 2,
+    "token_breakdown": {
+        "schema_version": 2,
+        "quality": "complete",
+        "total_tokens": 1020,
+        "input": {
+            "total_tokens": 1000,
+            "uncached_tokens": 900,
+            "cache_read_tokens": 40,
+            "cache_write_tokens": 60,
+        },
+        "output": {
+            "total_tokens": 20,
+            "non_reasoning_tokens": 17,
+            "reasoning_tokens": 3,
+        },
+        "unclassified_tokens": 0,
+    },
+    "provider": "claude",
+    "executor_type": "claude",
+    "model": "claude-sonnet-4-5",
+    "endpoint": "/v1/messages",
+    "auth_type": "oauth",
     "api_key": "sk-test",
     "request_id": "req_123",
 }
@@ -40,33 +66,75 @@ def _payload(**overrides: Any) -> dict[str, Any]:
 
 
 def _record_from(payload: dict[str, Any]) -> RequestRecord:
-    return next(iter_records([payload]))
+    return parse_records([payload]).records[0]
 
 
-def test_valid_single_queue_json_object_maps_to_request_record():
+def _breakdown(payload: dict[str, Any]) -> dict[str, Any]:
+    return payload["token_breakdown"]
+
+
+def test_complete_breakdown_fills_each_token_column():
     record = _record_from(VALID_PAYLOAD)
 
     assert record == RequestRecord(
         timestamp="2026-05-04T12:34:56.789Z",
         api_key="sk-test",
-        model="gpt-5.4",
+        model="claude-sonnet-4-5",
         source="codex-user@example.com",
         auth_index="auth-1",
         latency_ms=1234,
-        input_tokens=100,
+        input_tokens=1000,
         output_tokens=20,
         reasoning_tokens=3,
-        cached_tokens=40,
-        total_tokens=163,
+        cache_read_tokens=40,
+        cache_creation_tokens=60,
+        total_tokens=1020,
         failed=False,
     )
 
 
-def test_iter_records_returns_iterator_not_list():
-    result = iter_records([VALID_PAYLOAD])
+def test_legacy_tokens_object_is_ignored():
+    payload = _payload()
+    payload["tokens"] = {"input_tokens": "not read"}
 
-    assert isinstance(result, Iterator)
-    assert not isinstance(result, list)
+    assert _record_from(payload) == _record_from(VALID_PAYLOAD)
+
+
+@pytest.mark.parametrize("quality", ["inconsistent", "unclassified"])
+def test_incomplete_breakdown_stores_only_total_and_is_counted(quality: str):
+    payload = _payload()
+    _breakdown(payload).update(quality=quality, total_tokens=1500)
+    _breakdown(payload)["unclassified_tokens"] = 480
+
+    batch = parse_records([VALID_PAYLOAD, payload])
+
+    assert batch.incomplete == 1
+    record = batch.records[1]
+    assert (
+        record.input_tokens,
+        record.output_tokens,
+        record.reasoning_tokens,
+        record.cache_read_tokens,
+        record.cache_creation_tokens,
+        record.total_tokens,
+    ) == (0, 0, 0, 0, 0, 1500)
+
+
+def test_missing_breakdown_raises_schema_error():
+    payload = _payload()
+    del payload["token_breakdown"]
+
+    with pytest.raises(SchemaError):
+        parse_records([payload])
+
+
+@pytest.mark.parametrize("version", [1, 3, "2"])
+def test_other_schema_version_raises_schema_error(version: Any):
+    payload = _payload()
+    _breakdown(payload)["schema_version"] = version
+
+    with pytest.raises(SchemaError):
+        parse_records([payload])
 
 
 @pytest.mark.parametrize(
@@ -79,7 +147,6 @@ def test_iter_records_returns_iterator_not_list():
         "auth_index",
         "latency_ms",
         "failed",
-        "tokens",
     ],
 )
 def test_missing_required_top_level_fields_raise_schema_error(field: str):
@@ -87,25 +154,30 @@ def test_missing_required_top_level_fields_raise_schema_error(field: str):
     del payload[field]
 
     with pytest.raises(SchemaError):
-        list(iter_records([payload]))
+        parse_records([payload])
 
 
 @pytest.mark.parametrize(
-    "field",
+    "path",
     [
-        "input_tokens",
-        "output_tokens",
-        "reasoning_tokens",
-        "cached_tokens",
-        "total_tokens",
+        ("total_tokens",),
+        ("quality",),
+        ("input", "total_tokens"),
+        ("input", "cache_read_tokens"),
+        ("input", "cache_write_tokens"),
+        ("output", "total_tokens"),
+        ("output", "reasoning_tokens"),
     ],
 )
-def test_missing_token_fields_raise_schema_error(field: str):
+def test_missing_breakdown_fields_raise_schema_error(path: tuple[str, ...]):
     payload = _payload()
-    del payload["tokens"][field]
+    parent = _breakdown(payload)
+    for key in path[:-1]:
+        parent = parent[key]
+    del parent[path[-1]]
 
     with pytest.raises(SchemaError):
-        list(iter_records([payload]))
+        parse_records([payload])
 
 
 @pytest.mark.parametrize(
@@ -119,22 +191,22 @@ def test_wrong_top_level_types_raise_schema_error(field: str, value: Any):
     payload = _payload(**{field: value})
 
     with pytest.raises(SchemaError):
-        list(iter_records([payload]))
+        parse_records([payload])
 
 
 def test_wrong_token_type_raises_schema_error():
     payload = _payload()
-    payload["tokens"]["total_tokens"] = "163"
+    _breakdown(payload)["input"]["total_tokens"] = "1000"
 
     with pytest.raises(SchemaError):
-        list(iter_records([payload]))
+        parse_records([payload])
 
 
 def test_schema_error_identifies_batch_element_index():
     bad_payload = _payload(latency_ms="1234")
 
     with pytest.raises(SchemaError, match="Queue element 1 failed validation"):
-        list(iter_records([VALID_PAYLOAD, bad_payload]))
+        parse_records([VALID_PAYLOAD, bad_payload])
 
 
 def test_unstored_queue_fields_are_accepted_but_ignored():
@@ -145,22 +217,7 @@ def test_unstored_queue_fields_are_accepted_but_ignored():
         request_id=["ignored"],
     )
 
-    record = _record_from(payload)
-
-    assert record.model_dump() == {
-        "timestamp": "2026-05-04T12:34:56.789Z",
-        "api_key": "sk-test",
-        "model": "gpt-5.4",
-        "source": "codex-user@example.com",
-        "auth_index": "auth-1",
-        "latency_ms": 1234,
-        "input_tokens": 100,
-        "output_tokens": 20,
-        "reasoning_tokens": 3,
-        "cached_tokens": 40,
-        "total_tokens": 163,
-        "failed": False,
-    }
+    assert _record_from(payload) == _record_from(VALID_PAYLOAD)
     assert set(RequestRecord.model_fields) == {
         "timestamp",
         "api_key",
@@ -171,7 +228,8 @@ def test_unstored_queue_fields_are_accepted_but_ignored():
         "input_tokens",
         "output_tokens",
         "reasoning_tokens",
-        "cached_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
         "total_tokens",
         "failed",
     }

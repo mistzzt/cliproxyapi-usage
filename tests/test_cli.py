@@ -14,7 +14,9 @@ from cliproxy_usage_collect.queue_client import AuthError, TransientError
 QueueRecord = dict[str, Any]
 
 
-def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> QueueRecord:
+def _queue_payload(
+    timestamp: str, *, model: str = "claude-sonnet-4-5", quality: str = "complete"
+) -> QueueRecord:
     return {
         "timestamp": timestamp,
         "api_key": "api-key-1",
@@ -23,12 +25,22 @@ def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> Queue
         "auth_index": "0",
         "latency_ms": 1234,
         "failed": False,
-        "tokens": {
-            "input_tokens": 10,
-            "output_tokens": 20,
-            "reasoning_tokens": 3,
-            "cached_tokens": 4,
+        "token_breakdown": {
+            "schema_version": 2,
+            "quality": quality,
             "total_tokens": 37,
+            "input": {
+                "total_tokens": 14,
+                "uncached_tokens": 10,
+                "cache_read_tokens": 4,
+                "cache_write_tokens": 0,
+            },
+            "output": {
+                "total_tokens": 20,
+                "non_reasoning_tokens": 17,
+                "reasoning_tokens": 3,
+            },
+            "unclassified_tokens": 0 if quality == "complete" else 3,
         },
     }
 
@@ -72,7 +84,9 @@ def test_happy_path_inserts_all_valid_queued_records(env_vars, capsys):
     ]
 
     captured = capsys.readouterr()
-    assert captured.err == "inserted 2 new records from 2 queued records\n"
+    assert captured.err == (
+        "inserted 2 new records from 2 queued records, 0 without a token split\n"
+    )
 
 
 def test_second_run_with_duplicate_timestamps_inserts_zero(env_vars, capsys):
@@ -92,7 +106,9 @@ def test_second_run_with_duplicate_timestamps_inserts_zero(env_vars, capsys):
     assert row_count == 2
 
     captured = capsys.readouterr()
-    assert captured.err.endswith("inserted 0 new records from 2 queued records\n")
+    assert captured.err.endswith(
+        "inserted 0 new records from 2 queued records, 0 without a token split\n"
+    )
 
 
 def test_empty_queue_returns_success(env_vars, capsys):
@@ -100,7 +116,9 @@ def test_empty_queue_returns_success(env_vars, capsys):
 
     assert result == 0
     captured = capsys.readouterr()
-    assert captured.err == "inserted 0 new records from 0 queued records\n"
+    assert captured.err == (
+        "inserted 0 new records from 0 queued records, 0 without a token split\n"
+    )
 
 
 def test_missing_management_key(monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
@@ -154,3 +172,24 @@ def test_queue_client_is_not_called_after_config_error(
         raise AssertionError("queue client should not be called")
 
     assert main(queue_client=queue_client) == 2
+
+
+def test_summary_counts_records_without_a_token_split(env_vars, capsys):
+    records = [
+        _queue_payload("2026-04-22T19:22:30.001Z", quality="unclassified"),
+        _queue_payload("2026-04-22T19:22:31.001Z"),
+    ]
+
+    assert main(queue_client=_queue_client(records)) == 0
+
+    conn = sqlite3.connect(env_vars)
+    rows = conn.execute(
+        "SELECT input_tokens, output_tokens, total_tokens FROM requests "
+        "ORDER BY timestamp"
+    ).fetchall()
+    conn.close()
+    assert rows == [(0, 0, 37), (14, 20, 37)]
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "inserted 2 new records from 2 queued records, 1 without a token split\n"
+    )
