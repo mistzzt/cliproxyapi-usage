@@ -1,0 +1,49 @@
+# Plan: store tokens with fixed meanings
+
+## Goal
+
+Token columns get meanings we own, so stored rows never depend on upstream conventions again, and "tokens" means what OpenAI's `total_tokens` and Anthropic's usage mean: all input plus output. CLIProxyAPI has changed what `total_tokens` and `cached_tokens` mean over time, and we never stored or priced Claude cache writes.
+
+## Schema
+
+The `requests` table in `src/cliproxy_usage_collect/db.py` (authoritative) becomes, for its token columns:
+
+```sql
+  input_tokens          INTEGER NOT NULL,            -- all input: uncached + cache read + cache creation
+  output_tokens         INTEGER NOT NULL,            -- all output, reasoning included
+  reasoning_tokens      INTEGER NOT NULL,            -- part of output_tokens
+  cache_read_tokens     INTEGER NOT NULL,            -- part of input_tokens (renamed from cached_tokens)
+  cache_creation_tokens INTEGER NOT NULL DEFAULT 0,  -- part of input_tokens (new)
+  total_tokens          INTEGER NOT NULL,            -- upstream's reported total; never read
+```
+
+`_INSERT` and every other `INSERT INTO requests` (tests included) name their columns, so column order does not matter (a migrated table has `cache_creation_tokens` last; a fresh one lists it as above). `RequestRecord` (`src/cliproxy_usage_collect/schemas.py`) follows the new names.
+
+## Changes
+
+1. **Collector parser** (`src/cliproxy_usage_collect/parser.py`) reads only the payload's `token_breakdown`: `input.total_tokens`, `input.cache_read_tokens`, `input.cache_write_tokens`, `output.total_tokens`, `output.reasoning_tokens` and `total_tokens` fill the columns above. A missing `token_breakdown` or a `schema_version` other than 2 is a `SchemaError`. A breakdown whose `quality` is not `complete` has no split: its token columns other than `total_tokens` are stored as 0 (the request still counts), and the collector's summary line reports how many such rows the batch had.
+2. **Migration**, in its own module `src/cliproxy_usage_collect/migration.py`, which `open_db` calls when the table still has `cached_tokens`; nothing else in the code knows the old layout, and a follow-up commit deletes the module once the deployed DB is migrated. It writes a consistent copy to `<db>.pre-cache-columns` with `VACUUM INTO` (replacing an earlier file of that name), then in one `BEGIN IMMEDIATE` transaction re-checks the layout and, if still old: renames `cached_tokens` to `cache_read_tokens`, adds `cache_creation_tokens`, and rewrites rows whose model starts with `claude` (Anthropic accounting; every other model in the data already stores all input in `input_tokens`): cache creation = `MAX(0, total_tokens - input_tokens - output_tokens - cache_read_tokens)`, input = input + cache read + cache creation, both from the old values. Any migration failure, including a concurrent run holding the lock, leaves the DB unchanged and makes the collector exit 1 (transient) before the queue is popped, so cron retries.
+3. **Per-request split** in `_fetch_cells` (`src/cliproxy_usage_server/aggregate.py`): uncached input = input - cache read - cache creation; the four types are uncached input, cache read, cache creation, output. The SQL no longer reads the plan's `openai` flag (the `CostPlan.openai` field is removed) and no longer clamps cache reads to input. Whole-request plans compare `input_tokens` with the threshold; marginal plans tier each type's own amount, and a request counts as long-context when any of the four types exceeds the threshold.
+4. **Pricing:** cache creation is priced at `Rates.cache_creation` under the same `CostPlan` rules; `cost_by_type` gains `cache_creation`.
+5. **API** (`src/cliproxy_usage_server/schemas.py`, mirrored in `frontend/src/types/api.ts`): totals carry `input_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `output_tokens`, `reasoning_tokens`; series, trends and mix entries rename `cached_tokens` to `cache_read_tokens`; the CSV export carries all five. `cached_tokens`, `uncached_input_tokens` and `ModelPrice.cached_in_input` are removed.
+6. **Frontend:** `tokens()` stays input + output, and every place showing tokens follows. Cache hit rate is cache read over input everywhere, model rows included. Drawer token tiles: Input (caption: share from cache reads), Output (caption: reasoning share), Cache writes (`cache_creation_tokens`; caption: share of input). Spend by token type has four parts (Input is the uncached part, Output, Cache read, Cache write); the cache savings line is unchanged.
+
+7. **Version 0.3.0.** Bump `pyproject.toml` to `0.3.0`; `flake.nix` reads the version from `pyproject.toml` (`builtins.fromTOML`) instead of repeating it. `migration.py` ships in 0.3.x and is removed in 0.4.0, which its docstring states. Start `CHANGELOG.md` with a 0.3.0 entry (the changes above, the breaking schema change, and the upgrade steps: CLIProxyAPI v7.2.97+, the collector migrates on its first run and leaves the backup file, run a 0.3.x collector once before moving to 0.4+); `README.md` links to it. Tag `v0.3.0` on the merge commit.
+
+Limitations, recorded in `AGENTS.md`: migrated Claude rows that wrote to the cache without reading it stay counted as cache reads, and Claude rows before v7.1.26 have no cache creation (their total did not include it).
+
+## Constraints
+
+- Only the migration function may know the old layout or classify rows by model name; every other read uses the new columns as defined above.
+- Update `AGENTS.md`'s schema, token and pricing text (it describes `cached_tokens`, `price.cached_in_input`, the cached-in-input split and the positional `_INSERT` rule, which no longer applies), `docs/usage-scan-dedup.md`'s rollup schema and its token and clamp text, and `README.md`: its token, API and pricing notes (cached-excluded wording, the OpenAI subset note, the Anthropic cache-write undercount), the proxy requirement (CLIProxyAPI v7.2.97+), the backup file, and that the collector must run once before the new server starts.
+
+## Done when
+
+- `uv run pytest`, `uv run ruff check`, `uv run ruff format --check` and `uv run basedpyright` pass. New or changed tests:
+  - Parser: a complete breakdown fills each column; a missing breakdown and a wrong `schema_version` raise `SchemaError`; an incomplete one stores 0 in every token column but `total_tokens`, and the collector's summary line counts it.
+  - Migration (its own test file, deleted with the module; it also fails once the package version reaches 0.4.0), on a DB created with the old DDL holding a Claude row with reads and creation in its total, an older Claude row (`total_tokens = input + output`), and a GPT row: values match the rules in item 2; the backup file exists; a second `open_db` changes nothing; the migrated DB and a fresh one have the same set of columns with the same types, `NOT NULL` flags and defaults in `PRAGMA table_info(requests)`.
+  - Cost: `tests/test_pricing_ccusage.py` keeps its dollar amounts, with inputs restated in the new column meanings (`test_openai_cached_tokens_are_clamped_to_input` is deleted); `request_cost`/`request_totals` in `tests/conftest.py` take input, output, cache read and cache creation; new cases price cache creation under each `CostPlan` shape.
+- `nix develop -c bash -c 'cd frontend && bun test && bun run lint && bun run build'` passes.
+- `nix build` succeeds and `nix eval --raw .#packages.x86_64-linux.default.version` prints `0.3.0`.
+- The Playwright suite passes (command in `AGENTS.md`); `e2e/seed_db.py` writes the new columns.
+- On a copy of the extracted snapshot outside the repo, migrated by running `open_db` on it: with the server on the copy, `summary` for `start=2026-09-17T00:00:00Z&end=2026-10-18T00:00:00Z&tz=UTC` has `input_tokens + output_tokens` equal to `SUM(total_tokens)` over the same rows of the original DB (Python's `sqlite3` module) and `cost_by_type.cache_creation > 0`; for `start=2026-05-01T00:00:00Z&end=2026-06-01T00:00:00Z&tz=UTC` it equals `SUM(total_tokens)` over all rows plus `SUM(cached_tokens)` over Claude rows of the original, and `cache_creation_tokens` is 0. For both windows, `cost_by_type.input`, `.output` and `.cache_read` on the migrated copy match (to 1e-9 relative) what commit `0ebf45f`'s server reports on the original, with both servers pricing from one copy of the snapshot's `pricing.json` kept outside the original directory (`USAGE_PRICING_CACHE` pointing at it, `USAGE_PRICING_TTL_SECONDS` large enough that neither refreshes it).
