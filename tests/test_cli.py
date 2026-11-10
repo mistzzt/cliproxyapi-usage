@@ -15,7 +15,7 @@ QueueRecord = dict[str, Any]
 
 
 def _queue_payload(
-    timestamp: str, *, model: str = "claude-sonnet-4-5", quality: str = "complete"
+    timestamp: str, *, model: str = "claude-sonnet-4-5", unclassified: int = 0
 ) -> QueueRecord:
     return {
         "timestamp": timestamp,
@@ -27,8 +27,8 @@ def _queue_payload(
         "failed": False,
         "token_breakdown": {
             "schema_version": 2,
-            "quality": quality,
-            "total_tokens": 37,
+            "quality": "unclassified" if unclassified else "complete",
+            "total_tokens": 34 + unclassified,
             "input": {
                 "total_tokens": 14,
                 "uncached_tokens": 10,
@@ -40,7 +40,7 @@ def _queue_payload(
                 "non_reasoning_tokens": 17,
                 "reasoning_tokens": 3,
             },
-            "unclassified_tokens": 0 if quality == "complete" else 3,
+            "unclassified_tokens": unclassified,
         },
     }
 
@@ -79,8 +79,8 @@ def test_happy_path_inserts_all_valid_queued_records(env_vars, capsys):
     ).fetchall()
     conn.close()
     assert rows == [
-        ("2026-04-22T19:22:30.001Z", "claude-sonnet-4-5", 37),
-        ("2026-04-22T19:22:31.001Z", "gpt-5", 37),
+        ("2026-04-22T19:22:30.001Z", "claude-sonnet-4-5", 34),
+        ("2026-04-22T19:22:31.001Z", "gpt-5", 34),
     ]
 
     captured = capsys.readouterr()
@@ -176,7 +176,7 @@ def test_queue_client_is_not_called_after_config_error(
 
 def test_summary_counts_records_without_a_token_split(env_vars, capsys):
     records = [
-        _queue_payload("2026-04-22T19:22:30.001Z", quality="unclassified"),
+        _queue_payload("2026-04-22T19:22:30.001Z", unclassified=3),
         _queue_payload("2026-04-22T19:22:31.001Z"),
     ]
 
@@ -188,7 +188,7 @@ def test_summary_counts_records_without_a_token_split(env_vars, capsys):
         "ORDER BY timestamp"
     ).fetchall()
     conn.close()
-    assert rows == [(0, 0, 37), (14, 20, 37)]
+    assert rows == [(0, 0, 37), (14, 20, 34)]
     captured = capsys.readouterr()
     assert captured.err == (
         "inserted 2 new records from 2 queued records, 1 without a token split\n"
