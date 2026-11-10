@@ -6,21 +6,26 @@ export type CostStatus = 'live' | 'partial_missing' | 'missing';
 
 /** Spend split by token type; the parts add up to the total cost. */
 export interface CostByType {
+  /** Uncached input. */
   input: number;
   output: number;
   cache_read: number;
+  cache_creation: number;
 }
 
-/** Uncached input and cache read tokens follow each model's token accounting. */
 export interface Totals {
   requests: number;
   failed: number;
+  /** All input: uncached + cache read + cache creation. */
   input_tokens: number;
-  output_tokens: number;
-  cached_tokens: number;
-  reasoning_tokens: number;
-  uncached_input_tokens: number;
+  /** Part of input_tokens. */
   cache_read_tokens: number;
+  /** Part of input_tokens. */
+  cache_creation_tokens: number;
+  /** All output, reasoning included. */
+  output_tokens: number;
+  /** Part of output_tokens. */
+  reasoning_tokens: number;
   cost: number | null;
   cost_status: CostStatus;
   /** These three are null exactly when cost is null. */
@@ -35,7 +40,7 @@ export interface Totals {
 }
 
 /** Raw token components; derived "tokens" lives in `utils/usage/totals.ts`. */
-export type TokenPart = 'input_tokens' | 'output_tokens' | 'cached_tokens';
+export type TokenPart = 'input_tokens' | 'output_tokens' | 'cache_read_tokens';
 
 export interface SummaryResponse {
   /** Effective bucket after auto selection or coarsening. */
@@ -53,7 +58,7 @@ export interface MixEntry {
   cost: number | null;
   input_tokens: number;
   output_tokens: number;
-  cached_tokens: number;
+  cache_read_tokens: number;
 }
 
 /** USD per 1M tokens of each type. */
@@ -73,8 +78,6 @@ export interface LongContextPrice extends UnitPrices {
 /** The rates cost is computed with (base tier, no speed multiplier). */
 export interface ModelPrice extends UnitPrices {
   long_context: LongContextPrice | null;
-  /** OpenAI accounting: cached tokens are a subset of input. */
-  cached_in_input: boolean;
 }
 
 export interface BreakdownRow {

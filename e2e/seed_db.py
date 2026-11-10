@@ -39,8 +39,9 @@ def records(now: datetime) -> list[RequestRecord]:
                 input_tokens=1000 + 10 * (i % 30),
                 output_tokens=200 + i % 40,
                 reasoning_tokens=0,
-                cached_tokens=100,
-                total_tokens=1300 + 10 * (i % 30) + i % 40,
+                cache_read_tokens=100,
+                cache_creation_tokens=50 if i % 2 == 0 else 0,
+                total_tokens=1200 + 10 * (i % 30) + i % 40,
                 failed=i % 17 == 0,
             )
         )
