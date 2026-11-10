@@ -12,58 +12,55 @@ Costs are the hard part. Each request's cost depends on its own size compared to
 
 ## Rollup schema
 
-`cost_plan` produces four plan shapes. Each needs its own sums:
+`cost_plan` produces three plan shapes. Each needs its own sums:
 
 | Shape | Who | Billed at the long rate |
 | --- | --- | --- |
 | Marginal, 200k | non-OpenAI models with `*_above_200k_tokens` rates or none | each token type's excess over 200k |
-| Whole request, 272k | non-OpenAI models with only `*_above_272k_tokens` rates | the whole request when input + cached > 272k |
-| OpenAI, 200k | OpenAI accounting, no 272k rates | the whole request when input > 200k |
-| OpenAI, 272k | OpenAI accounting with 272k rates | the whole request when input > 272k |
+| Whole request, 200k | OpenAI models without 272k rates | the whole request when input > 200k |
+| Whole request, 272k | OpenAI models with 272k rates, and non-OpenAI models with only `*_above_272k_tokens` rates | the whole request when input > 272k |
 
-OpenAI accounting reports cached tokens inside input. So its cache read is `MIN(cached_tokens, input_tokens)`, and its plain input is input minus that.
+Every model's `input_tokens` includes its cache reads and cache creation, so uncached input is `input_tokens - cache_read_tokens - cache_creation_tokens`, and no clamp is needed.
 
 ```sql
 CREATE TABLE requests_rollup (
-  slot             INTEGER NOT NULL,  -- CAST(strftime('%s', timestamp) AS INTEGER) / 900, as _fetch_cells today
-  api_key          TEXT    NOT NULL,
-  model            TEXT    NOT NULL,
-  source           TEXT    NOT NULL,
-  requests         INTEGER NOT NULL,
-  failed           INTEGER NOT NULL,
-  input_tokens     INTEGER NOT NULL,
-  output_tokens    INTEGER NOT NULL,
-  cached_tokens    INTEGER NOT NULL,
-  reasoning_tokens INTEGER NOT NULL,
-  latency_ms       INTEGER NOT NULL,  -- sum over successful requests (failed = 0)
-  last_ts          TEXT    NOT NULL,  -- MAX(timestamp), as _fetch_cells today
-  cached_in_input  INTEGER NOT NULL,  -- SUM(MIN(cached_tokens, input_tokens))
-  -- marginal 200k: SUM(MIN(x, 200000)) per token type
-  input_200k       INTEGER NOT NULL,
-  output_200k      INTEGER NOT NULL,
-  cached_200k      INTEGER NOT NULL,
-  -- whole request 272k: sums over requests with input + cached > 272000
-  long272_input    INTEGER NOT NULL,
-  long272_output   INTEGER NOT NULL,
-  long272_cached   INTEGER NOT NULL,
-  -- OpenAI: sums over requests with input > 200000 (or 272000); cached is MIN(cached, input)
-  oa_long200_input  INTEGER NOT NULL,
-  oa_long200_output INTEGER NOT NULL,
-  oa_long200_cached INTEGER NOT NULL,
-  oa_long272_input  INTEGER NOT NULL,
-  oa_long272_output INTEGER NOT NULL,
-  oa_long272_cached INTEGER NOT NULL,
+  slot                  INTEGER NOT NULL,  -- CAST(strftime('%s', timestamp) AS INTEGER) / 900, as _fetch_cells today
+  api_key               TEXT    NOT NULL,
+  model                 TEXT    NOT NULL,
+  source                TEXT    NOT NULL,
+  requests              INTEGER NOT NULL,
+  failed                INTEGER NOT NULL,
+  input_tokens          INTEGER NOT NULL,  -- all input, as in requests
+  output_tokens         INTEGER NOT NULL,
+  reasoning_tokens      INTEGER NOT NULL,
+  cache_read_tokens     INTEGER NOT NULL,
+  cache_creation_tokens INTEGER NOT NULL,
+  latency_ms            INTEGER NOT NULL,  -- sum over successful requests (failed = 0)
+  last_ts               TEXT    NOT NULL,  -- MAX(timestamp), as _fetch_cells today
+  -- marginal 200k: SUM(MIN(x, 200000)) per token type, x = uncached input, output, cache read, cache creation
+  uncached_200k         INTEGER NOT NULL,
+  output_200k           INTEGER NOT NULL,
+  cache_read_200k       INTEGER NOT NULL,
+  cache_creation_200k   INTEGER NOT NULL,
+  -- whole request: sums over requests with input_tokens > 200000 (long200) or > 272000 (long272)
+  long200_uncached       INTEGER NOT NULL,
+  long200_output         INTEGER NOT NULL,
+  long200_cache_read     INTEGER NOT NULL,
+  long200_cache_creation INTEGER NOT NULL,
+  long272_uncached       INTEGER NOT NULL,
+  long272_output         INTEGER NOT NULL,
+  long272_cache_read     INTEGER NOT NULL,
+  long272_cache_creation INTEGER NOT NULL,
   -- successful requests with tokens at the long rate, one count per shape:
-  -- marginal 200k: any of input, output, cached > 200000; the others as their long sums above
-  long200_requests     INTEGER NOT NULL,
-  long272_requests     INTEGER NOT NULL,
-  oa_long200_requests  INTEGER NOT NULL,
-  oa_long272_requests  INTEGER NOT NULL,
+  -- marginal 200k: any of the four token types > 200000; the others as their long sums above
+  marginal200_requests  INTEGER NOT NULL,
+  long200_requests      INTEGER NOT NULL,
+  long272_requests      INTEGER NOT NULL,
   PRIMARY KEY (slot, api_key, model, source)
 ) WITHOUT ROWID;
 ```
 
-The base-rate amounts of a cell are its totals minus its long sums (whole-request shapes) or its `*_200k` sums (marginal). Cache write is always 0, as today. Every number is a plain sum, so slots add up, and a group without the slot column (`/options`) prices exactly too.
+The base-rate amounts of a cell are its totals minus its long sums (whole-request shapes) or its `*_200k` sums (marginal). Every number is a plain sum, so slots add up, and a group without the slot column (`/options`) prices exactly too.
 
 Each per-request expression has exactly one definition, shared by the trigger, the refill and the server's edge query, and the 200k and 272k thresholds live in one place that `cost_plan` uses as well. A test enumerates the plan shapes that `cost_plan` can produce and fails when a shape has no rollup columns, so a new tier cannot price wrongly in silence. (Today `_base_rate` holds this logic; it goes away.)
 

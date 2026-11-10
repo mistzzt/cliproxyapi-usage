@@ -4,6 +4,14 @@ A cron-runnable collector that drains request records from CLIProxyAPI's HTTP ma
 
 Before running the collector, enable usage publishing and the HTTP management usage queue in CLIProxyAPI. See the upstream API docs: https://help.router-for.me/management/api.html#usage-telemetry-queue
 
+The collector requires CLIProxyAPI v7.2.97 or later: it reads token counts only from the queue payload's `token_breakdown` and rejects payloads without one (exit code 4).
+
+See [CHANGELOG.md](CHANGELOG.md) for changes and upgrade steps between versions.
+
+## Upgrading from 0.2.x
+
+Version 0.3.0 changes the `requests` table: `cached_tokens` becomes `cache_read_tokens`, a `cache_creation_tokens` column is added, and `input_tokens` now holds all input for every model. The first 0.3.x collector run migrates an existing DB in place. Before it changes anything, it writes a consistent copy of the old DB next to it as `<db>.pre-cache-columns` (for example `usage.db.pre-cache-columns`), replacing an earlier file of that name; delete the copy once you are satisfied with the result. If the migration fails (for example because another process holds the write lock), the DB is left unchanged and the collector exits 1 before popping the queue, so cron retries on the next tick. Run the collector once before starting the 0.3.x server, which cannot read the old layout, and run a 0.3.x collector at least once before moving to 0.4 or later, which no longer migrates.
+
 ## Environment variables
 
 | Variable                              | Default                 | Required |
@@ -52,7 +60,7 @@ Choose a cron frequency shorter than the upstream queue retention window. The co
 
 **Tokens per person (API key) per day**
 
-Tokens here match the dashboard: input + output, cached tokens excluded.
+Tokens here match the dashboard: input + output, where `input_tokens` already includes cache reads (`cache_read_tokens`) and cache writes (`cache_creation_tokens`).
 
 ```sql
 SELECT
@@ -82,9 +90,9 @@ LIMIT 10;
 
 A local dashboard (`cliproxy-usage-server`) serves a read-only FastAPI backend plus a React SPA built with Vite, backed by the same `usage.db` produced by the collector.
 
-The usage page (`/usage`; `/` redirects there) answers how much each person uses and what share of the total that is; a person is one API key, shown redacted or by its alias from `USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average latency with the change against the previous period of equal length, a share bar and per-row trends for people, a people by model heatmap, and Models / Credentials tabs. Clicking a row opens a detail drawer with that entity's trend and mix. Tokens always mean input + output tokens (cached tokens excluded). Time buckets (hour, day, or week) follow the browser's timezone. Filters and view settings live in the URL, so links are shareable, and opening the page without them restores the last view. Entity colors are fixed by all-time spend, so they do not change with filters.
+The usage page (`/usage`; `/` redirects there) answers how much each person uses and what share of the total that is; a person is one API key, shown redacted or by its alias from `USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average latency with the change against the previous period of equal length, a share bar and per-row trends for people, a people by model heatmap, and Models / Credentials tabs. Clicking a row opens a detail drawer with that entity's trend and mix. Tokens always mean all input tokens (cache reads and writes included) plus output tokens. Time buckets (hour, day, or week) follow the browser's timezone. Filters and view settings live in the URL, so links are shareable, and opening the page without them restores the last view. Entity colors are fixed by all-time spend, so they do not change with filters.
 
-The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage/options`, and the quota endpoints under `/api/quota/*`. The usage endpoints report only the raw token components (`input_tokens`, `output_tokens`, `cached_tokens`); the dashboard derives tokens from them.
+The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage/options`, and the quota endpoints under `/api/quota/*`. The usage endpoints report only the raw token components (totals carry `input_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `output_tokens` and `reasoning_tokens`; series, trends and mix entries carry `input_tokens`, `output_tokens` and `cache_read_tokens`); the dashboard derives tokens from them. `/api/usage/export` returns the range as CSV with all five token columns.
 
 ### Server environment variables
 
@@ -122,10 +130,11 @@ Codex window labels come from each window's declared duration. A duration of 18,
 
 The webapp prices every request on its own with liteLLM's pricing data (`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`, disk-cached locally), following the cost rules of [ccusage](https://github.com/ccusage/ccusage). What to know:
 
-- **Long-context rates apply per request.** For models with liteLLM `*_above_200k_tokens` rates, only the tokens of each type above 200k in a single request bill at the higher rate. Models whose higher rates are only published above 272k (such as gpt-5.x), and every OpenAI-accounting model, bill the whole request at the long-context rates once its context passes the threshold. Summed usage never crosses a threshold on its own.
-- **Codex/OpenAI rows** report `cached_tokens` as a *subset* of `input_tokens`, so the cached portion bills at the cache-read rate and only the rest at the input rate. Which models use this accounting comes from liteLLM's `litellm_provider` (`openai`, `azure`), and the models table's cache hit rate uses the same convention.
-- **Fallback rates.** A missing cache-read rate is 10% of the input rate (the full input rate for OpenAI-accounting models), and a missing cache-write rate is 125% of the input rate. liteLLM entries without both a base input and output rate are ignored.
-- **Anthropic rows undercount cache writes.** Upstream CLIProxyAPI collapses Anthropic's `cache_creation_input_tokens` and `cache_read_input_tokens` into a single `cached_tokens` value before pushing to its usage queue. The webapp bills that combined value at the cache-read rate (~10% of input) rather than the cache-creation rate (~125% of input) for the creation portion. Claude totals are therefore a **lower bound** when prompt caching is in use; the magnitude of the undercount depends on your cache-write/read ratio. There is no purely-backend fix because the data needed to split the two buckets is not in the queue payload.
+- **Long-context rates apply per request.** For models with liteLLM `*_above_200k_tokens` rates, only the tokens of each type above 200k in a single request bill at the higher rate. Models whose higher rates are only published above 272k (such as gpt-5.x), and every OpenAI model, bill the whole request at the long-context rates once its input (cache reads and writes included) passes the threshold. Summed usage never crosses a threshold on its own.
+- **Token types.** Every request is split into uncached input, cache reads, cache writes and output, each billed at its own rate, for every model alike: uncached input is `input_tokens - cache_read_tokens - cache_creation_tokens`. Which models bill like OpenAI (whole-request long context, fallback rates below) comes from liteLLM's `litellm_provider` (`openai`, `azure`). Cache hit rate is cache reads over input everywhere.
+- **Fallback rates.** A missing cache-read rate is 10% of the input rate (the full input rate for OpenAI models), and a missing cache-write rate is 125% of the input rate. liteLLM entries without both a base input and output rate are ignored.
+- **Rows migrated from 0.2.x.** Before 0.3.0, cache reads and writes were stored as one number. The migration recovers Claude cache writes from each row's reported total, with two limits: Claude rows that wrote to the cache without reading it stay counted as cache reads, and Claude rows recorded before CLIProxyAPI v7.1.26 have no cache writes (their total did not include them), so their cost is a lower bound.
+- **Requests without a token split.** When CLIProxyAPI cannot classify a request's tokens (its `token_breakdown` quality is not `complete`), the request is stored with zero input and output tokens, so it counts as a request but adds no tokens or cost. The collector's log line reports how many such requests each run had.
 - **Missing pricing.** When liteLLM has no usable entry for a model, or the model id is empty (shown as `<empty>`), the dashboard renders that model's cost as `n/a` ("missing"). Totals that combine some priced and some unpriced models show the priced part with a trailing `*` ("partial_missing"), so they are a lower bound. The models table shows the rates each model is billed at per 1M tokens (input / output / cache read, with cache write and any long-context rates in the tooltip), the same rates the cost uses, or `n/a` when unpriced. The pricing map is refreshed periodically (`USAGE_PRICING_TTL_SECONDS`, default daily); restart the server or shorten the TTL if you need a newly-released model picked up sooner.
 
 ### Production run (single process)
