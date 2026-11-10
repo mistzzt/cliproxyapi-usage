@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from cliproxy_usage_collect import migration
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.db import open_db
@@ -42,6 +43,8 @@ OLD_ROWS = [
     ("2026-05-01T00:00:00Z", "claude-opus-4-1", 100, 50, 1000, 150),
     # GPT already stores all input, cache reads included.
     ("2026-10-02T00:00:00Z", "gpt-5", 2000, 100, 500, 2100),
+    # A GPT row reporting more cache reads than input gets them capped at input.
+    ("2026-10-03T00:00:00Z", "gpt-5", 300, 10, 900, 310),
 ]
 
 COLUMNS = (
@@ -83,6 +86,7 @@ def test_migration_rewrites_claude_rows_only(tmp_path: Path) -> None:
         ("2026-05-01T00:00:00Z", "claude-opus-4-1", 1100, 50, 2, 1000, 0, 150),
         ("2026-10-01T00:00:00Z", "claude-sonnet-4-5", 1400, 50, 2, 1000, 300, 1450),
         ("2026-10-02T00:00:00Z", "gpt-5", 2000, 100, 2, 500, 0, 2100),
+        ("2026-10-03T00:00:00Z", "gpt-5", 300, 10, 2, 300, 0, 310),
     ]
     conn.close()
 
@@ -101,6 +105,51 @@ def test_migration_writes_a_backup_of_the_old_db(tmp_path: Path) -> None:
     ).fetchall()
     old.close()
     assert rows == sorted(OLD_ROWS)
+
+
+def _backup_columns(backup: Path) -> set[str]:
+    conn = sqlite3.connect(backup)
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(requests)")}
+    conn.close()
+    return columns
+
+
+def test_run_that_loses_the_race_keeps_the_first_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = _old_db(tmp_path / "usage.db")
+    check = migration._is_old_layout  # pyright: ignore[reportPrivateUsage]
+    raced = False
+
+    def check_then_race(conn: sqlite3.Connection) -> bool:
+        # After this run's first check, another run migrates before it takes the lock.
+        nonlocal raced
+        old = check(conn)
+        if not raced:
+            raced = True
+            open_db(db).close()
+        return old
+
+    monkeypatch.setattr(migration, "_is_old_layout", check_then_race)
+    conn = open_db(db)
+    rows = _rows(conn)
+    conn.close()
+
+    assert "cached_tokens" in _backup_columns(tmp_path / f"usage.db{BACKUP_SUFFIX}")
+    assert rows[0] == (
+        "2026-05-01T00:00:00Z",
+        "claude-opus-4-1",
+        1100,
+        50,
+        2,
+        1000,
+        0,
+        150,
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "usage.db",
+        f"usage.db{BACKUP_SUFFIX}",
+    ]
 
 
 def test_second_open_changes_nothing(tmp_path: Path) -> None:
