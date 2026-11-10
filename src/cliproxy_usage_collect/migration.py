@@ -37,6 +37,14 @@ def _is_old_layout(conn: sqlite3.Connection) -> bool:
     return "cached_tokens" in columns
 
 
+def _fsync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def migrate(conn: sqlite3.Connection, path: Path) -> None:
     """Migrate the ``requests`` table if it has the old layout, backing it up first.
 
@@ -55,7 +63,10 @@ def migrate(conn: sqlite3.Connection, path: Path) -> None:
         conn.execute("BEGIN IMMEDIATE")
         try:
             if _is_old_layout(conn):
+                # VACUUM INTO does not sync its output; make the backup durable first.
+                _fsync(temp)
                 os.replace(temp, backup)
+                _fsync(path.parent)
                 for statement in _MIGRATE.split(";"):
                     if statement.strip():
                         conn.execute(statement)
