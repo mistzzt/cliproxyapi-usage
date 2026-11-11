@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import read_version
 
 from cliproxy_usage_collect import db as db_module
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
-from cliproxy_usage_collect.db import open_db, user_version
+from cliproxy_usage_collect.db import open_db
 from cliproxy_usage_collect.migration import BACKUP_SUFFIX, MigrationError
+from cliproxy_usage_collect.schema_version import supported_version, user_version
 
 # The 0.2.0 layout, with token columns in its order and meanings.
 OLD_DDL = """
@@ -120,16 +122,16 @@ def test_run_that_loses_the_race_keeps_the_first_backup(
     db = _old_db(tmp_path / "usage.db")
     raced = False
 
-    def read_then_race(conn: sqlite3.Connection) -> int:
+    def read_then_race(conn: sqlite3.Connection, path: Path) -> int:
         # After this run's first read, another run migrates before it takes the lock.
         nonlocal raced
-        version = user_version(conn)
+        version = supported_version(conn, path)
         if not raced:
             raced = True
             open_db(db).close()
         return version
 
-    monkeypatch.setattr(db_module, "user_version", read_then_race)
+    monkeypatch.setattr(db_module, "supported_version", read_then_race)
     conn = open_db(db)
     rows = _rows(conn)
     conn.close()
@@ -189,10 +191,9 @@ def test_locked_db_is_left_unchanged(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(db)
     columns = {r[1] for r in conn.execute("PRAGMA table_info(requests)")}
-    version = user_version(conn)
     conn.close()
     assert "cached_tokens" in columns
-    assert version == 0
+    assert read_version(db) == 0
 
 
 def test_migration_failure_exits_1_before_popping_the_queue(
@@ -209,6 +210,4 @@ def test_migration_failure_exits_1_before_popping_the_queue(
 
     assert main(queue_client=queue_client) == 1
     assert "Migration error" in capsys.readouterr().err
-    conn = sqlite3.connect(db)
-    assert user_version(conn) == 0
-    conn.close()
+    assert read_version(db) == 0

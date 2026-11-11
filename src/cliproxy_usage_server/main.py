@@ -16,7 +16,11 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from cliproxy_usage_collect.db import SCHEMA_VERSION, user_version
+from cliproxy_usage_collect.schema_version import (
+    SCHEMA_VERSION,
+    mismatch_message,
+    user_version,
+)
 from cliproxy_usage_server.config import ServerConfig, load_config, load_key_aliases
 from cliproxy_usage_server.db import open_ro
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
@@ -261,13 +265,10 @@ def _schema_problem(db_path: Path) -> str | None:
     if version == SCHEMA_VERSION:
         return None
     if version < SCHEMA_VERSION:
-        action = "run cliproxy-usage-collect once to migrate it"
-    else:
-        action = "upgrade the server"
-    return (
-        f"{db_path} has schema version {version}, but this server needs "
-        f"{SCHEMA_VERSION}; {action}"
-    )
+        return mismatch_message(
+            db_path, version, "run cliproxy-usage-collect once to migrate it"
+        )
+    return mismatch_message(db_path, version, "upgrade the server")
 
 
 def run() -> None:

@@ -1,5 +1,7 @@
+import contextlib
 import json
 import pathlib
+import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.schema_version import user_version
 from cliproxy_usage_collect.schemas import RequestRecord
 from cliproxy_usage_server.aggregate import Filters, Window, query_summary
 from cliproxy_usage_server.pricing import ModelPricing
@@ -80,6 +83,18 @@ def _record(row: UsageRow, cache_creation: int = 0) -> RequestRecord:
         total_tokens=inp + out,
         failed=False,
     )
+
+
+def db_at_version(db_path: Path, version: int) -> Path:
+    """Create or stamp the DB at *db_path* with schema *version*."""
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        conn.execute(f"PRAGMA user_version = {version}")
+    return db_path
+
+
+def read_version(db_path: Path) -> int:
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        return user_version(conn)
 
 
 def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:

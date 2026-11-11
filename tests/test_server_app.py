@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from conftest import db_at_version
 from fastapi.testclient import TestClient
 
 import cliproxy_usage_server.main as main_mod
-from cliproxy_usage_collect.db import SCHEMA_VERSION, open_db
+from cliproxy_usage_collect.db import open_db
+from cliproxy_usage_collect.schema_version import SCHEMA_VERSION
 from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.schemas import QuotaAccount
@@ -247,12 +248,6 @@ def run_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Magi
     return db_path, mock_uvicorn_run
 
 
-def _db_at_version(db_path: Path, version: int) -> None:
-    conn = sqlite3.connect(db_path)
-    conn.execute(f"PRAGMA user_version = {version}")
-    conn.close()
-
-
 def test_run_invokes_uvicorn(
     run_env: tuple[Path, MagicMock], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -266,6 +261,17 @@ def test_run_invokes_uvicorn(
     _, kwargs = mock_uvicorn_run.call_args
     assert kwargs["host"] == "0.0.0.0"
     assert kwargs["port"] == 9999
+
+
+def test_run_starts_when_the_db_file_is_missing(
+    run_env: tuple[Path, MagicMock],
+) -> None:
+    db_path, mock_uvicorn_run = run_env
+
+    main_mod.run()
+
+    assert not db_path.exists()
+    mock_uvicorn_run.assert_called_once()
 
 
 def test_run_starts_on_a_db_at_the_schema_version(
@@ -290,7 +296,7 @@ def test_run_refuses_a_db_at_another_schema_version(
     run_env: tuple[Path, MagicMock], version: int, action: str
 ) -> None:
     db_path, mock_uvicorn_run = run_env
-    _db_at_version(db_path, version)
+    db_at_version(db_path, version)
 
     with pytest.raises(SystemExit) as exc_info:
         main_mod.run()

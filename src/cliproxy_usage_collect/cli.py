@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from cliproxy_usage_collect.config import Config, ConfigError, load_config
-from cliproxy_usage_collect.db import SchemaVersionError, insert_records, open_db
+from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.migration import MigrationError
 from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.queue_client import (
@@ -15,6 +16,7 @@ from cliproxy_usage_collect.queue_client import (
     TransientError,
     pop_usage_records,
 )
+from cliproxy_usage_collect.schema_version import SchemaVersionError
 
 QueueClient = Callable[[Config], Sequence[Mapping[str, Any]]]
 
@@ -31,7 +33,7 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
     Returns
     -------
     int
-        Exit code: 0 success, 1 transient error (migration failures included),
+        Exit code: 0 success, 1 transient error (migration and DB failures included),
         2 config error (a DB from a newer version included), 3 auth error,
         4 schema error.
     """
@@ -48,6 +50,9 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
         return 2
     except MigrationError as exc:
         print(f"Migration error: {exc}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as exc:
+        print(f"Database error: {exc}", file=sys.stderr)
         return 1
 
     try:

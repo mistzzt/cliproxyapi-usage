@@ -10,14 +10,13 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from cliproxy_usage_collect.db import user_version
+from cliproxy_usage_collect.schema_version import execute_statements, locked_step
 
 BACKUP_SUFFIX = ".pre-cache-columns"
 
 # Claude rows stored uncached input; cache creation is the rest of their total.
 # Other rows already stored all input; capping cache reads keeps uncached input >= 0.
 _MIGRATE = """
-PRAGMA user_version = 1;
 ALTER TABLE requests RENAME COLUMN cached_tokens TO cache_read_tokens;
 ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
 UPDATE requests SET
@@ -54,22 +53,17 @@ def migrate(conn: sqlite3.Connection, path: Path) -> None:
     try:
         fd, name = tempfile.mkstemp(dir=path.parent, prefix=backup.name, suffix=".tmp")
         os.close(fd)
-        temp = Path(name)
+        temp = copy = Path(name)
         conn.execute("VACUUM INTO ?", (name,))
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            if user_version(conn) == 0:
-                # VACUUM INTO does not sync its output; make the backup durable first.
-                _fsync(temp)
-                os.replace(temp, backup)
-                _fsync(path.parent)
-                for statement in _MIGRATE.split(";"):
-                    if statement.strip():
-                        conn.execute(statement)
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
+
+        def apply() -> None:
+            # VACUUM INTO does not sync its output; make the backup durable first.
+            _fsync(copy)
+            os.replace(copy, backup)
+            _fsync(path.parent)
+            execute_statements(conn, _MIGRATE)
+
+        locked_step(conn, path, lambda version, _has_table: version == 0, apply, 1)
     except (sqlite3.Error, OSError) as exc:
         msg = f"could not migrate {path}: {exc}"
         raise MigrationError(msg) from exc
