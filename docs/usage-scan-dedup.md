@@ -20,7 +20,7 @@ Costs are the hard part. Each request's cost depends on its own size compared to
 | Whole request, 200k | OpenAI models without 272k rates | the whole request when input > 200k |
 | Whole request, 272k | OpenAI models with 272k rates, and non-OpenAI models with only `*_above_272k_tokens` rates | the whole request when input > 272k |
 
-Every model's `input_tokens` includes its cache reads and cache creation, so uncached input is `input_tokens - cache_read_tokens - cache_creation_tokens`, and no clamp is needed.
+Every model's `input_tokens` includes its cache reads and cache creation, so uncached input is `input_tokens - cache_read_tokens - cache_creation_tokens`, and no clamp is needed. Cache creation splits into its 1-hour part (`cache_creation_1h_tokens`, billed at twice the tier's input rate) and the 5-minute rest, `cache_creation_tokens - cache_creation_1h_tokens`; marginal plans tier the two parts separately.
 
 ```sql
 CREATE TABLE requests_rollup (
@@ -35,24 +35,29 @@ CREATE TABLE requests_rollup (
   reasoning_tokens      INTEGER NOT NULL,
   cache_read_tokens     INTEGER NOT NULL,
   cache_creation_tokens INTEGER NOT NULL,
+  cache_creation_1h_tokens INTEGER NOT NULL,
   latency_ms            INTEGER NOT NULL,  -- sum over successful requests (failed = 0)
   last_ts               TEXT    NOT NULL,  -- MAX(timestamp), as _fetch_cells today
-  -- marginal 200k: SUM(MIN(x, 200000)) per token type, x = uncached input, output, cache read, cache creation
+  -- marginal 200k: SUM(MIN(x, 200000)) per token type, x = uncached input, output, cache read,
+  -- 5-minute cache creation, 1-hour cache creation
   uncached_200k         INTEGER NOT NULL,
   output_200k           INTEGER NOT NULL,
   cache_read_200k       INTEGER NOT NULL,
-  cache_creation_200k   INTEGER NOT NULL,
+  cache_creation_5m_200k INTEGER NOT NULL,
+  cache_creation_1h_200k INTEGER NOT NULL,
   -- whole request: sums over requests with input_tokens > 200000 (long200) or > 272000 (long272)
   long200_uncached       INTEGER NOT NULL,
   long200_output         INTEGER NOT NULL,
   long200_cache_read     INTEGER NOT NULL,
   long200_cache_creation INTEGER NOT NULL,
+  long200_cache_creation_1h INTEGER NOT NULL,
   long272_uncached       INTEGER NOT NULL,
   long272_output         INTEGER NOT NULL,
   long272_cache_read     INTEGER NOT NULL,
   long272_cache_creation INTEGER NOT NULL,
+  long272_cache_creation_1h INTEGER NOT NULL,
   -- successful requests with tokens at the long rate, one count per shape:
-  -- marginal 200k: any of the four token types > 200000; the others as their long sums above
+  -- marginal 200k: any of the five token types > 200000; the others as their long sums above
   marginal200_requests  INTEGER NOT NULL,
   long200_requests      INTEGER NOT NULL,
   long272_requests      INTEGER NOT NULL,

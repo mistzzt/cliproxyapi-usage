@@ -36,7 +36,10 @@ def make_record(timestamp: str, failed: bool = False) -> RequestRecord:
         reasoning_tokens=0,
         cache_read_tokens=5,
         cache_creation_tokens=0,
+        cache_creation_1h_tokens=0,
         total_tokens=30,
+        service_tier=None,
+        ttft_ms=None,
         failed=failed,
     )
 
@@ -182,15 +185,23 @@ def test_insert_records_single_transaction(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_insert_records_round_trips_every_token_column(tmp_path: Path) -> None:
+def test_insert_records_round_trips_token_tier_and_ttft_columns(tmp_path: Path) -> None:
     conn = open_db(tmp_path / "usage.db")
     rec = make_record("ts-1").model_copy(
-        update={"input_tokens": 100, "cache_creation_tokens": 7, "reasoning_tokens": 2}
+        update={
+            "input_tokens": 100,
+            "cache_creation_tokens": 7,
+            "cache_creation_1h_tokens": 3,
+            "reasoning_tokens": 2,
+            "service_tier": "priority",
+            "ttft_ms": 40,
+        }
     )
     insert_records(conn, [rec])
     row = conn.execute(
         "SELECT input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, "
-        "cache_creation_tokens, total_tokens FROM requests"
+        "cache_creation_tokens, cache_creation_1h_tokens, total_tokens, "
+        "service_tier, ttft_ms FROM requests"
     ).fetchone()
-    assert row == (100, 20, 2, 5, 7, 30)
+    assert row == (100, 20, 2, 5, 7, 3, 30, "priority", 40)
     conn.close()

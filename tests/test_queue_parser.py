@@ -10,7 +10,7 @@ import pytest
 from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.schemas import RequestRecord
 
-# Shaped like CLIProxyAPI's queuedUsageDetail, legacy ``tokens`` included.
+# Shaped like CLIProxyAPI's queuedUsageDetail; only 1-hour writes are read from tokens.
 VALID_PAYLOAD: dict[str, Any] = {
     "timestamp": "2026-05-04T12:34:56.789Z",
     "latency_ms": 1234,
@@ -25,6 +25,7 @@ VALID_PAYLOAD: dict[str, Any] = {
         "cache_read_tokens": 40,
         "cache_read_tokens_present": True,
         "cache_creation_tokens": 60,
+        "cache_creation_1h_tokens": 25,
         "total_tokens": 1020,
     },
     "failed": False,
@@ -52,6 +53,8 @@ VALID_PAYLOAD: dict[str, Any] = {
     "provider": "claude",
     "executor_type": "claude",
     "model": "claude-sonnet-4-5",
+    "service_tier": "",
+    "response_service_tier": "standard",
     "endpoint": "/v1/messages",
     "auth_type": "oauth",
     "api_key": "sk-test",
@@ -88,16 +91,57 @@ def test_complete_breakdown_fills_each_token_column():
         reasoning_tokens=3,
         cache_read_tokens=40,
         cache_creation_tokens=60,
+        cache_creation_1h_tokens=25,
         total_tokens=1020,
+        service_tier="standard",
+        ttft_ms=300,
         failed=False,
     )
 
 
-def test_legacy_tokens_object_is_ignored():
+def test_legacy_token_fields_are_ignored():
     payload = _payload()
-    payload["tokens"] = {"input_tokens": "not read"}
+    payload["tokens"] = {"input_tokens": "not read", "cache_creation_1h_tokens": 25}
 
     assert _record_from(payload) == _record_from(VALID_PAYLOAD)
+
+
+@pytest.mark.parametrize(
+    ("tokens", "expected"),
+    [({}, 0), ({"cache_creation_1h_tokens": 90}, 60), (None, 0)],
+)
+def test_cache_creation_1h_defaults_to_0_and_is_capped(
+    tokens: dict[str, Any] | None, expected: int
+):
+    payload = _payload()
+    if tokens is None:
+        del payload["tokens"]
+    else:
+        payload["tokens"] = tokens
+
+    assert _record_from(payload).cache_creation_1h_tokens == expected
+
+
+@pytest.mark.parametrize("tier", [None, ""])
+def test_missing_or_empty_service_tier_is_none(tier: str | None):
+    payload = _payload()
+    if tier is None:
+        del payload["response_service_tier"]
+    else:
+        payload["response_service_tier"] = tier
+
+    assert _record_from(payload).service_tier is None
+
+
+@pytest.mark.parametrize("ttft", [None, 0])
+def test_missing_or_zero_ttft_is_none(ttft: int | None):
+    payload = _payload()
+    if ttft is None:
+        del payload["ttft_ms"]
+    else:
+        payload["ttft_ms"] = ttft
+
+    assert _record_from(payload).ttft_ms is None
 
 
 @pytest.mark.parametrize("quality", ["inconsistent", "unclassified"])
@@ -116,8 +160,9 @@ def test_incomplete_breakdown_stores_only_total_and_is_counted(quality: str):
         record.reasoning_tokens,
         record.cache_read_tokens,
         record.cache_creation_tokens,
+        record.cache_creation_1h_tokens,
         record.total_tokens,
-    ) == (0, 0, 0, 0, 0, 1500)
+    ) == (0, 0, 0, 0, 0, 0, 1500)
 
 
 def test_missing_breakdown_raises_schema_error():
@@ -230,6 +275,9 @@ def test_unstored_queue_fields_are_accepted_but_ignored():
         "reasoning_tokens",
         "cache_read_tokens",
         "cache_creation_tokens",
+        "cache_creation_1h_tokens",
         "total_tokens",
+        "service_tier",
+        "ttft_ms",
         "failed",
     }

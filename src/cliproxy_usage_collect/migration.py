@@ -19,6 +19,10 @@ BACKUP_SUFFIX = ".pre-cache-columns"
 _MIGRATE = (
     "ALTER TABLE requests RENAME COLUMN cached_tokens TO cache_read_tokens",
     "ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE requests ADD COLUMN cache_creation_1h_tokens "
+    "INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE requests ADD COLUMN service_tier TEXT",
+    "ALTER TABLE requests ADD COLUMN ttft_ms INTEGER",
     """
 UPDATE requests SET
   cache_creation_tokens =

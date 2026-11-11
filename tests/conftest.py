@@ -68,7 +68,9 @@ SYNTHETIC_PRICING: dict[str, ModelPricing] = {
 }
 
 
-def _record(row: UsageRow, cache_creation: int = 0) -> RequestRecord:
+def _record(
+    row: UsageRow, cache_creation: int = 0, cache_creation_1h: int = 0
+) -> RequestRecord:
     ts, key, model, source, inp, out, cache_read = row
     return RequestRecord(
         timestamp=ts,
@@ -82,7 +84,10 @@ def _record(row: UsageRow, cache_creation: int = 0) -> RequestRecord:
         reasoning_tokens=0,
         cache_read_tokens=cache_read,
         cache_creation_tokens=cache_creation,
+        cache_creation_1h_tokens=cache_creation_1h,
         total_tokens=inp + out,
+        service_tier=None,
+        ttft_ms=None,
         failed=False,
     )
 
@@ -112,12 +117,17 @@ def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
 
 
 def request_totals(
-    pricing: ModelPricing, inp: int, out: int, cache_read: int, cache_creation: int
+    pricing: ModelPricing,
+    inp: int,
+    out: int,
+    cache_read: int,
+    cache_creation: int,
+    cache_creation_1h: int = 0,
 ) -> Totals:
     """Totals of one request with these DB columns, from the production query."""
     conn = open_db(Path(":memory:"))
     row = ("2026-10-01T00:00:00Z", "k", "m", "s", inp, out, cache_read)
-    insert_records(conn, [_record(row, cache_creation)])
+    insert_records(conn, [_record(row, cache_creation, cache_creation_1h)])
     window = Window(None, datetime(2100, 1, 1, tzinfo=UTC))
     summary = query_summary(
         conn, window, None, ZoneInfo("UTC"), Filters(), {"m": pricing}
@@ -127,10 +137,17 @@ def request_totals(
 
 
 def request_cost(
-    pricing: ModelPricing, inp: int, out: int, cache_read: int, cache_creation: int
+    pricing: ModelPricing,
+    inp: int,
+    out: int,
+    cache_read: int,
+    cache_creation: int,
+    cache_creation_1h: int = 0,
 ) -> float:
     """Cost of one request with these DB columns, priced by the production query."""
-    cost = request_totals(pricing, inp, out, cache_read, cache_creation).cost
+    cost = request_totals(
+        pricing, inp, out, cache_read, cache_creation, cache_creation_1h
+    ).cost
     assert cost is not None
     return cost
 

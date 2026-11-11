@@ -37,6 +37,12 @@ class _TokenBreakdown(_Model):
     output: _OutputBreakdown
 
 
+class _Tokens(_Model):
+    """The legacy ``tokens`` object; only its 1-hour cache writes are read."""
+
+    cache_creation_1h_tokens: int = 0
+
+
 class _QueuePayload(_Model):
     timestamp: str
     api_key: str
@@ -44,7 +50,10 @@ class _QueuePayload(_Model):
     source: str
     auth_index: str
     latency_ms: int
+    ttft_ms: int = 0  # 0 when neither a first token nor packet was observed
+    response_service_tier: str = ""
     failed: bool
+    tokens: _Tokens = _Tokens()
     token_breakdown: _TokenBreakdown
 
 
@@ -56,6 +65,7 @@ class ParsedBatch(NamedTuple):
 def _record(payload: _QueuePayload) -> RequestRecord:
     tokens = payload.token_breakdown
     complete = tokens.quality == "complete"
+    cache_creation = tokens.input.cache_write_tokens if complete else 0
     return RequestRecord(
         timestamp=payload.timestamp,
         api_key=payload.api_key,
@@ -67,8 +77,14 @@ def _record(payload: _QueuePayload) -> RequestRecord:
         output_tokens=tokens.output.total_tokens if complete else 0,
         reasoning_tokens=tokens.output.reasoning_tokens if complete else 0,
         cache_read_tokens=tokens.input.cache_read_tokens if complete else 0,
-        cache_creation_tokens=tokens.input.cache_write_tokens if complete else 0,
+        cache_creation_tokens=cache_creation,
+        # 1-hour writes are part of the stored cache creation, never more.
+        cache_creation_1h_tokens=min(
+            payload.tokens.cache_creation_1h_tokens, cache_creation
+        ),
         total_tokens=tokens.total_tokens,
+        service_tier=payload.response_service_tier or None,
+        ttft_ms=payload.ttft_ms or None,
         failed=payload.failed,
     )
 

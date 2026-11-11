@@ -68,6 +68,12 @@ CostTypes = tuple[float, float, float, float]
             (260_000, 0, 0, 250_000),
             ((0.03, 0.0, 0.0, 0.9375), 0.1875, 1, 0.0),
         ),
+        # Marginal 200k: 1-hour creation tiers on its own, at twice the input rates.
+        (
+            CLAUDE,
+            (260_000, 0, 0, 250_000, 250_000),
+            ((0.03, 0.0, 0.0, 1.8), 0.6, 1, 0.0),
+        ),
         # OpenAI 272k: input includes the 100k cache reads; whole request at long rates.
         (
             GPT_LONG,
@@ -86,18 +92,17 @@ CostTypes = tuple[float, float, float, float]
 )
 def test_single_request_detail(
     pricing: ModelPricing,
-    tokens: tuple[int, int, int, int],
+    tokens: tuple[int, ...],
     expected: tuple[CostTypes, float, int, float],
 ) -> None:
-    inp, out, cache_read, cache_creation = tokens
-    t = request_totals(pricing, inp, out, cache_read, cache_creation)
+    t = request_totals(pricing, *tokens)
     assert _detail(t) == expected
     assert (
         t.input_tokens,
         t.output_tokens,
         t.cache_read_tokens,
         t.cache_creation_tokens,
-    ) == tokens
+    ) == tokens[:4]
     assert t.cost == pytest.approx(sum(expected[0]))
 
 
@@ -114,7 +119,10 @@ def _record(ts: str, *, inp: int, latency: int, failed: bool) -> RequestRecord:
         reasoning_tokens=0,
         cache_read_tokens=0,
         cache_creation_tokens=0,
+        cache_creation_1h_tokens=0,
         total_tokens=inp,
+        service_tier=None,
+        ttft_ms=None,
         failed=failed,
     )
 
@@ -197,6 +205,7 @@ def test_export_rows_match_breakdown(synthetic_db_path: pathlib.Path) -> None:
         "output_tokens",
         "cache_read_tokens",
         "cache_creation_tokens",
+        "cache_creation_1h_tokens",
         "reasoning_tokens",
         "cost",
     ]
@@ -220,3 +229,19 @@ def test_export_redacts_and_blanks_unpriced(synthetic_db_path: pathlib.Path) -> 
         "claude-t": False,
         "gpt-t": True,
     }
+
+
+def test_export_carries_cache_creation_1h(tmp_path: pathlib.Path) -> None:
+    conn = open_db(tmp_path / "usage.db")
+    rec = _record("2026-11-01T12:00:00Z", inp=100, latency=0, failed=False)
+    update = {"cache_creation_tokens": 30, "cache_creation_1h_tokens": 10}
+    insert_records(conn, [rec.model_copy(update=update)])
+    conn.close()
+
+    [row] = _export(tmp_path / "usage.db", {"m": FLAT})
+    assert (row["cache_creation_tokens"], row["cache_creation_1h_tokens"]) == (
+        "30",
+        "10",
+    )
+    # 70 uncached at 3e-6, 20 5-minute writes at 3.75e-6, 10 1-hour at 6e-6.
+    assert float(row["cost"]) == pytest.approx(0.000345)

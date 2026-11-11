@@ -109,6 +109,7 @@ class _Cell:
     reasoning_tokens: int
     cache_read_tokens: int
     cache_creation_tokens: int
+    cache_creation_1h_tokens: int
     ok_latency_sum: int
     long_requests: int
     last_used: datetime
@@ -141,6 +142,7 @@ class _Acc:
     reasoning_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
     ok_latency_sum: int = 0
     long_requests: int = 0
     cost_input: float = 0.0
@@ -160,6 +162,7 @@ class _Acc:
         self.reasoning_tokens += c.reasoning_tokens
         self.cache_read_tokens += c.cache_read_tokens
         self.cache_creation_tokens += c.cache_creation_tokens
+        self.cache_creation_1h_tokens += c.cache_creation_1h_tokens
         self.ok_latency_sum += c.ok_latency_sum
         self.long_requests += c.long_requests
         self.cost_input += c.costs.input
@@ -294,7 +297,8 @@ def _fetch_cells(
                 requests.*,
                 COALESCE(switch, 0) AS switch,
                 COALESCE(threshold, 0) AS t,
-                input_tokens - cache_read_tokens - cache_creation_tokens AS uncached
+                input_tokens - cache_read_tokens - cache_creation_tokens AS uncached,
+                cache_creation_tokens - cache_creation_1h_tokens AS cache_creation_5m
             FROM requests LEFT JOIN plan ON plan_model = model
             {where}
         )
@@ -310,14 +314,16 @@ def _fetch_cells(
             SUM(reasoning_tokens),
             SUM(cache_read_tokens),
             SUM(cache_creation_tokens),
+            SUM(cache_creation_1h_tokens),
             SUM(CASE WHEN failed THEN 0 ELSE latency_ms END),
             SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END),
             MAX(timestamp),
             SUM(uncached),
             SUM({_base_rate("uncached")}),
             SUM({_base_rate("output_tokens")}),
-            SUM({_base_rate("cache_creation_tokens")}),
-            SUM({_base_rate("cache_read_tokens")})
+            SUM({_base_rate("cache_creation_5m")}),
+            SUM({_base_rate("cache_read_tokens")}),
+            SUM({_base_rate("cache_creation_1h_tokens")})
         FROM r
         GROUP BY slice_no, api_key, model, source
         """,
@@ -339,19 +345,27 @@ def _fetch_cells(
         rea,
         cr,
         cc,
+        cc_1h,
         lat,
         long_req,
         last,
         uncached,
         base_inp,
         base_out,
-        base_cc,
+        base_cc_5m,
         base_cr,
+        base_cc_1h,
     ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        base = (base_inp, base_out, base_cc, base_cr)
-        above = (uncached - base_inp, out - base_out, cc - base_cc, cr - base_cr)
+        base = (base_inp, base_out, base_cc_5m, base_cr, base_cc_1h)
+        above = (
+            uncached - base_inp,
+            out - base_out,
+            cc - cc_1h - base_cc_5m,
+            cr - base_cr,
+            cc_1h - base_cc_1h,
+        )
         if plan is None or not plan.has_long_tier:
             long_req = 0
         if api_key not in people:
@@ -371,6 +385,7 @@ def _fetch_cells(
                 reasoning_tokens=rea,
                 cache_read_tokens=cr,
                 cache_creation_tokens=cc,
+                cache_creation_1h_tokens=cc_1h,
                 ok_latency_sum=lat,
                 long_requests=long_req,
                 last_used=_parse_ts(last),
@@ -390,7 +405,7 @@ def _fetch_cells(
 # the threshold, marginal plans when any one token type exceeds it.
 _LONG_REQUEST = (
     "(CASE WHEN switch THEN input_tokens > t ELSE MAX(uncached, output_tokens, "
-    "cache_read_tokens, cache_creation_tokens) > t END)"
+    "cache_read_tokens, cache_creation_5m, cache_creation_1h_tokens) > t END)"
 )
 
 _NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
@@ -675,6 +690,7 @@ EXPORT_COLUMNS = (
     "output_tokens",
     "cache_read_tokens",
     "cache_creation_tokens",
+    "cache_creation_1h_tokens",
     "reasoning_tokens",
     "cost",
 )
@@ -717,6 +733,7 @@ def query_export(
                 acc.output_tokens,
                 acc.cache_read_tokens,
                 acc.cache_creation_tokens,
+                acc.cache_creation_1h_tokens,
                 acc.reasoning_tokens,
                 repr(acc.cost) if priced[model] else "",
             )

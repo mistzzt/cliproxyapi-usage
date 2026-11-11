@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS requests (
   reasoning_tokens      INTEGER NOT NULL,  -- part of output_tokens
   cache_read_tokens     INTEGER NOT NULL,  -- part of input_tokens
   cache_creation_tokens INTEGER NOT NULL DEFAULT 0,  -- part of input_tokens
+  cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,  -- 1-hour part of cache_creation
   total_tokens          INTEGER NOT NULL,  -- upstream's reported total, never read
+  service_tier          TEXT,              -- billed tier; NULL when unknown
+  ttft_ms               INTEGER,           -- time to first token; NULL when unmeasured
   failed                INTEGER NOT NULL
 )
 """,
@@ -52,7 +55,10 @@ _COLUMNS = (
     "reasoning_tokens",
     "cache_read_tokens",
     "cache_creation_tokens",
+    "cache_creation_1h_tokens",
     "total_tokens",
+    "service_tier",
+    "ttft_ms",
     "failed",
 )
 
@@ -114,7 +120,10 @@ def insert_records(conn: sqlite3.Connection, records: Iterable[RequestRecord]) -
             rec.reasoning_tokens,
             rec.cache_read_tokens,
             rec.cache_creation_tokens,
+            rec.cache_creation_1h_tokens,
             rec.total_tokens,
+            rec.service_tier,
+            rec.ttft_ms,
             int(rec.failed),
         )
         for rec in records

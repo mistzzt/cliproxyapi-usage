@@ -41,7 +41,10 @@ def records(now: datetime) -> list[RequestRecord]:
                 reasoning_tokens=0,
                 cache_read_tokens=100,
                 cache_creation_tokens=50 if i % 2 == 0 else 0,
+                cache_creation_1h_tokens=20 if i % 4 == 0 else 0,
                 total_tokens=1200 + 10 * (i % 30) + i % 40,
+                service_tier="default" if i % 3 == 0 else None,
+                ttft_ms=80 + i % 20 if i % 5 else None,
                 failed=i % 17 == 0,
             )
         )

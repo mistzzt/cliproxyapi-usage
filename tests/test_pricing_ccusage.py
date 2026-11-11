@@ -1,8 +1,8 @@
 """Per-request cost semantics ported from ccusage (cost.rs and the Codex adapter).
 
 Each case prices one request through the production query (``request_cost``:
-input with its cache reads and creation, output, cache read, cache creation)
-and compares it with a fixed, hand-checked dollar amount.
+input with its cache reads and creation, output, cache read, cache creation, and
+its 1-hour part) and compares it with a fixed, hand-checked dollar amount.
 
 TODO: check these cases against ccusage itself (e.g. run its Rust cost
 calculator on the same inputs) instead of hand-checked amounts.
@@ -110,6 +110,8 @@ def test_cache_creation_flat_rate() -> None:
     )
     # 1000 uncached, 200 cache read and 300 cache creation make 1500 input.
     assert request_cost(p, 1_500, 500, 200, 300) == pytest.approx(0.011685)
+    # 100 of the creation lasts an hour, at twice the input rate.
+    assert request_cost(p, 1_500, 500, 200, 300, 100) == pytest.approx(0.01191)
 
 
 @pytest.mark.parametrize(
@@ -151,3 +153,44 @@ def test_272k_only_rates_bill_cache_creation_at_the_long_rate() -> None:
     )
     # 100k uncached + 200k creation is 300k input, which bills long.
     assert request_cost(p, 300_000, 0, 0, 200_000) == pytest.approx(3.5)
+
+
+# ---------------------------------------------------------------------------
+# 1-hour cache creation (2x the input rate of its tier) under each CostPlan shape
+# ---------------------------------------------------------------------------
+
+
+def test_cache_creation_1h_flat_rate() -> None:
+    p = ModelPricing(input_cost_per_token=3e-6, output_cost_per_token=15e-6)
+    assert request_cost(p, 100_000, 0, 0, 100_000, 100_000) == pytest.approx(0.6)
+
+
+@pytest.mark.parametrize(
+    ("creation", "creation_1h", "expected"),
+    [
+        # 50k of the 250k 1-hour creation bills at twice the above input rate.
+        (250_000, 250_000, 1.8),
+        # 150k 5-minute + 150k 1-hour creation: neither part crosses 200k.
+        (300_000, 150_000, 1.4625),
+    ],
+)
+def test_cache_creation_1h_200k_tier_charges_only_its_excess(
+    creation: int, creation_1h: int, expected: float
+) -> None:
+    cost = request_cost(CLAUDE, creation, 0, 0, creation, creation_1h)
+    assert cost == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("inp", "expected"), [(272_000, 1.86), (272_001, 3.72001)])
+def test_openai_cache_creation_1h_follows_the_whole_request_switch(
+    inp: int, expected: float
+) -> None:
+    # 100k of the input is 1-hour creation, at twice the input rate of either tier.
+    cost = request_cost(GPT_LONG, inp, 0, 0, 100_000, 100_000)
+    assert cost == pytest.approx(expected)
+
+
+def test_272k_only_rates_bill_cache_creation_1h_at_twice_the_long_input_rate() -> None:
+    p = GPT_LONG.model_copy(update={"litellm_provider": "xai"})
+    # 100k uncached + 200k 1-hour creation is 300k input, which bills long.
+    assert request_cost(p, 300_000, 0, 0, 200_000, 200_000) == pytest.approx(5.0)

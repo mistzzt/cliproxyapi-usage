@@ -119,6 +119,10 @@ def rollup_cost_status(statuses: Collection[PricingResolution]) -> CostStatus:
     return "partial_missing" if "live" in statuses else "missing"
 
 
+# ccusage bills 1-hour cache writes at twice the input rate of their tier.
+_CACHE_CREATION_1H_INPUT_MULTIPLIER = 2.0
+
+
 class Rates(NamedTuple):
     """USD per token for each token type."""
 
@@ -127,8 +131,21 @@ class Rates(NamedTuple):
     cache_creation: float
     cache_read: float
 
+    @property
+    def by_amount(self) -> tuple[float, float, float, float, float]:
+        """Rates in ``Amounts`` order."""
+        return (
+            self.input,
+            self.output,
+            self.cache_creation,
+            self.cache_read,
+            self.input * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
+        )
 
-Amounts = tuple[int, int, int, int]  # token counts in ``Rates`` field order
+
+# Token counts: uncached input, output, 5-minute cache creation, cache read and
+# 1-hour cache creation.
+Amounts = tuple[int, int, int, int, int]
 
 
 class Costs(NamedTuple):
@@ -136,7 +153,7 @@ class Costs(NamedTuple):
 
     input: float
     output: float
-    cache_creation: float
+    cache_creation: float  # 5-minute and 1-hour writes
     cache_read: float
 
 
@@ -159,18 +176,19 @@ class CostPlan(NamedTuple):
 
     def costs(self, base: Amounts, above: Amounts) -> Costs:
         """Per-type cost of token sums billed at the base and above rates."""
-        return Costs(
-            *(
-                b * rb + a * ra
-                for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
+        inp, out, cache_creation, cache_read, cache_creation_1h = (
+            b * rb + a * ra
+            for b, a, rb, ra in zip(
+                base, above, self.base.by_amount, self.above.by_amount, strict=True
             )
         )
+        return Costs(inp, out, cache_creation + cache_creation_1h, cache_read)
 
     def long_cost(self, above: Amounts) -> float:
         """Cost of the tokens billed at long-context rates; 0 without a long tier."""
         if not self.has_long_tier:
             return 0.0
-        return sum(n * r for n, r in zip(above, self.above, strict=True))
+        return sum(n * r for n, r in zip(above, self.above.by_amount, strict=True))
 
     def cache_savings(self, base_read: int, above_read: int) -> float:
         """Uncached input cost of cache reads, minus their cost, per tier."""

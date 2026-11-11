@@ -24,5 +24,8 @@ class RequestRecord(BaseModel):
     reasoning_tokens: int  # part of output_tokens
     cache_read_tokens: int  # part of input_tokens
     cache_creation_tokens: int  # part of input_tokens
+    cache_creation_1h_tokens: int  # part of cache_creation_tokens, 1-hour lifetime
     total_tokens: int  # upstream's reported total; never read
+    service_tier: str | None  # tier the response was billed at; None when unknown
+    ttft_ms: int | None  # time to first token; None when not measured
     failed: bool

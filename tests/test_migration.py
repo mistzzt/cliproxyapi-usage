@@ -89,6 +89,10 @@ def test_migration_rewrites_claude_rows_only(tmp_path: Path) -> None:
         ("2026-10-02T00:00:00Z", "gpt-5", 2000, 100, 2, 500, 0, 2100),
         ("2026-10-03T00:00:00Z", "gpt-5", 300, 10, 2, 300, 0, 310),
     ]
+    new_columns = "cache_creation_1h_tokens, service_tier, ttft_ms"
+    assert conn.execute(f"SELECT DISTINCT {new_columns} FROM requests").fetchall() == [
+        (0, None, None)
+    ]
     conn.close()
 
 
