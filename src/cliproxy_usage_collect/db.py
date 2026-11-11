@@ -9,16 +9,14 @@ from pathlib import Path
 from cliproxy_usage_collect.migration import migrate
 from cliproxy_usage_collect.schema_version import (
     SCHEMA_VERSION,
-    execute_statements,
-    has_requests_table,
-    locked_step,
     supported_version,
+    write_lock,
 )
 from cliproxy_usage_collect.schemas import RequestRecord
 
-# The layout of SCHEMA_VERSION.
-
-_DDL = """
+# The layout of SCHEMA_VERSION, one statement per string.
+_DDL = (
+    """
 CREATE TABLE IF NOT EXISTS requests (
   timestamp             TEXT    PRIMARY KEY,
   api_key               TEXT    NOT NULL,
@@ -31,15 +29,16 @@ CREATE TABLE IF NOT EXISTS requests (
   reasoning_tokens      INTEGER NOT NULL,  -- part of output_tokens
   cache_read_tokens     INTEGER NOT NULL,  -- part of input_tokens
   cache_creation_tokens INTEGER NOT NULL DEFAULT 0,  -- part of input_tokens
-  total_tokens          INTEGER NOT NULL,  -- upstream's reported total; never read
+  total_tokens          INTEGER NOT NULL,  -- upstream's reported total, never read
   failed                INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_requests_source    ON requests(source);
-CREATE INDEX IF NOT EXISTS idx_requests_model     ON requests(model);
-CREATE INDEX IF NOT EXISTS idx_requests_api_key   ON requests(api_key);
-CREATE INDEX IF NOT EXISTS idx_requests_source_ts ON requests(source, timestamp);
-CREATE INDEX IF NOT EXISTS idx_requests_ts_utc    ON requests(datetime(timestamp));
-"""
+)
+""",
+    "CREATE INDEX IF NOT EXISTS idx_requests_source ON requests(source)",
+    "CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model)",
+    "CREATE INDEX IF NOT EXISTS idx_requests_api_key ON requests(api_key)",
+    "CREATE INDEX IF NOT EXISTS idx_requests_source_ts ON requests(source, timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_requests_ts_utc ON requests(datetime(timestamp))",
+)
 
 _COLUMNS = (
     "timestamp",
@@ -78,16 +77,21 @@ def open_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _has_requests_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'requests'"
+    ).fetchone()
+    return row is not None
+
+
 def _prepare_schema(conn: sqlite3.Connection, path: Path) -> None:
     version = supported_version(conn, path)
-    if not has_requests_table(conn):
-        locked_step(
-            conn,
-            path,
-            lambda _version, has_table: not has_table,
-            lambda: execute_statements(conn, _DDL),
-            SCHEMA_VERSION,
-        )
+    if not _has_requests_table(conn):
+        with write_lock(conn, path):
+            if not _has_requests_table(conn):
+                for statement in _DDL:
+                    conn.execute(statement)
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     elif version == 0:
         migrate(conn, path)
 

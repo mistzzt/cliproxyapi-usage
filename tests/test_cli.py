@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any
 
 import pytest
-from conftest import db_at_version, read_version
+from conftest import db_at_version, forbidden_queue_client, read_version
 
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
@@ -170,19 +170,13 @@ def test_queue_client_is_not_called_after_config_error(
     monkeypatch.delenv("CLIPROXY_MANAGEMENT_KEY", raising=False)
     monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "u.db"))
 
-    def queue_client(cfg: Config) -> list[QueueRecord]:
-        raise AssertionError("queue client should not be called")
-
-    assert main(queue_client=queue_client) == 2
+    assert main(queue_client=forbidden_queue_client) == 2
 
 
 def test_db_from_a_newer_version_exits_2_before_popping_the_queue(env_vars, capsys):
     db_at_version(env_vars, SCHEMA_VERSION + 1)
 
-    def queue_client(cfg: Config) -> list[QueueRecord]:
-        raise AssertionError("queue client should not be called")
-
-    assert main(queue_client=queue_client) == 2
+    assert main(queue_client=forbidden_queue_client) == 2
     assert f"schema version {SCHEMA_VERSION + 1}" in capsys.readouterr().err
     assert read_version(env_vars) == SCHEMA_VERSION + 1
 
@@ -190,10 +184,7 @@ def test_db_from_a_newer_version_exits_2_before_popping_the_queue(env_vars, caps
 def test_unreadable_db_exits_1_before_popping_the_queue(env_vars, capsys):
     env_vars.write_text("not a database, but long enough to fail the header check")
 
-    def queue_client(cfg: Config) -> list[QueueRecord]:
-        raise AssertionError("queue client should not be called")
-
-    assert main(queue_client=queue_client) == 1
+    assert main(queue_client=forbidden_queue_client) == 1
     assert capsys.readouterr().err.startswith("Database error: ")
 
 

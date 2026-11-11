@@ -2,13 +2,15 @@ import contextlib
 import json
 import pathlib
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.schema_version import user_version
 from cliproxy_usage_collect.schemas import RequestRecord
@@ -83,6 +85,11 @@ def _record(row: UsageRow, cache_creation: int = 0) -> RequestRecord:
         total_tokens=inp + out,
         failed=False,
     )
+
+
+def forbidden_queue_client(cfg: Config) -> list[Mapping[str, Any]]:
+    """Queue client for runs that must stop before popping the queue."""
+    raise AssertionError("queue client should not be called")
 
 
 def db_at_version(db_path: Path, version: int) -> Path:

@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import read_version
+from conftest import forbidden_queue_client, read_version
 
 from cliproxy_usage_collect import db as db_module
 from cliproxy_usage_collect.cli import main
-from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.db import open_db
 from cliproxy_usage_collect.migration import BACKUP_SUFFIX, MigrationError
 from cliproxy_usage_collect.schema_version import supported_version, user_version
@@ -205,9 +204,6 @@ def test_migration_failure_exits_1_before_popping_the_queue(
     # A directory where the backup goes makes the migration fail.
     (tmp_path / f"usage.db{BACKUP_SUFFIX}").mkdir()
 
-    def queue_client(cfg: Config) -> list[dict[str, Any]]:
-        raise AssertionError("queue client should not be called")
-
-    assert main(queue_client=queue_client) == 1
+    assert main(queue_client=forbidden_queue_client) == 1
     assert "Migration error" in capsys.readouterr().err
     assert read_version(db) == 0

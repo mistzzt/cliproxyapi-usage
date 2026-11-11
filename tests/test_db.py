@@ -79,7 +79,6 @@ def test_open_db_creates_five_indexes(tmp_path: Path) -> None:
 
 def test_open_db_creates_a_db_at_the_current_schema_version(tmp_path: Path) -> None:
     conn = open_db(tmp_path / "usage.db")
-    assert SCHEMA_VERSION == 1
     assert user_version(conn) == SCHEMA_VERSION
     conn.close()
 
