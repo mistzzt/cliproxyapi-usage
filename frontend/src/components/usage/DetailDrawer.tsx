@@ -165,18 +165,20 @@ export default function DetailDrawer({
                   />
                 }
               />
-              <StatTile
-                className={s.tile}
-                label="Cache writes"
-                value={fmtCompact(cur.cache_creation_tokens)}
-                title="Input tokens written to the cache"
-                foot={
-                  <Foot
-                    sub={writeShare === null ? 'no input' : `${fmtPct(writeShare)} of input`}
-                    change={change(cur.cache_creation_tokens, prev?.cache_creation_tokens)}
-                  />
-                }
-              />
+              {cur.cache_creation_tokens > 0 && (
+                <StatTile
+                  className={s.tile}
+                  label="Cache writes"
+                  value={fmtCompact(cur.cache_creation_tokens)}
+                  title="Input tokens written to the cache"
+                  foot={
+                    <Foot
+                      sub={writeShare === null ? 'no input' : `${fmtPct(writeShare)} of input`}
+                      change={change(cur.cache_creation_tokens, prev?.cache_creation_tokens)}
+                    />
+                  }
+                />
+              )}
             </div>
             <h3 className={s.section}>Over time by {DIMENSION_LABEL[splitDim].toLowerCase()}</h3>
             <Loaded query={{ data: chart, isError: split.isError }}>
