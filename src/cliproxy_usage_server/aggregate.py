@@ -34,6 +34,7 @@ from cliproxy_usage_server.db import (
     effective_bucket,
 )
 from cliproxy_usage_server.pricing import (
+    Amounts,
     CostPlan,
     Costs,
     CostStatus,
@@ -319,6 +320,7 @@ def _fetch_cells(
             SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END),
             MAX(timestamp),
             SUM(uncached),
+            SUM(cache_creation_5m),
             SUM({_base_rate("uncached")}),
             SUM({_base_rate("output_tokens")}),
             SUM({_base_rate("cache_creation_5m")}),
@@ -350,6 +352,7 @@ def _fetch_cells(
         long_req,
         last,
         uncached,
+        cc_5m,
         base_inp,
         base_out,
         base_cc_5m,
@@ -358,13 +361,19 @@ def _fetch_cells(
     ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        base = (base_inp, base_out, base_cc_5m, base_cr, base_cc_1h)
-        above = (
-            uncached - base_inp,
-            out - base_out,
-            cc - cc_1h - base_cc_5m,
-            cr - base_cr,
-            cc_1h - base_cc_1h,
+        base = Amounts(
+            input=base_inp,
+            output=base_out,
+            cache_creation=base_cc_5m,
+            cache_read=base_cr,
+            cache_creation_1h=base_cc_1h,
+        )
+        above = Amounts(
+            input=uncached - base_inp,
+            output=out - base_out,
+            cache_creation=cc_5m - base_cc_5m,
+            cache_read=cr - base_cr,
+            cache_creation_1h=cc_1h - base_cc_1h,
         )
         if plan is None or not plan.has_long_tier:
             long_req = 0
@@ -392,7 +401,9 @@ def _fetch_cells(
                 costs=plan.costs(base, above) if plan is not None else _NO_COST,
                 long_cost=plan.long_cost(above) if plan is not None else 0.0,
                 cache_savings=(
-                    plan.cache_savings(base[3], above[3]) if plan is not None else 0.0
+                    plan.cache_savings(base.cache_read, above.cache_read)
+                    if plan is not None
+                    else 0.0
                 ),
                 status=status,
                 plan=plan,

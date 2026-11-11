@@ -74,6 +74,13 @@ CostTypes = tuple[float, float, float, float]
             (260_000, 0, 0, 250_000, 250_000),
             ((0.03, 0.0, 0.0, 1.8), 0.6, 1, 0.0),
         ),
+        # Marginal 200k: 300k cache creation, but neither its 5-minute nor 1-hour
+        # part crosses 200k.
+        (
+            CLAUDE,
+            (300_000, 0, 0, 300_000, 150_000),
+            ((0.0, 0.0, 0.0, 1.4625), 0.0, 0, 0.0),
+        ),
         # OpenAI 272k: input includes the 100k cache reads; whole request at long rates.
         (
             GPT_LONG,

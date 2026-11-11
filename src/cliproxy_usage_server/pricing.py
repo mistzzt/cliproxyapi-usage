@@ -130,22 +130,17 @@ class Rates(NamedTuple):
     output: float
     cache_creation: float
     cache_read: float
-
-    @property
-    def by_amount(self) -> tuple[float, float, float, float, float]:
-        """Rates in ``Amounts`` order."""
-        return (
-            self.input,
-            self.output,
-            self.cache_creation,
-            self.cache_read,
-            self.input * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
-        )
+    cache_creation_1h: float
 
 
-# Token counts: uncached input, output, 5-minute cache creation, cache read and
-# 1-hour cache creation.
-Amounts = tuple[int, int, int, int, int]
+class Amounts(NamedTuple):
+    """Token counts in ``Rates`` field order."""
+
+    input: int  # uncached
+    output: int
+    cache_creation: int  # the 5-minute part
+    cache_read: int
+    cache_creation_1h: int
 
 
 class Costs(NamedTuple):
@@ -178,9 +173,7 @@ class CostPlan(NamedTuple):
         """Per-type cost of token sums billed at the base and above rates."""
         inp, out, cache_creation, cache_read, cache_creation_1h = (
             b * rb + a * ra
-            for b, a, rb, ra in zip(
-                base, above, self.base.by_amount, self.above.by_amount, strict=True
-            )
+            for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
         )
         return Costs(inp, out, cache_creation + cache_creation_1h, cache_read)
 
@@ -188,7 +181,7 @@ class CostPlan(NamedTuple):
         """Cost of the tokens billed at long-context rates; 0 without a long tier."""
         if not self.has_long_tier:
             return 0.0
-        return sum(n * r for n, r in zip(above, self.above.by_amount, strict=True))
+        return sum(n * r for n, r in zip(above, self.above, strict=True))
 
     def cache_savings(self, base_read: int, above_read: int) -> float:
         """Uncached input cost of cache reads, minus their cost, per tier."""
@@ -212,6 +205,7 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
         output=pricing.output_cost_per_token,
         cache_creation=_or(pricing.cache_creation_input_token_cost, inp * 1.25),
         cache_read=_or(cache_read, inp if openai else inp * 0.1),
+        cache_creation_1h=inp * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
     )
     above_200k = (
         pricing.input_cost_per_token_above_200k_tokens,
@@ -233,7 +227,11 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
         if switch and has_272k
         else (_THRESHOLD_200K, above_200k)
     )
-    above = Rates(*(_or(a, b) for a, b in zip(tier, base, strict=True)))
+    # No tier publishes a 1-hour rate; it is twice the tier's input rate.
+    above = Rates(*(_or(a, b) for a, b in zip((*tier, None), base, strict=True)))
+    above = above._replace(
+        cache_creation_1h=above.input * _CACHE_CREATION_1H_INPUT_MULTIPLIER
+    )
     if openai and cache_read is None:
         # Codex bills unpriced cache reads of long requests at the long input rate.
         above = above._replace(cache_read=above.input)
