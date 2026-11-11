@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+import cliproxy_usage_server.main as main_mod
+from cliproxy_usage_collect.db import SCHEMA_VERSION, open_db
 from cliproxy_usage_server.config import ServerConfig
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.schemas import QuotaAccount
@@ -222,13 +225,14 @@ def test_root_level_static_files_served(
 
 
 # ---------------------------------------------------------------------------
-# run() passes host/port from config to uvicorn
+# run() checks the schema version, then passes host/port from config to uvicorn
 # ---------------------------------------------------------------------------
 
 
-def test_run_invokes_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def run_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, MagicMock]:
+    """Point run() at a temp DB path and replace uvicorn.run; return both."""
     for var in (
-        "USAGE_DB_PATH",
         "USAGE_SERVER_HOST",
         "USAGE_SERVER_PORT",
         "USAGE_PRICING_CACHE",
@@ -236,23 +240,77 @@ def test_run_invokes_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
         "USAGE_PRICING_URL",
     ):
         monkeypatch.delenv(var, raising=False)
+    db_path = tmp_path / "usage.db"
+    monkeypatch.setenv("USAGE_DB_PATH", str(db_path))
+    mock_uvicorn_run = MagicMock()
+    monkeypatch.setattr(main_mod.uvicorn, "run", mock_uvicorn_run)
+    return db_path, mock_uvicorn_run
 
+
+def _db_at_version(db_path: Path, version: int) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.execute(f"PRAGMA user_version = {version}")
+    conn.close()
+
+
+def test_run_invokes_uvicorn(
+    run_env: tuple[Path, MagicMock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, mock_uvicorn_run = run_env
     monkeypatch.setenv("USAGE_SERVER_HOST", "0.0.0.0")
     monkeypatch.setenv("USAGE_SERVER_PORT", "9999")
 
-    mock_uvicorn_run = MagicMock()
-    import cliproxy_usage_server.main as main_mod
-
-    monkeypatch.setattr(main_mod.uvicorn, "run", mock_uvicorn_run)
-
-    from cliproxy_usage_server.main import run
-
-    run()
+    main_mod.run()
 
     mock_uvicorn_run.assert_called_once()
     _, kwargs = mock_uvicorn_run.call_args
     assert kwargs["host"] == "0.0.0.0"
     assert kwargs["port"] == 9999
+
+
+def test_run_starts_on_a_db_at_the_schema_version(
+    run_env: tuple[Path, MagicMock],
+) -> None:
+    db_path, mock_uvicorn_run = run_env
+    open_db(db_path).close()
+
+    main_mod.run()
+
+    mock_uvicorn_run.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("version", "action"),
+    [
+        (SCHEMA_VERSION - 1, "run cliproxy-usage-collect once to migrate it"),
+        (SCHEMA_VERSION + 1, "upgrade the server"),
+    ],
+)
+def test_run_refuses_a_db_at_another_schema_version(
+    run_env: tuple[Path, MagicMock], version: int, action: str
+) -> None:
+    db_path, mock_uvicorn_run = run_env
+    _db_at_version(db_path, version)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_mod.run()
+
+    message = str(exc_info.value.code)
+    assert f"schema version {version}" in message
+    assert f"needs {SCHEMA_VERSION}" in message
+    assert action in message
+    mock_uvicorn_run.assert_not_called()
+
+
+def test_run_refuses_a_file_that_is_not_a_db(run_env: tuple[Path, MagicMock]) -> None:
+    db_path, mock_uvicorn_run = run_env
+    db_path.write_text("not a database, but long enough to fail the header check")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_mod.run()
+
+    assert "cannot read the schema version" in str(exc_info.value.code)
+    mock_uvicorn_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

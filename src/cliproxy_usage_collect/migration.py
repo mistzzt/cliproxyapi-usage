@@ -10,11 +10,14 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from cliproxy_usage_collect.db import user_version
+
 BACKUP_SUFFIX = ".pre-cache-columns"
 
 # Claude rows stored uncached input; cache creation is the rest of their total.
 # Other rows already stored all input; capping cache reads keeps uncached input >= 0.
 _MIGRATE = """
+PRAGMA user_version = 1;
 ALTER TABLE requests RENAME COLUMN cached_tokens TO cache_read_tokens;
 ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
 UPDATE requests SET
@@ -29,12 +32,7 @@ WHERE NOT model GLOB 'claude*';
 
 
 class MigrationError(Exception):
-    """Raised when an old-layout DB could not be migrated; the DB is unchanged."""
-
-
-def _is_old_layout(conn: sqlite3.Connection) -> bool:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(requests)")}
-    return "cached_tokens" in columns
+    """Raised when a version-0 DB could not be migrated; the DB is unchanged."""
 
 
 def _fsync(path: Path) -> None:
@@ -46,13 +44,11 @@ def _fsync(path: Path) -> None:
 
 
 def migrate(conn: sqlite3.Connection, path: Path) -> None:
-    """Migrate the ``requests`` table if it has the old layout, backing it up first.
+    """Migrate a version-0 ``requests`` table to version 1, backing it up first.
 
     The backup is a consistent copy at ``<path>.pre-cache-columns``, replaced only
     by the run that migrates (VACUUM INTO cannot run inside the write transaction).
     """
-    if not _is_old_layout(conn):
-        return
     backup = path.with_name(path.name + BACKUP_SUFFIX)
     temp: Path | None = None
     try:
@@ -62,7 +58,7 @@ def migrate(conn: sqlite3.Connection, path: Path) -> None:
         conn.execute("VACUUM INTO ?", (name,))
         conn.execute("BEGIN IMMEDIATE")
         try:
-            if _is_old_layout(conn):
+            if user_version(conn) == 0:
                 # VACUUM INTO does not sync its output; make the backup durable first.
                 _fsync(temp)
                 os.replace(temp, backup)

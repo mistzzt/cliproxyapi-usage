@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from cliproxy_usage_collect.config import Config, ConfigError, load_config
-from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.db import SchemaVersionError, insert_records, open_db
 from cliproxy_usage_collect.migration import MigrationError
 from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.queue_client import (
@@ -32,7 +32,8 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
     -------
     int
         Exit code: 0 success, 1 transient error (migration failures included),
-        2 config error, 3 auth error, 4 schema error.
+        2 config error (a DB from a newer version included), 3 auth error,
+        4 schema error.
     """
     try:
         cfg = load_config()
@@ -42,6 +43,9 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
 
     try:
         conn = open_db(cfg.db_path)
+    except SchemaVersionError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
     except MigrationError as exc:
         print(f"Migration error: {exc}", file=sys.stderr)
         return 1

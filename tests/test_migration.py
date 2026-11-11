@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-from cliproxy_usage_collect import migration
+from cliproxy_usage_collect import db as db_module
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
-from cliproxy_usage_collect.db import open_db
+from cliproxy_usage_collect.db import open_db, user_version
 from cliproxy_usage_collect.migration import BACKUP_SUFFIX, MigrationError
 
 # The 0.2.0 layout, with token columns in its order and meanings.
@@ -118,23 +118,23 @@ def test_run_that_loses_the_race_keeps_the_first_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db = _old_db(tmp_path / "usage.db")
-    check = migration._is_old_layout  # pyright: ignore[reportPrivateUsage]
     raced = False
 
-    def check_then_race(conn: sqlite3.Connection) -> bool:
-        # After this run's first check, another run migrates before it takes the lock.
+    def read_then_race(conn: sqlite3.Connection) -> int:
+        # After this run's first read, another run migrates before it takes the lock.
         nonlocal raced
-        old = check(conn)
+        version = user_version(conn)
         if not raced:
             raced = True
             open_db(db).close()
-        return old
+        return version
 
-    monkeypatch.setattr(migration, "_is_old_layout", check_then_race)
+    monkeypatch.setattr(db_module, "user_version", read_then_race)
     conn = open_db(db)
     rows = _rows(conn)
     conn.close()
 
+    assert raced
     assert "cached_tokens" in _backup_columns(tmp_path / f"usage.db{BACKUP_SUFFIX}")
     assert rows[0] == (
         "2026-05-01T00:00:00Z",
@@ -171,6 +171,7 @@ def test_migrated_layout_matches_a_fresh_db(tmp_path: Path) -> None:
     fresh = open_db(tmp_path / "fresh.db")
 
     assert _layout(migrated) == _layout(fresh)
+    assert user_version(migrated) == user_version(fresh) == 1
     migrated.close()
     fresh.close()
 
@@ -188,8 +189,10 @@ def test_locked_db_is_left_unchanged(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(db)
     columns = {r[1] for r in conn.execute("PRAGMA table_info(requests)")}
+    version = user_version(conn)
     conn.close()
     assert "cached_tokens" in columns
+    assert version == 0
 
 
 def test_migration_failure_exits_1_before_popping_the_queue(
@@ -206,3 +209,6 @@ def test_migration_failure_exits_1_before_popping_the_queue(
 
     assert main(queue_client=queue_client) == 1
     assert "Migration error" in capsys.readouterr().err
+    conn = sqlite3.connect(db)
+    assert user_version(conn) == 0
+    conn.close()

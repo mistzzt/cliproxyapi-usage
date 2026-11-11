@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import sqlite3
+import sys
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
 
@@ -14,7 +16,9 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from cliproxy_usage_collect.db import SCHEMA_VERSION, user_version
 from cliproxy_usage_server.config import ServerConfig, load_config, load_key_aliases
+from cliproxy_usage_server.db import open_ro
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
 from cliproxy_usage_server.quota.client import CliProxyClient
 from cliproxy_usage_server.quota.providers import PROVIDERS
@@ -245,8 +249,31 @@ def create_app(
 # ---------------------------------------------------------------------------
 
 
+def _schema_problem(db_path: Path) -> str | None:
+    """Say why the server cannot read *db_path*; ``None`` if it can or it is absent."""
+    try:
+        with contextlib.closing(open_ro(db_path)) as conn:
+            version = user_version(conn)
+    except FileNotFoundError:
+        return None
+    except sqlite3.Error as exc:
+        return f"cannot read the schema version of {db_path}: {exc}"
+    if version == SCHEMA_VERSION:
+        return None
+    if version < SCHEMA_VERSION:
+        action = "run cliproxy-usage-collect once to migrate it"
+    else:
+        action = "upgrade the server"
+    return (
+        f"{db_path} has schema version {version}, but this server needs "
+        f"{SCHEMA_VERSION}; {action}"
+    )
+
+
 def run() -> None:
-    """Load config and start uvicorn."""
+    """Check the DB's schema version, load config and start uvicorn."""
     config = load_config()
+    if (problem := _schema_problem(config.db_path)) is not None:
+        sys.exit(f"Schema version error: {problem}")
     app = create_app(config)
     uvicorn.run(app, host=config.host, port=config.port)

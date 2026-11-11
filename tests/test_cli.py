@@ -9,6 +9,7 @@ import pytest
 
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
+from cliproxy_usage_collect.db import SCHEMA_VERSION
 from cliproxy_usage_collect.queue_client import AuthError, TransientError
 
 QueueRecord = dict[str, Any]
@@ -172,6 +173,18 @@ def test_queue_client_is_not_called_after_config_error(
         raise AssertionError("queue client should not be called")
 
     assert main(queue_client=queue_client) == 2
+
+
+def test_db_from_a_newer_version_exits_2_before_popping_the_queue(env_vars, capsys):
+    conn = sqlite3.connect(env_vars)
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    conn.close()
+
+    def queue_client(cfg: Config) -> list[QueueRecord]:
+        raise AssertionError("queue client should not be called")
+
+    assert main(queue_client=queue_client) == 2
+    assert f"schema version {SCHEMA_VERSION + 1}" in capsys.readouterr().err
 
 
 def test_summary_counts_records_without_a_token_split(env_vars, capsys):

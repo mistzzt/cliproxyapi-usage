@@ -6,8 +6,10 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from cliproxy_usage_collect.migration import migrate
 from cliproxy_usage_collect.schemas import RequestRecord
+
+# PRAGMA user_version of the layout below; 0 is the pre-0.3.0 ``cached_tokens`` layout.
+SCHEMA_VERSION = 1
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -54,19 +56,51 @@ _INSERT = (
 )
 
 
-def open_db(path: Path) -> sqlite3.Connection:
-    """Open the DB at *path*, migrate or create its schema, return the connection.
+class SchemaVersionError(Exception):
+    """Raised when the DB has a newer schema version than this code supports."""
 
-    Raises ``MigrationError`` when an old-layout DB cannot be migrated.
+
+def user_version(conn: sqlite3.Connection) -> int:
+    """Return the DB's schema version (``PRAGMA user_version``)."""
+    (version,) = conn.execute("PRAGMA user_version").fetchone()
+    return version
+
+
+def open_db(path: Path) -> sqlite3.Connection:
+    """Open the DB at *path*, create or migrate its schema, return the connection.
+
+    Raises ``SchemaVersionError`` for a newer DB, ``MigrationError`` when a failed
+    migration left the DB unchanged.
     """
     conn = sqlite3.connect(path)
     try:
-        migrate(conn, path)
+        _prepare_schema(conn, path)
     except BaseException:
         conn.close()
         raise
-    conn.executescript(_DDL)
     return conn
+
+
+def _prepare_schema(conn: sqlite3.Connection, path: Path) -> None:
+    version = user_version(conn)
+    if version > SCHEMA_VERSION:
+        msg = (
+            f"{path} has schema version {version}, but this collector supports "
+            f"{SCHEMA_VERSION}; upgrade cliproxy-usage"
+        )
+        raise SchemaVersionError(msg)
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'requests'"
+    ).fetchone()
+    if has_table is None:
+        conn.executescript(
+            f"BEGIN IMMEDIATE;{_DDL}PRAGMA user_version = {SCHEMA_VERSION};COMMIT;"
+        )
+    elif version == 0:
+        # Imported here because migration.py imports this module.
+        from cliproxy_usage_collect.migration import migrate
+
+        migrate(conn, path)
 
 
 def insert_records(conn: sqlite3.Connection, records: Iterable[RequestRecord]) -> int:

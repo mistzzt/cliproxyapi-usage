@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.db import (
+    SCHEMA_VERSION,
+    insert_records,
+    open_db,
+    user_version,
+)
 from cliproxy_usage_collect.schemas import RequestRecord
 
 # ---------------------------------------------------------------------------
@@ -63,6 +68,13 @@ def test_open_db_creates_five_indexes(tmp_path: Path) -> None:
         "idx_requests_ts_utc",
     }
     assert index_names == expected
+    conn.close()
+
+
+def test_open_db_creates_a_db_at_the_current_schema_version(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "usage.db")
+    assert SCHEMA_VERSION == 1
+    assert user_version(conn) == SCHEMA_VERSION
     conn.close()
 
 
