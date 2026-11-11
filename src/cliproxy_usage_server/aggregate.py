@@ -23,6 +23,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from operator import sub
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -290,9 +291,7 @@ def _fetch_cells(
     plan_rows = ", ".join(["(NULL, 0, 0)", *["(?, ?, ?)"] * len(plans)])
     plan_params = [v for m, p in plans.items() for v in (m, p.switch, p.threshold)]
     where, params = _where(window, filters)
-    cursor = conn.cursor()
-    cursor.row_factory = sqlite3.Row
-    rows = cursor.execute(
+    rows = conn.execute(
         f"""
         WITH plan(plan_model, switch, threshold) AS (VALUES {plan_rows}),
         r AS (
@@ -313,7 +312,6 @@ def _fetch_cells(
             SUM(failed) AS failed,
             SUM(input_tokens) AS input_tokens,
             SUM(reasoning_tokens) AS reasoning_tokens,
-            SUM(cache_creation_tokens) AS cache_creation_tokens,
             SUM(CASE WHEN failed THEN 0 ELSE latency_ms END) AS ok_latency_sum,
             SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END)
                 AS long_requests,
@@ -328,14 +326,26 @@ def _fetch_cells(
     people: dict[str, str] = {}
     credentials: dict[str, str] = {}
     cells: list[_Cell] = []
-    for row in rows:
-        api_key, model, source = row["api_key"], row["model"], row["source"]
+    n = len(Amounts._fields)
+    for (
+        slice_no,
+        api_key,
+        model,
+        source,
+        requests,
+        failed,
+        input_tokens,
+        reasoning_tokens,
+        ok_latency_sum,
+        long_requests,
+        last_used,
+        *priced,
+    ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        total = Amounts._make(row[f"total_{f}"] for f in Amounts._fields)
-        base = Amounts._make(row[f"base_{f}"] for f in Amounts._fields)
-        above = Amounts._make(t - b for t, b in zip(total, base, strict=True))
-        long_requests = row["long_requests"]
+        total = Amounts._make(priced[:n])
+        base = Amounts._make(priced[n:])
+        above = Amounts._make(map(sub, total, base, strict=True))
         if plan is None or not plan.has_long_tier:
             long_requests = 0
         if api_key not in people:
@@ -344,21 +354,21 @@ def _fetch_cells(
             credentials[source] = redact_source(source)
         cells.append(
             _Cell(
-                slice_no=row["slice_no"],
+                slice_no=slice_no,
                 person=people[api_key],
                 model=keys[model],
                 credential=credentials[source],
-                requests=row["requests"],
-                failed=row["failed"],
-                input_tokens=row["input_tokens"],
+                requests=requests,
+                failed=failed,
+                input_tokens=input_tokens,
                 output_tokens=total.output,
-                reasoning_tokens=row["reasoning_tokens"],
+                reasoning_tokens=reasoning_tokens,
                 cache_read_tokens=total.cache_read,
-                cache_creation_tokens=row["cache_creation_tokens"],
+                cache_creation_tokens=total.cache_creation + total.cache_creation_1h,
                 cache_creation_1h_tokens=total.cache_creation_1h,
-                ok_latency_sum=row["ok_latency_sum"],
+                ok_latency_sum=ok_latency_sum,
                 long_requests=long_requests,
-                last_used=_parse_ts(row["last_used"]),
+                last_used=_parse_ts(last_used),
                 costs=plan.costs(base, above) if plan is not None else _NO_COST,
                 long_cost=plan.long_cost(above) if plan is not None else 0.0,
                 cache_savings=(
@@ -393,9 +403,10 @@ _PRICED: dict[str, str] = {
     "cache_creation_1h": "cache_creation_1h_tokens",
 }
 _PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in Amounts._fields)
+# Every type's total, then every type's base-rate share, in ``Amounts`` order.
 _PRICED_SUMS = ", ".join(
-    f"SUM(priced_{f}) AS total_{f}, SUM({_base_rate(f'priced_{f}')}) AS base_{f}"
-    for f in Amounts._fields
+    [f"SUM(priced_{f}) AS total_{f}" for f in Amounts._fields]
+    + [f"SUM({_base_rate(f'priced_{f}')}) AS base_{f}" for f in Amounts._fields]
 )
 # A request has tokens at the long rate: whole-request plans when its input passes
 # the threshold, marginal plans when any one token type exceeds it.
