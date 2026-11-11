@@ -16,12 +16,31 @@ from cliproxy_usage_server.pricing import CostStatus
 Dimension = Literal["person", "model", "credential"]
 TrendMetric = Literal["cost", "input_tokens", "output_tokens", "cached_tokens"]
 SeriesMetric = Literal[
-    "cost", "input_tokens", "output_tokens", "cached_tokens", "requests"
+    "cost",
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+    "requests",
+    "failed",
+    "latency_ms",
 ]
 
 
+class CostByType(BaseModel):
+    """Spend split by token type; the parts add up to the total cost."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input: float
+    output: float
+    cache_read: float
+
+
 class Totals(BaseModel):
-    """Aggregate usage over a window; derived "tokens" is a frontend concern."""
+    """Aggregate usage over a window; ratios such as "tokens" are a frontend concern.
+
+    Uncached input and cache read tokens follow each model's token accounting.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -31,9 +50,15 @@ class Totals(BaseModel):
     output_tokens: int
     cached_tokens: int
     reasoning_tokens: int
+    uncached_input_tokens: int
+    cache_read_tokens: int
     cost: float | None
     cost_status: CostStatus
-    avg_latency_ms: float
+    cost_by_type: CostByType | None  # None exactly when cost is None, as below
+    long_context_cost: float | None
+    cache_savings: float | None
+    latency_ms: int  # sum over successful requests
+    long_context_requests: int  # successful requests with tokens at the long rate
     last_used: datetime | None
 
 

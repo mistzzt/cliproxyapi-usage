@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 __all__ = [
     "CostPlan",
     "CostStatus",
+    "Costs",
     "ModelPricing",
     "PricingResolution",
     "Rates",
@@ -130,10 +131,19 @@ class Rates(NamedTuple):
 Amounts = tuple[int, int, int, int]  # token counts in ``Rates`` field order
 
 
+class Costs(NamedTuple):
+    """USD spent on each token type."""
+
+    input: float
+    output: float
+    cache_creation: float
+    cache_read: float
+
+
 class CostPlan(NamedTuple):
     """How one model bills a request, following ccusage.
 
-    ``aggregate._fetch_cells`` applies it per request in SQL; ``price`` prices the sums.
+    ``aggregate._fetch_cells`` applies it per request in SQL; ``costs`` prices the sums.
     """
 
     openai: bool  # cached tokens are reported inside input_tokens
@@ -144,10 +154,29 @@ class CostPlan(NamedTuple):
     base: Rates
     above: Rates
 
-    def price(self, base: Amounts, above: Amounts) -> float:
-        """Cost of token sums billed at the base and above rates."""
-        return sum(n * r for n, r in zip(base, self.base, strict=True)) + sum(
-            n * r for n, r in zip(above, self.above, strict=True)
+    @property
+    def has_long_tier(self) -> bool:
+        return self.above != self.base
+
+    def costs(self, base: Amounts, above: Amounts) -> Costs:
+        """Per-type cost of token sums billed at the base and above rates."""
+        return Costs(
+            *(
+                b * rb + a * ra
+                for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
+            )
+        )
+
+    def long_cost(self, above: Amounts) -> float:
+        """Cost of the tokens billed at long-context rates; 0 without a long tier."""
+        if not self.has_long_tier:
+            return 0.0
+        return sum(n * r for n, r in zip(above, self.above, strict=True))
+
+    def cache_savings(self, base_read: int, above_read: int) -> float:
+        """Uncached input cost of cache reads, minus their cost, per tier."""
+        return base_read * (self.base.input - self.base.cache_read) + above_read * (
+            self.above.input - self.above.cache_read
         )
 
 

@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { ChartData, ChartOptions } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 import { buildTooltipConfig, readThemeColors } from '@/components/charts/theme-colors';
+import { BAR_GEOMETRY, Y_AXIS_WIDTH } from '@/components/charts/time-axis';
 import type { Bucket } from '@/types/api';
 import { bucketLabel, tickLabel } from '@/utils/usage/dates';
 import { fmtMetric } from '@/utils/usage/format';
@@ -41,9 +42,7 @@ export default function TimeChart({
         borderColor: colors.surface,
         borderWidth: { top: 2, bottom: 0, left: 0, right: 0 },
         borderSkipped: false,
-        maxBarThickness: 24,
-        categoryPercentage: 0.8,
-        barPercentage: 0.9,
+        ...BAR_GEOMETRY,
       })),
     }),
     [buckets, layers, colors],
@@ -88,6 +87,9 @@ export default function TimeChart({
         },
         y: {
           stacked: true,
+          afterFit: (axis) => {
+            axis.width = Y_AXIS_WIDTH;
+          },
           grid: { color: colors.grid },
           border: { display: false },
           ticks: { color: colors.tick, maxTicksLimit: 5, callback: (v) => fmtMetric(Number(v), metric) },

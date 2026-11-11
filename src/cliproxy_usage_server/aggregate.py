@@ -16,6 +16,8 @@ directly.
 
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
@@ -33,6 +35,7 @@ from cliproxy_usage_server.db import (
 )
 from cliproxy_usage_server.pricing import (
     CostPlan,
+    Costs,
     CostStatus,
     ModelPricing,
     PricingResolution,
@@ -45,6 +48,7 @@ from cliproxy_usage_server.redact import model_key, redact_key, redact_source
 from cliproxy_usage_server.schemas import (
     BreakdownResponse,
     BreakdownRow,
+    CostByType,
     Dimension,
     Entity,
     LongContextPrice,
@@ -104,11 +108,20 @@ class _Cell:
     output_tokens: int
     cached_tokens: int
     reasoning_tokens: int
-    latency_sum: int
+    uncached_input_tokens: int
+    cache_read_tokens: int
+    ok_latency_sum: int
+    long_requests: int
     last_used: datetime
-    cost: float
+    costs: Costs
+    long_cost: float
+    cache_savings: float
     status: PricingResolution
     plan: CostPlan | None
+
+    @property
+    def cost(self) -> float:
+        return sum(self.costs)
 
     def key(self, dim: Dimension) -> str:
         if dim == "person":
@@ -128,8 +141,15 @@ class _Acc:
     output_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
-    latency_sum: int = 0
-    cost: float = 0.0
+    uncached_input_tokens: int = 0
+    cache_read_tokens: int = 0
+    ok_latency_sum: int = 0
+    long_requests: int = 0
+    cost_input: float = 0.0
+    cost_output: float = 0.0
+    cost_cache_read: float = 0.0
+    long_cost: float = 0.0
+    cache_savings: float = 0.0
     last_used: datetime | None = None
     statuses: set[PricingResolution] = field(default_factory=set)
 
@@ -140,8 +160,15 @@ class _Acc:
         self.output_tokens += c.output_tokens
         self.cached_tokens += c.cached_tokens
         self.reasoning_tokens += c.reasoning_tokens
-        self.latency_sum += c.latency_sum
-        self.cost += c.cost
+        self.uncached_input_tokens += c.uncached_input_tokens
+        self.cache_read_tokens += c.cache_read_tokens
+        self.ok_latency_sum += c.ok_latency_sum
+        self.long_requests += c.long_requests
+        self.cost_input += c.costs.input
+        self.cost_output += c.costs.output
+        self.cost_cache_read += c.costs.cache_read
+        self.long_cost += c.long_cost
+        self.cache_savings += c.cache_savings
         self.statuses.add(c.status)
         if self.last_used is None or c.last_used > self.last_used:
             self.last_used = c.last_used
@@ -151,10 +178,15 @@ class _Acc:
             return "missing"
         return rollup_cost_status(self.statuses)
 
+    @property
+    def cost(self) -> float:
+        return self.cost_input + self.cost_output + self.cost_cache_read
+
     def cost_value(self, has_pricing: bool) -> float | None:
         return None if self.cost_status(has_pricing) == "missing" else self.cost
 
     def totals(self, has_pricing: bool) -> Totals:
+        priced = self.cost_status(has_pricing) != "missing"
         return Totals(
             requests=self.requests,
             failed=self.failed,
@@ -162,9 +194,23 @@ class _Acc:
             output_tokens=self.output_tokens,
             cached_tokens=self.cached_tokens,
             reasoning_tokens=self.reasoning_tokens,
-            cost=self.cost_value(has_pricing),
+            uncached_input_tokens=self.uncached_input_tokens,
+            cache_read_tokens=self.cache_read_tokens,
+            cost=self.cost if priced else None,
             cost_status=self.cost_status(has_pricing),
-            avg_latency_ms=self.latency_sum / self.requests if self.requests else 0.0,
+            cost_by_type=(
+                CostByType(
+                    input=self.cost_input,
+                    output=self.cost_output,
+                    cache_read=self.cost_cache_read,
+                )
+                if priced
+                else None
+            ),
+            long_context_cost=self.long_cost if priced else None,
+            cache_savings=self.cache_savings if priced else None,
+            latency_ms=self.ok_latency_sum,
+            long_context_requests=self.long_requests,
             last_used=self.last_used,
         )
 
@@ -264,7 +310,8 @@ def _fetch_cells(
             SUM(output_tokens),
             SUM(cached_tokens),
             SUM(reasoning_tokens),
-            SUM(latency_ms),
+            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END),
+            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END),
             MAX(timestamp),
             SUM(inp),
             SUM(cr),
@@ -292,6 +339,7 @@ def _fetch_cells(
         cac,
         rea,
         lat,
+        long_req,
         last,
         cost_inp,
         cost_cr,
@@ -301,14 +349,10 @@ def _fetch_cells(
     ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        cost = (
-            plan.price(
-                (base_inp, base_out, 0, base_cr),
-                (cost_inp - base_inp, out - base_out, 0, cost_cr - base_cr),
-            )
-            if plan is not None
-            else 0.0
-        )
+        base = (base_inp, base_out, 0, base_cr)
+        above = (cost_inp - base_inp, out - base_out, 0, cost_cr - base_cr)
+        if plan is None or not plan.has_long_tier:
+            long_req = 0
         if api_key not in people:
             people[api_key] = redact_key(api_key)
         if source not in credentials:
@@ -325,14 +369,30 @@ def _fetch_cells(
                 output_tokens=out,
                 cached_tokens=cac,
                 reasoning_tokens=rea,
-                latency_sum=lat,
+                uncached_input_tokens=cost_inp,
+                cache_read_tokens=cost_cr,
+                ok_latency_sum=lat,
+                long_requests=long_req,
                 last_used=_parse_ts(last),
-                cost=cost,
+                costs=plan.costs(base, above) if plan is not None else _NO_COST,
+                long_cost=plan.long_cost(above) if plan is not None else 0.0,
+                cache_savings=(
+                    plan.cache_savings(base[3], above[3]) if plan is not None else 0.0
+                ),
                 status=status,
                 plan=plan,
             )
         )
     return cells
+
+
+# A request has tokens at the long rate: whole-request plans past the threshold,
+# marginal plans when any one token type exceeds it.
+_LONG_REQUEST = (
+    "(CASE WHEN switch THEN inp + cr > t ELSE MAX(inp, output_tokens, cr) > t END)"
+)
+
+_NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
 
 
 def _base_rate(column: str) -> str:
@@ -430,6 +490,8 @@ def query_summary(
         "output_tokens": [0.0] * n,
         "cached_tokens": [0.0] * n,
         "requests": [0.0] * n,
+        "failed": [0.0] * n,
+        "latency_ms": [0.0] * n,
     }
     for c in cells:
         current.add(c)
@@ -441,6 +503,8 @@ def query_summary(
         series["output_tokens"][pos] += c.output_tokens
         series["cached_tokens"][pos] += c.cached_tokens
         series["requests"][pos] += c.requests
+        series["failed"][pos] += c.failed
+        series["latency_ms"][pos] += c.ok_latency_sum
 
     prev_window = window.previous()
     previous: Totals | None = None
@@ -597,3 +661,62 @@ def query_options(
         models=entities("model"),
         credentials=entities("credential"),
     )
+
+
+EXPORT_COLUMNS = (
+    "bucket_start",
+    "person",
+    "person_label",
+    "model",
+    "credential",
+    "requests",
+    "failed",
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "cost",
+)
+
+
+def query_export(
+    conn: sqlite3.Connection,
+    window: Window,
+    requested_bucket: Bucket | None,
+    tz: ZoneInfo,
+    filters: Filters,
+    pricing: Mapping[str, ModelPricing],
+    aliases: Mapping[str, str],
+) -> str:
+    """CSV with one row per (bucket, person, model, credential) that has requests."""
+    axis = _axis(conn, window, requested_bucket, tz)
+    groups: dict[tuple[int, str, str, str], _Acc] = defaultdict(_Acc)
+    priced: dict[str, bool] = {}
+    for c in _fetch_cells(conn, window, filters, pricing):
+        pos = axis.position(c.slice_no)
+        if pos is None:
+            continue
+        groups[(pos, c.person, c.model, c.credential)].add(c)
+        priced[c.model] = c.plan is not None
+
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(EXPORT_COLUMNS)
+    for (pos, person, model, credential), acc in sorted(groups.items()):
+        writer.writerow(
+            (
+                axis.starts[pos].isoformat(),
+                person,
+                _label("person", person, aliases),
+                model,
+                credential,
+                acc.requests,
+                acc.failed,
+                acc.input_tokens,
+                acc.output_tokens,
+                acc.cached_tokens,
+                acc.reasoning_tokens,
+                repr(acc.cost) if priced[model] else "",
+            )
+        )
+    return out.getvalue()

@@ -33,10 +33,13 @@
   &:hover:enabled {
     filter: brightness(1.08);
   }
+}
 
-  &:disabled {
-    cursor: default;
-  }
+.static {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
 }
 
 .legend {

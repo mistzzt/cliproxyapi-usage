@@ -1,7 +1,9 @@
 """Browser tests for the usage page's data loading: one request per panel."""
 
+import csv
 from collections import Counter
 from datetime import date, timedelta
+from urllib.parse import parse_qs, urlparse
 
 from conftest import ApiCall, ApiLog, wait_until
 from playwright.sync_api import Locator, Page, Route, expect
@@ -120,6 +122,25 @@ def test_drawer_requests_share_the_page_window(page: Page, api: ApiLog) -> None:
         [("options", None)]
     )
     assert len(windows(calls)) == 1
+
+
+def test_export_downloads_the_page_view_as_csv(page: Page, api: ApiLog) -> None:
+    [page_window] = windows(open_usage(page, api, "range=30d&models=gpt-e2e"))
+    with page.expect_download() as info:
+        page.get_by_role("link", name="Download CSV").click()
+    download = info.value
+    url = urlparse(download.url)
+    params = {k: v[0] for k, v in parse_qs(url.query).items()}
+    assert url.path == "/api/usage/export"
+    assert (params.get("start"), params["end"]) == page_window
+    assert params["models"] == "gpt-e2e"
+
+    path = download.path()
+    with path.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows
+    assert {r["model"] for r in rows} == {"gpt-e2e"}
+    assert all(not r["person"].startswith("sk-e2e") for r in rows)
 
 
 def test_tab_switch_fetches_only_unseen_tabs(page: Page, api: ApiLog) -> None:

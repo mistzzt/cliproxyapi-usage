@@ -3,6 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import {
   breakdownKey,
   computeWindow,
+  exportPath,
   OPTIONS_KEY,
   requestParams,
   summaryKey,
@@ -68,4 +69,15 @@ test('a window prefix selects exactly the requests inside that window', () => {
   qc.setQueryData(windowKey({ kind: 'preset', id: 'all' }, 'UTC'), all);
   const matched = qc.getQueriesData({ queryKey: windowPrefix({ ...all }) }).map(([key]) => key);
   expect(matched).toEqual([summaryKey(all, DEFAULT_VIEW_STATE)]);
+});
+
+test('the export path carries the same window, filters and bucket as the page', () => {
+  const w = { start: '2026-09-01T00:00:00.000Z', end: '2026-09-02T00:00:00.000Z', tz: 'UTC' };
+  const s: ViewState = { ...DEFAULT_VIEW_STATE, models: ['m1', 'm2'], granularity: 'hour' };
+  const path = exportPath(w, s);
+  expect(path.startsWith('/usage/export?')).toBe(true);
+  expect(Object.fromEntries(new URLSearchParams(path.split('?')[1]))).toEqual({
+    ...requestParams(summaryKey(w, s)),
+  });
+  expect(exportPath({ ...w, start: null }, DEFAULT_VIEW_STATE)).not.toContain('start=');
 });

@@ -35,7 +35,7 @@ CREATE TABLE requests_rollup (
   output_tokens    INTEGER NOT NULL,
   cached_tokens    INTEGER NOT NULL,
   reasoning_tokens INTEGER NOT NULL,
-  latency_ms       INTEGER NOT NULL,  -- sum; the API reports the average only
+  latency_ms       INTEGER NOT NULL,  -- sum over successful requests (failed = 0)
   last_ts          TEXT    NOT NULL,  -- MAX(timestamp), as _fetch_cells today
   cached_in_input  INTEGER NOT NULL,  -- SUM(MIN(cached_tokens, input_tokens))
   -- marginal 200k: SUM(MIN(x, 200000)) per token type
@@ -53,6 +53,12 @@ CREATE TABLE requests_rollup (
   oa_long272_input  INTEGER NOT NULL,
   oa_long272_output INTEGER NOT NULL,
   oa_long272_cached INTEGER NOT NULL,
+  -- successful requests with tokens at the long rate, one count per shape:
+  -- marginal 200k: any of input, output, cached > 200000; the others as their long sums above
+  long200_requests     INTEGER NOT NULL,
+  long272_requests     INTEGER NOT NULL,
+  oa_long200_requests  INTEGER NOT NULL,
+  oa_long272_requests  INTEGER NOT NULL,
   PRIMARY KEY (slot, api_key, model, source)
 ) WITHOUT ROWID;
 ```
@@ -78,7 +84,7 @@ In `src/cliproxy_usage_collect/db.py`, which stays the authoritative schema:
 ### 2. Server: read from the rollup
 
 - `_fetch_cells` returns the same cells as today. It takes whole slots inside the window from the rollup. It takes the partial slot at each edge from `requests`, grouped by slot, API key, model and source with the same expressions, through the existing `datetime(timestamp)` index. A slot is whole when its seconds `[900 * slot, 900 * slot + 900)` lie inside the window, compared at whole seconds the way the current `datetime()` filter compares. Return cells in today's order (slot, API key, model, source), so float sums are added in the same order.
-- One Python function prices a cell from its sums and its model's `CostPlan`. `CostPlan.price` stays the only place that multiplies amounts by rates.
+- One Python function prices a cell from its sums and its model's `CostPlan`. `CostPlan.costs` stays the only place that multiplies amounts by rates (it also gives cost by type, long-context cost and cache savings).
 - The model list in `_fetch_cells` and `resolve_filter` read distinct values from the rollup, not from `requests`.
 - `query_options` groups the rollup by API key, model and source only.
 - Requests stay read-only (`open_ro`). When `usage.db` does not exist, startup behaves as today. When it exists, startup (on both lifespan paths, including `pricing_provider`) checks that the rollup and trigger exist and match the code's definitions. If they do not, it opens a separate writable connection, runs the shared rebuild, waits for it to finish and then serves. This is the only write the server ever does. If the file is not writable or the rebuild fails, the server exits with a message that names the path it could not write and says to run the collector or `cliproxy-usage-rebuild-rollup` once.

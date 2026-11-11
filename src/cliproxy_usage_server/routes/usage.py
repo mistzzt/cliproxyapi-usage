@@ -1,4 +1,4 @@
-"""Usage endpoints: /api/usage/summary, /breakdown, /options.
+"""Usage endpoints: /api/usage/summary, /breakdown, /export, /options.
 
 Range-consuming endpoints take ``start`` (optional; absent = all time) and
 ``end`` (defaults to server now) as ISO-8601 instants with an offset, ``tz`` (a
@@ -18,12 +18,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from cliproxy_usage_server.aggregate import (
     Filters,
     Window,
     query_breakdown,
+    query_export,
     query_options,
     query_summary,
     resolve_filter,
@@ -160,6 +161,29 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
             rng.filters(conn),
             pricing,
             aliases,
+        )
+
+    @r.get("/export", response_class=Response)
+    def export(
+        conn: Annotated[sqlite3.Connection, Depends(get_conn)],
+        pricing: _Pricing,
+        rng: _Range,
+        bucket: _BucketParam = "auto",
+    ) -> Response:
+        """CSV of the range: one row per bucket, person, model and credential."""
+        body = query_export(
+            conn,
+            rng.window,
+            _bucket(bucket),
+            rng.tz,
+            rng.filters(conn),
+            pricing,
+            aliases,
+        )
+        return Response(
+            body,
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="usage.csv"'},
         )
 
     @r.get("/options", response_model=OptionsResponse)

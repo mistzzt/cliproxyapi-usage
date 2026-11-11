@@ -4,7 +4,8 @@ import { DayPicker, type DateRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import Button from '@/components/ui/Button';
 import type { Bucket, Entity, OptionsResponse } from '@/types/api';
-import type { ResolvedWindow } from '@/utils/usage/queryKeys';
+import { apiPath } from '@/services/runtimeConfig';
+import { exportPath, type ResolvedWindow } from '@/utils/usage/queryKeys';
 import {
   dayRange,
   isValidCustomRange,
@@ -73,6 +74,15 @@ export default function FilterBar({ state, update, win, effectiveBucket, options
         ]}
         onChange={(metric) => update({ metric })}
       />
+      <a
+        className={s.iconButton}
+        href={apiPath(exportPath(win, state))}
+        download="usage.csv"
+        aria-label="Download CSV"
+        title="Download CSV: one row per bucket, person, model and credential"
+      >
+        <DownloadIcon />
+      </a>
       <button type="button" className={s.iconButton} aria-label="Refresh" title="Refresh" onClick={onRefresh}>
         <RefreshIcon />
       </button>
@@ -256,6 +266,14 @@ function CalendarIcon() {
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
       <rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+      <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

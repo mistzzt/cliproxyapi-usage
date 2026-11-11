@@ -14,7 +14,7 @@ import {
   type SortKey,
   type SortState,
 } from '@/utils/usage/richRows';
-import { fmtLatency, fmtSpend, tokens } from '@/utils/usage/totals';
+import { avgLatency, fmtLatency, fmtSpend, tokens } from '@/utils/usage/totals';
 import { METRIC_WORD, type Metric } from '@/utils/usage/viewState';
 import ChangeBadge from './ChangeBadge';
 import shared from './Shared.module.scss';
@@ -177,7 +177,7 @@ function Row({
       </td>
       {dim === 'model' && <td className={s.num}>{r.cacheHit === null ? 'n/a' : `${(r.cacheHit * 100).toFixed(1)}%`}</td>}
       {dim === 'model' && <PriceTd row={r} />}
-      {dim === 'model' && <td className={s.num}>{fmtLatency(r.totals.avg_latency_ms)}</td>}
+      {dim === 'model' && <td className={s.num}>{fmtLatency(avgLatency(r.totals))}</td>}
       {dim === 'credential' && <td className={s.num}>{r.lastUsed === null ? 'never' : fmtTimestamp(r.lastUsed)}</td>}
       <td className={`${s.num} ${r.fail >= FAIL_HIGHLIGHT ? s.failHigh : ''}`}>{fmtPct(r.fail)}</td>
     </tr>

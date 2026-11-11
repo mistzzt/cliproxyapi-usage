@@ -11,6 +11,7 @@ from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.schemas import RequestRecord
 from cliproxy_usage_server.aggregate import Filters, Window, query_summary
 from cliproxy_usage_server.pricing import ModelPricing
+from cliproxy_usage_server.schemas import Totals
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -88,8 +89,8 @@ def write_usage_db(db_path: Path, rows: Iterable[UsageRow]) -> Path:
     return db_path
 
 
-def request_cost(pricing: ModelPricing, inp: int, out: int, cached: int) -> float:
-    """Cost of one request with these raw DB counts, priced by the production query."""
+def request_totals(pricing: ModelPricing, inp: int, out: int, cached: int) -> Totals:
+    """Totals of one request with these raw DB counts, from the production query."""
     conn = open_db(Path(":memory:"))
     insert_records(
         conn, _records([("2026-10-01T00:00:00Z", "k", "m", "s", inp, out, cached)])
@@ -99,8 +100,14 @@ def request_cost(pricing: ModelPricing, inp: int, out: int, cached: int) -> floa
         conn, window, None, ZoneInfo("UTC"), Filters(), {"m": pricing}
     )
     conn.close()
-    assert summary.current.cost is not None
-    return summary.current.cost
+    return summary.current
+
+
+def request_cost(pricing: ModelPricing, inp: int, out: int, cached: int) -> float:
+    """Cost of one request with these raw DB counts, priced by the production query."""
+    cost = request_totals(pricing, inp, out, cached).cost
+    assert cost is not None
+    return cost
 
 
 @pytest.fixture
