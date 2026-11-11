@@ -272,7 +272,7 @@ def _schema_problem(db_path: Path) -> str | None:
 
 
 def run() -> None:
-    """Check the DB's schema version, load config and start uvicorn."""
+    """Load config, check the DB's schema version and start uvicorn."""
     config = load_config()
     if (problem := _schema_problem(config.db_path)) is not None:
         sys.exit(f"Schema version error: {problem}")

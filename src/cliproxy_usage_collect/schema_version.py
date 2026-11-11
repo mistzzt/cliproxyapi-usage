@@ -48,7 +48,7 @@ def write_lock(conn: sqlite3.Connection, path: Path) -> Iterator[int]:
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield supported_version(conn, path)
+        conn.commit()
     except BaseException:
         conn.rollback()
         raise
-    conn.commit()
