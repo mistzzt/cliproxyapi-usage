@@ -200,13 +200,13 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
     openai = _uses_codex_billing(pricing)
     inp = pricing.input_cost_per_token
     cache_read = pricing.cache_read_input_token_cost
-    base = Rates(
-        input=inp,
-        output=pricing.output_cost_per_token,
-        cache_creation=_or(pricing.cache_creation_input_token_cost, inp * 1.25),
-        cache_read=_or(cache_read, inp if openai else inp * 0.1),
-        cache_creation_1h=inp * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
+    published = (
+        inp,
+        pricing.output_cost_per_token,
+        _or(pricing.cache_creation_input_token_cost, inp * 1.25),
+        _or(cache_read, inp if openai else inp * 0.1),
     )
+    base = _rates(*published)
     above_200k = (
         pricing.input_cost_per_token_above_200k_tokens,
         pricing.output_cost_per_token_above_200k_tokens,
@@ -227,15 +227,24 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
         if switch and has_272k
         else (_THRESHOLD_200K, above_200k)
     )
-    # No tier publishes a 1-hour rate; it is twice the tier's input rate.
-    above = Rates(*(_or(a, b) for a, b in zip((*tier, None), base, strict=True)))
-    above = above._replace(
-        cache_creation_1h=above.input * _CACHE_CREATION_1H_INPUT_MULTIPLIER
-    )
+    above = _rates(*(_or(a, b) for a, b in zip(tier, published, strict=True)))
     if openai and cache_read is None:
         # Codex bills unpriced cache reads of long requests at the long input rate.
         above = above._replace(cache_read=above.input)
     return CostPlan(switch, threshold, base, above)
+
+
+def _rates(
+    inp: float, output: float, cache_creation: float, cache_read: float
+) -> Rates:
+    """Rates from the four published ones; 1-hour writes bill at twice input."""
+    return Rates(
+        inp,
+        output,
+        cache_creation,
+        cache_read,
+        inp * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
+    )
 
 
 def _or(value: float | None, default: float) -> float:

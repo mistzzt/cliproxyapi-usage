@@ -290,7 +290,9 @@ def _fetch_cells(
     plan_rows = ", ".join(["(NULL, 0, 0)", *["(?, ?, ?)"] * len(plans)])
     plan_params = [v for m, p in plans.items() for v in (m, p.switch, p.threshold)]
     where, params = _where(window, filters)
-    rows = conn.execute(
+    cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
+    rows = cursor.execute(
         f"""
         WITH plan(plan_model, switch, threshold) AS (VALUES {plan_rows}),
         r AS (
@@ -298,8 +300,7 @@ def _fetch_cells(
                 requests.*,
                 COALESCE(switch, 0) AS switch,
                 COALESCE(threshold, 0) AS t,
-                input_tokens - cache_read_tokens - cache_creation_tokens AS uncached,
-                cache_creation_tokens - cache_creation_1h_tokens AS cache_creation_5m
+                {_PRICED_COLUMNS}
             FROM requests LEFT JOIN plan ON plan_model = model
             {where}
         )
@@ -308,24 +309,16 @@ def _fetch_cells(
             api_key,
             model,
             source,
-            COUNT(*),
-            SUM(failed),
-            SUM(input_tokens),
-            SUM(output_tokens),
-            SUM(reasoning_tokens),
-            SUM(cache_read_tokens),
-            SUM(cache_creation_tokens),
-            SUM(cache_creation_1h_tokens),
-            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END),
-            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END),
-            MAX(timestamp),
-            SUM(uncached),
-            SUM(cache_creation_5m),
-            SUM({_base_rate("uncached")}),
-            SUM({_base_rate("output_tokens")}),
-            SUM({_base_rate("cache_creation_5m")}),
-            SUM({_base_rate("cache_read_tokens")}),
-            SUM({_base_rate("cache_creation_1h_tokens")})
+            COUNT(*) AS requests,
+            SUM(failed) AS failed,
+            SUM(input_tokens) AS input_tokens,
+            SUM(reasoning_tokens) AS reasoning_tokens,
+            SUM(cache_creation_tokens) AS cache_creation_tokens,
+            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END) AS ok_latency_sum,
+            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END)
+                AS long_requests,
+            MAX(timestamp) AS last_used,
+            {_PRICED_SUMS}
         FROM r
         GROUP BY slice_no, api_key, model, source
         """,
@@ -335,69 +328,37 @@ def _fetch_cells(
     people: dict[str, str] = {}
     credentials: dict[str, str] = {}
     cells: list[_Cell] = []
-    for (
-        slice_no,
-        api_key,
-        model,
-        source,
-        req,
-        failed,
-        inp,
-        out,
-        rea,
-        cr,
-        cc,
-        cc_1h,
-        lat,
-        long_req,
-        last,
-        uncached,
-        cc_5m,
-        base_inp,
-        base_out,
-        base_cc_5m,
-        base_cr,
-        base_cc_1h,
-    ) in rows:
+    for row in rows:
+        api_key, model, source = row["api_key"], row["model"], row["source"]
         _, status = resolved[model]
         plan = plans.get(model)
-        base = Amounts(
-            input=base_inp,
-            output=base_out,
-            cache_creation=base_cc_5m,
-            cache_read=base_cr,
-            cache_creation_1h=base_cc_1h,
-        )
-        above = Amounts(
-            input=uncached - base_inp,
-            output=out - base_out,
-            cache_creation=cc_5m - base_cc_5m,
-            cache_read=cr - base_cr,
-            cache_creation_1h=cc_1h - base_cc_1h,
-        )
+        total = Amounts._make(row[f"total_{f}"] for f in Amounts._fields)
+        base = Amounts._make(row[f"base_{f}"] for f in Amounts._fields)
+        above = Amounts._make(t - b for t, b in zip(total, base, strict=True))
+        long_requests = row["long_requests"]
         if plan is None or not plan.has_long_tier:
-            long_req = 0
+            long_requests = 0
         if api_key not in people:
             people[api_key] = redact_key(api_key)
         if source not in credentials:
             credentials[source] = redact_source(source)
         cells.append(
             _Cell(
-                slice_no=slice_no,
+                slice_no=row["slice_no"],
                 person=people[api_key],
                 model=keys[model],
                 credential=credentials[source],
-                requests=req,
-                failed=failed,
-                input_tokens=inp,
-                output_tokens=out,
-                reasoning_tokens=rea,
-                cache_read_tokens=cr,
-                cache_creation_tokens=cc,
-                cache_creation_1h_tokens=cc_1h,
-                ok_latency_sum=lat,
-                long_requests=long_req,
-                last_used=_parse_ts(last),
+                requests=row["requests"],
+                failed=row["failed"],
+                input_tokens=row["input_tokens"],
+                output_tokens=total.output,
+                reasoning_tokens=row["reasoning_tokens"],
+                cache_read_tokens=total.cache_read,
+                cache_creation_tokens=row["cache_creation_tokens"],
+                cache_creation_1h_tokens=total.cache_creation_1h,
+                ok_latency_sum=row["ok_latency_sum"],
+                long_requests=long_requests,
+                last_used=_parse_ts(row["last_used"]),
                 costs=plan.costs(base, above) if plan is not None else _NO_COST,
                 long_cost=plan.long_cost(above) if plan is not None else 0.0,
                 cache_savings=(
@@ -412,13 +373,6 @@ def _fetch_cells(
     return cells
 
 
-# A request has tokens at the long rate: whole-request plans when its input passes
-# the threshold, marginal plans when any one token type exceeds it.
-_LONG_REQUEST = (
-    "(CASE WHEN switch THEN input_tokens > t ELSE MAX(uncached, output_tokens, "
-    "cache_read_tokens, cache_creation_5m, cache_creation_1h_tokens) > t END)"
-)
-
 _NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
 
 
@@ -428,6 +382,27 @@ def _base_rate(column: str) -> str:
         f"CASE WHEN switch THEN (CASE WHEN input_tokens > t THEN 0 ELSE {column} END) "
         f"ELSE MIN({column}, t) END"
     )
+
+
+# Per-request tokens of each priced type, by ``Amounts`` field.
+_PRICED: dict[str, str] = {
+    "input": "input_tokens - cache_read_tokens - cache_creation_tokens",
+    "output": "output_tokens",
+    "cache_creation": "cache_creation_tokens - cache_creation_1h_tokens",
+    "cache_read": "cache_read_tokens",
+    "cache_creation_1h": "cache_creation_1h_tokens",
+}
+_PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in Amounts._fields)
+_PRICED_SUMS = ", ".join(
+    f"SUM(priced_{f}) AS total_{f}, SUM({_base_rate(f'priced_{f}')}) AS base_{f}"
+    for f in Amounts._fields
+)
+# A request has tokens at the long rate: whole-request plans when its input passes
+# the threshold, marginal plans when any one token type exceeds it.
+_LONG_REQUEST = (
+    "(CASE WHEN switch THEN input_tokens > t "
+    f"ELSE MAX({', '.join(f'priced_{f}' for f in Amounts._fields)}) > t END)"
+)
 
 
 def _data_start(conn: sqlite3.Connection) -> datetime | None:
@@ -568,13 +543,13 @@ def _model_price(plan: CostPlan | None) -> ModelPrice | None:
     if plan is None:
         return None
     long_context = (
-        None
-        if plan.above == plan.base
-        else LongContextPrice(
+        LongContextPrice(
             **_unit_prices(plan.above).model_dump(),
             threshold=plan.threshold,
             whole_request=plan.switch,
         )
+        if plan.has_long_tier
+        else None
     )
     return ModelPrice(
         **_unit_prices(plan.base).model_dump(),
