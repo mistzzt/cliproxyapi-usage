@@ -76,6 +76,17 @@ class ServerConfig(BaseSettings):
         ),
     )
 
+    cell_cache: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("cell_cache", "USAGE_CELL_CACHE"),
+    )
+    cell_cache_verify_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices(
+            "cell_cache_verify_seconds", "USAGE_CELL_CACHE_VERIFY_SECONDS"
+        ),
+    )
+
     @field_validator("base_path")
     @classmethod
     def _normalize_base_path(cls, value: str) -> str:

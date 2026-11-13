@@ -119,8 +119,10 @@ class SliceIndexer:
         self._edges = [int(b.timestamp()) for b in buckets]
         self._cache: dict[int, int | None] = {}
 
-    def __call__(self, slice_no: int) -> int | None:
+    def __call__(self, slice_no: int | None) -> int | None:
         """Return the bucket position for *slice_no*, or None if outside the axis."""
+        if slice_no is None:
+            return None
         if slice_no in self._cache:
             return self._cache[slice_no]
         pos = bisect_right(self._edges, slice_no * SLICE_SECONDS) - 1

@@ -29,6 +29,7 @@ from cliproxy_usage_server.aggregate import (
     query_summary,
     resolve_filter,
 )
+from cliproxy_usage_server.cell_cache import CellCache
 from cliproxy_usage_server.db import Bucket, open_ro
 from cliproxy_usage_server.pricing import ModelPricing
 from cliproxy_usage_server.schemas import (
@@ -115,11 +116,14 @@ _Pricing = Annotated[Mapping[str, ModelPricing], Depends(_get_pricing)]
 _Range = Annotated[_RangeParams, Depends()]
 
 
-def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
+def build_router(
+    db_path: Path, aliases: Mapping[str, str], cache: CellCache | None = None
+) -> APIRouter:
     """Build the usage API router.
 
     DB connections are opened read-only from *db_path* per-request; *aliases*
-    maps redacted keys to display names. Access control is delegated upstream.
+    maps redacted keys to display names; *cache*, when given, serves whole slots.
+    Access control is delegated upstream.
     """
     r = APIRouter(prefix="/usage", tags=["usage"])
     warned: set[str] = set()
@@ -140,7 +144,13 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
     ) -> SummaryResponse:
         """KPI totals with the previous period and dense per-bucket series."""
         return query_summary(
-            conn, rng.window, _bucket(bucket), rng.tz, rng.filters(conn), pricing
+            conn,
+            rng.window,
+            _bucket(bucket),
+            rng.tz,
+            rng.filters(conn),
+            pricing,
+            cache=cache,
         )
 
     @r.get("/breakdown", response_model=BreakdownResponse)
@@ -161,6 +171,7 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
             rng.filters(conn),
             pricing,
             aliases,
+            cache=cache,
         )
 
     @r.get("/export", response_class=Response)
@@ -179,6 +190,7 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
             rng.filters(conn),
             pricing,
             aliases,
+            cache=cache,
         )
         return Response(
             body,
@@ -191,7 +203,7 @@ def build_router(db_path: Path, aliases: Mapping[str, str]) -> APIRouter:
         conn: Annotated[sqlite3.Connection, Depends(get_conn)], pricing: _Pricing
     ) -> OptionsResponse:
         """Every person, model and credential with its all-time color slot."""
-        body = query_options(conn, pricing, aliases)
+        body = query_options(conn, pricing, aliases, cache=cache)
         unmatched = set(aliases) - {e.key for e in body.people} - warned
         for key in sorted(unmatched):
             _log.warning("USAGE_KEY_ALIASES entry %r matches no API key", key)
