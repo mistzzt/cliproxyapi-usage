@@ -3,10 +3,10 @@
 Every endpoint is built from cells per (15-minute UTC slice, api_key, model,
 source) from ``cell_cache``: each holds every plan shape's per-request base-rate
 share, so pricing a cell with its model's ``CostPlan`` equals the sum of its
-per-request costs. A ready ``CellCache`` serves whole slots; edges and the
-fallback query ``requests``. Totals, per-entity rows, trends and
-mixes are sums of the same priced cells, so they always agree, and cost is
-independent of the chosen bucket.
+per-request costs. A ready ``CellCache`` serves whole intervals; the partial
+and evicted ones, and all of them until it is ready, come from ``requests``.
+Totals, per-entity rows, trends and mixes are sums of the same priced cells, so
+they always agree, and cost is independent of the chosen bucket.
 
 People are redacted API keys (raw keys that redact alike merge into one
 person); credentials are redacted sources. Responses carry only raw token
@@ -375,10 +375,9 @@ def _pricer(pricing: Mapping[str, ModelPricing]) -> _Pricer:
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-def _seconds(conn: sqlite3.Connection, dt: datetime) -> int:
-    """Epoch seconds of the bound as ``_where``'s ``datetime(?)`` compares it."""
-    sql = "SELECT CAST(strftime('%s', ?) AS INTEGER)"
-    return conn.execute(sql, [_ts_param(dt)]).fetchone()[0]
+def _seconds(dt: datetime) -> int:
+    """Whole epoch seconds of *dt*, as ``_where``'s ``datetime(?)`` compares it."""
+    return (dt - _EPOCH) // timedelta(seconds=1)
 
 
 def _slot_start(slot: int) -> datetime:
@@ -386,11 +385,26 @@ def _slot_start(slot: int) -> datetime:
 
 
 def _matches(filters: Filters) -> Callable[[Key], bool]:
+    """Whether a cache key passes *filters*; key positions follow ``COLUMNS``."""
     sets = [
-        None if v is None else frozenset(v)
-        for v in (filters.api_keys, filters.models, filters.sources)
+        (i, frozenset(v))
+        for i, v in enumerate((filters.api_keys, filters.models, filters.sources))
+        if v is not None
     ]
-    return lambda key: all(s is None or k in s for s, k in zip(sets, key, strict=True))
+    return lambda key: all(key[i] in s for i, s in sets)
+
+
+def _scan_cells(
+    conn: sqlite3.Connection,
+    window: Window | None,
+    filters: Filters,
+    price: _Pricer,
+    *,
+    max_rowid: int | None = None,
+    by_time: bool = False,
+) -> list[_Cell]:
+    rows = scan(conn, *_where(window, filters, max_rowid), by_time=by_time)
+    return [price(r) for r in rows]
 
 
 def _cached_cells(
@@ -400,36 +414,38 @@ def _cached_cells(
     price: _Pricer,
     cache: CellCache,
 ) -> list[_Cell] | None:
-    """Whole slots from *cache*, partial edge slots from ``requests``."""
-    lo: int | None = None
-    hi: int | None = None
-    head: Window | None = None
-    tail: Window | None = None
-    if window is not None:
-        end = _seconds(conn, window.end)
-        hi = end // SLICE_SECONDS
-        if window.start is not None:
-            start = _seconds(conn, window.start)
-            lo = -(-start // SLICE_SECONDS)
-            if lo >= hi:
-                return None
-            if lo * SLICE_SECONDS > start:
-                head = Window(window.start, _slot_start(lo))
-        if hi * SLICE_SECONDS < end:
-            tail = Window(_slot_start(hi), window.end)
-    got = cache.read(conn, lo, hi, unslotted=window is None, price=price)
-    if got is None:
+    """Whole intervals from *cache*; the rest from ``requests`` up to its last rowid."""
+    first = None if window is None else window.start
+    start = None if first is None else _seconds(first)
+    end = None if window is None else _seconds(window.end)
+    lo = None if start is None else -(-start // SLICE_SECONDS)
+    hi = None if end is None else end // SLICE_SECONDS
+    if lo is not None and hi is not None and lo > hi:
+        # The window lies inside one interval, so the cache holds none of it.
+        return _scan_cells(conn, window, filters, price, by_time=True)
+    hit = cache.read(conn, lo, hi, unslotted=window is None, price=price)
+    if hit is None:
         return None
-    max_rowid, cached = got
 
-    def edge(w: Window | None) -> list[_Cell]:
-        if w is None:
-            return []
-        return [price(r) for r in scan(conn, *_where(w, filters, max_rowid))]
+    def edge(edge_start: datetime | None, edge_end: datetime) -> list[_Cell]:
+        w = Window(edge_start, edge_end)
+        return _scan_cells(
+            conn, w, filters, price, max_rowid=hit.max_rowid, by_time=True
+        )
 
+    # Unparseable timestamps, head, held intervals, tail: the direct query's order.
     match = _matches(filters)
-    # Head edge, whole slots, tail edge: the direct query's slot-then-key order.
-    return [*edge(head), *(c for key, c in cached if match(key)), *edge(tail)]
+    cells = [c for key, c in hit.unslotted if match(key)]
+    if hit.start is not None and (start is None or hit.start * SLICE_SECONDS > start):
+        cells += edge(first, _slot_start(hit.start))
+    cells += (c for key, c in hit.cells if match(key))
+    if (
+        window is not None
+        and hi is not None
+        and hi * SLICE_SECONDS < _seconds(window.end)
+    ):
+        cells += edge(_slot_start(hi), window.end)
+    return cells
 
 
 def _fetch_cells(
@@ -445,7 +461,7 @@ def _fetch_cells(
         cells = _cached_cells(conn, window, filters, price, cache)
         if cells is not None:
             return cells
-    return [price(r) for r in scan(conn, *_where(window, filters))]
+    return _scan_cells(conn, window, filters, price)
 
 
 def _data_start(conn: sqlite3.Connection) -> datetime | None:
@@ -499,14 +515,18 @@ def resolve_filter(
     conn: sqlite3.Connection,
     column: FilterColumn,
     keys: list[str] | None,
+    cache: CellCache | None = None,
 ) -> list[str] | None:
     """Raw *column* values whose display key is in *keys*; None means no filter."""
     if keys is None:
         return None
+    values = cache.values(conn, column) if cache is not None else None
+    if values is None:
+        sql = f"SELECT DISTINCT {column} FROM requests"
+        values = [v for (v,) in conn.execute(sql)]
     key_of = _FILTER_KEY[column]
     target = set(keys)
-    rows = conn.execute(f"SELECT DISTINCT {column} FROM requests").fetchall()
-    return [r[0] for r in rows if key_of(r[0]) in target]
+    return [v for v in values if key_of(v) in target]
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,7 @@
-"""Plan-independent cell sums and the process-wide slot cache that holds them.
+"""Pricing-independent cell sums and the in-memory cache that keeps them for history.
 
-A cell groups requests by (15-minute UTC slot, api_key, model, source). Its sums
-carry the base-rate share of every ``PLAN_SHAPES`` entry, so pricing picks each
-model's shape afterwards and the sums never depend on the pricing map.
-
-``CellCache`` keeps every cell of the DB in memory. One scan builds it in a
-background thread; each read first folds in rows whose ``rowid`` passed the last
-seen maximum. The collector only appends (``INSERT OR IGNORE``), so that is exact;
-a replaced file, schema change, lower ``MAX(rowid)``, changed anchor row or (every
-``verify_seconds``) a changed ``COUNT(*)`` drops the cache and rebuilds it.
+A cell groups requests by (15-minute UTC interval, api_key, model, source). Its sums
+hold every ``PLAN_SHAPES`` base-rate share, so pricing picks each model's shape later.
 """
 
 from __future__ import annotations
@@ -19,11 +12,12 @@ import os
 import sqlite3
 import threading
 import time
+from array import array
 from bisect import bisect_left, insort
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from cliproxy_usage_server.db import SLICE_SECONDS, open_ro
 from cliproxy_usage_server.pricing import PLAN_SHAPES, Amounts, PlanShape
@@ -40,12 +34,13 @@ _PRICED: dict[str, str] = {
 }
 _FIELDS = Amounts._fields
 
-# Layout of a cell's integer sums: plain counts, then long requests per shape,
+# Layout of a cell's sums: plain counts, then long requests per shape,
 # then every type's total, then every type's base-rate share per shape.
 REQUESTS, FAILED, INPUT_TOKENS, REASONING_TOKENS, OK_LATENCY_SUM = range(5)
 LONG_AT = 5
 TOTAL_AT = LONG_AT + len(PLAN_SHAPES)
 BASE_AT = TOTAL_AT + len(_FIELDS)
+TOTAL = slice(TOTAL_AT, BASE_AT)
 
 
 def base_slice(shape: int) -> slice:
@@ -54,10 +49,12 @@ def base_slice(shape: int) -> slice:
     return slice(start, start + len(_FIELDS))
 
 
-TOTAL = slice(TOTAL_AT, BASE_AT)
+# Estimated bytes of one entry: its sums plus one memoized priced result.
+ENTRY_BYTES = 2048
 
-type Key = tuple[str, str, str]  # api_key, model, source
-# slot (None for unparseable timestamps), api_key, model, source, last_used, sums
+COLUMNS = ("api_key", "model", "source")
+type Key = tuple[str, str, str]  # values of COLUMNS
+# interval (None when SQLite cannot parse the timestamp), *Key, last_used, sums
 type Row = tuple[int | None, str, str, str, str, Sequence[int]]
 
 
@@ -98,8 +95,16 @@ _SUMS = ",\n".join(
 _PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in _FIELDS)
 
 
-def scan(conn: sqlite3.Connection, where: str, params: Sequence[object]) -> list[Row]:
-    """Cell sums of the requests matching *where*, ordered by slot then key."""
+def scan(
+    conn: sqlite3.Connection,
+    where: str,
+    params: Sequence[object],
+    *,
+    by_time: bool = False,
+) -> list[Row]:
+    """Cell sums of the requests matching *where*, ordered by interval then key.
+    *by_time* makes SQLite use the timestamp index whatever else *where* filters."""
+    index = "INDEXED BY idx_requests_ts_utc" if by_time else ""
     rows = conn.execute(
         f"""
         SELECT
@@ -109,7 +114,7 @@ def scan(conn: sqlite3.Connection, where: str, params: Sequence[object]) -> list
         FROM (
             SELECT timestamp, api_key, model, source, failed, latency_ms,
                 input_tokens, reasoning_tokens, {_PRICED_COLUMNS}
-            FROM requests {where}
+            FROM requests {index} {where}
         )
         GROUP BY slice_no, api_key, model, source
         ORDER BY slice_no, api_key, model, source
@@ -120,9 +125,25 @@ def scan(conn: sqlite3.Connection, where: str, params: Sequence[object]) -> list
 
 
 @dataclass(slots=True)
-class _Sums:
+class _Entry:
     last_used: str
-    ints: list[int]
+    sums: array[int]
+
+
+class Hit[T](NamedTuple):
+    """A cached read: priced cells of the intervals from *start* (None: all) on."""
+
+    max_rowid: int
+    start: int | None
+    unslotted: list[tuple[Key, T]]
+    cells: list[tuple[Key, T]]
+
+
+type _Interned = tuple[dict[str, str], dict[str, str], dict[str, str]]
+
+
+def _interned() -> _Interned:
+    return {}, {}, {}
 
 
 @dataclass(slots=True)
@@ -131,29 +152,53 @@ class _State:
     schema_version: int
     max_rowid: int
     anchor: str | None  # timestamp of the row at max_rowid
-    count: int
     verified_at: float
-    cells: dict[int | None, dict[Key, _Sums]] = field(default_factory=dict)
-    order: list[int] = field(default_factory=list)  # sorted non-None slots
+    seen: int = 0  # rows folded in, evicted ones included
+    entries: int = 0
+    floor: int | None = None  # intervals below it are evicted
+    cells: dict[int | None, dict[Key, _Entry]] = field(default_factory=dict)
+    order: list[int] = field(default_factory=list)  # sorted intervals, None excluded
+    values: _Interned = field(default_factory=_interned)  # by COLUMNS
     priced: dict[int | None, list[tuple[Key, Any]]] = field(default_factory=dict)
     priced_by: object = None
 
     def fold(self, row: Row) -> None:
-        slot, api_key, model, source, last_used, ints = row
+        slot, api_key, model, source, last_used, sums = row
+        self.seen += sums[REQUESTS]
+        if slot is not None and self.floor is not None and slot < self.floor:
+            return
+        keys, models, sources = self.values
+        key = (
+            keys.setdefault(api_key, api_key),
+            models.setdefault(model, model),
+            sources.setdefault(source, source),
+        )
         slot_cells = self.cells.get(slot)
         if slot_cells is None:
             slot_cells = self.cells[slot] = {}
             if slot is not None:
                 insort(self.order, slot)
-        key = (api_key, model, source)
-        sums = slot_cells.get(key)
-        if sums is None:
-            slot_cells[key] = _Sums(last_used, list(ints))
+        entry = slot_cells.get(key)
+        if entry is None:
+            slot_cells[key] = _Entry(last_used, array("q", sums))
+            self.entries += 1
         else:
-            sums.ints = [a + b for a, b in zip(sums.ints, ints, strict=True)]
-            sums.last_used = max(sums.last_used, last_used)
-        self.count += ints[REQUESTS]
+            for i, v in enumerate(sums):
+                entry.sums[i] += v
+            entry.last_used = max(entry.last_used, last_used)
         self.priced.pop(slot, None)
+
+    def evict(self, max_entries: int) -> bool:
+        """Drop the oldest intervals until the entries fit; True if any were dropped."""
+        n = 0
+        while self.entries > max_entries and n < len(self.order):
+            self.entries -= len(self.cells.pop(self.order[n]))
+            self.priced.pop(self.order[n], None)
+            n += 1
+        if n:
+            self.floor = self.order[n - 1] + 1
+            del self.order[:n]
+        return n > 0
 
 
 def _head(conn: sqlite3.Connection) -> tuple[int, int]:
@@ -169,42 +214,34 @@ def _anchor(conn: sqlite3.Connection, rowid: int) -> str | None:
     return None if row is None else row[0]
 
 
-def _count(conn: sqlite3.Connection) -> int:
-    return conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
-
-
-class _Read:
+@contextlib.contextmanager
+def _snapshot(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Run statements in one read transaction so they see the same rows."""
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
-        self._began = False
-
-    def __enter__(self) -> sqlite3.Connection:
-        if not self._conn.in_transaction:
-            self._conn.execute("BEGIN")
-            self._began = True
-        return self._conn
-
-    def __exit__(self, *_: object) -> None:
-        if self._began:
-            self._conn.commit()
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    finally:
+        conn.commit()
 
 
 _RETRY_SECONDS = 30.0
 
 
 class CellCache:
-    """Process-wide cell sums of one DB, kept current by folding in new rows."""
+    """Cell sums of one DB's whole history, kept current by folding in new rows."""
 
-    def __init__(self, db_path: Path, *, verify_seconds: float = 60.0) -> None:
+    def __init__(
+        self, db_path: Path, *, verify_seconds: float = 60.0, max_mb: float = 512.0
+    ) -> None:
         self._db_path = db_path
         self._verify_seconds = verify_seconds
+        self._max_entries = int(max_mb * 2**20) // ENTRY_BYTES
         self._lock = threading.Lock()
         self._state: _State | None = None
         self._generation = 0
         self._building = False
         self._retry_at = 0.0
+        self._evicted = False  # the first eviction was logged
         self.builds = 0  # completed builds, for tests and benchmarks
         self.hits = 0  # reads served from the cache
 
@@ -235,9 +272,9 @@ class CellCache:
         *,
         unslotted: bool,
         price: Callable[[Row], T],
-    ) -> tuple[int, list[tuple[Key, T]]] | None:
-        """Priced cells of slots in ``[lo, hi)`` (None: unbounded) and the rowid
-        they cover; None while the cache is not ready. *price* keys the memo."""
+    ) -> Hit[T] | None:
+        """Priced cells of the held intervals in ``[lo, hi)`` (None: unbounded).
+        None until ready; *price* keys the memo of priced cells."""
         with self._lock:
             st = self._synced(conn)
             if st is None:
@@ -245,15 +282,27 @@ class CellCache:
             if st.priced_by is not price:
                 st.priced = {}
                 st.priced_by = price
-            out: list[tuple[Key, T]] = []
-            if unslotted and None in st.cells:
-                out.extend(self._priced(st, None, price))
-            i = 0 if lo is None else bisect_left(st.order, lo)
+            start = lo
+            if st.floor is not None and (lo is None or lo < st.floor):
+                start = st.floor
+            if start is not None and hi is not None:
+                start = min(start, hi)
+            i = 0 if start is None else bisect_left(st.order, start)
             j = len(st.order) if hi is None else bisect_left(st.order, hi)
-            for slot in st.order[i:j]:
-                out.extend(self._priced(st, slot, price))
+            cells = [c for s in st.order[i:j] for c in self._priced(st, s, price)]
+            loose = (
+                self._priced(st, None, price) if unslotted and None in st.cells else []
+            )
             self.hits += 1
-            return st.max_rowid, out
+            return Hit(st.max_rowid, start, loose, cells)
+
+    def values(self, conn: sqlite3.Connection, column: str) -> list[str] | None:
+        """Distinct raw values of *column*; None until ready or while any is evicted."""
+        with self._lock:
+            st = self._synced(conn)
+            if st is None or st.floor is not None:
+                return None
+            return list(st.values[COLUMNS.index(column)])
 
     @staticmethod
     def _priced[T](
@@ -262,8 +311,8 @@ class CellCache:
         memo = st.priced.get(slot)
         if memo is None:
             memo = st.priced[slot] = [
-                (key, price((slot, *key, s.last_used, s.ints)))
-                for key, s in sorted(st.cells[slot].items())
+                (key, price((slot, *key, e.last_used, e.sums)))
+                for key, e in sorted(st.cells[slot].items())
             ]
         return cast(list[tuple[Key, T]], memo)
 
@@ -272,7 +321,7 @@ class CellCache:
         return st.st_dev, st.st_ino
 
     def _synced(self, conn: sqlite3.Connection) -> _State | None:
-        """Fold rows past the cached max rowid; drop the cache on a rewrite."""
+        """Fold rows past the last seen rowid; drop the cache on a rewrite."""
         st = self._state
         if st is None:
             self._kick()
@@ -284,7 +333,7 @@ class CellCache:
         except OSError:
             intact = False
         if intact:
-            with _Read(conn):
+            with _snapshot(conn):
                 intact = self._fold_new(conn, st, verify)
         if not intact:
             _log.info("usage DB rewritten; rebuilding the cell cache")
@@ -294,6 +343,7 @@ class CellCache:
             return None
         if verify:
             st.verified_at = now
+        self._evict(st)
         return st
 
     @staticmethod
@@ -304,31 +354,39 @@ class CellCache:
         if st.max_rowid and _anchor(conn, st.max_rowid) != st.anchor:
             return False
         if max_rowid > st.max_rowid:
-            for row in scan(
-                conn, "WHERE rowid > ? AND rowid <= ?", [st.max_rowid, max_rowid]
-            ):
+            for row in scan(conn, "WHERE rowid > ?", [st.max_rowid]):
                 st.fold(row)
             st.max_rowid = max_rowid
             st.anchor = _anchor(conn, max_rowid)
-        return not verify or _count(conn) == st.count
+        if not verify:
+            return True
+        return conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == st.seen
 
     def _load(self) -> _State:
         file_id = self._file_id()
-        with contextlib.closing(open_ro(self._db_path)) as conn, _Read(conn):
+        with contextlib.closing(open_ro(self._db_path)) as conn, _snapshot(conn):
             schema_version, max_rowid = _head(conn)
             st = _State(
                 file_id=file_id,
                 schema_version=schema_version,
                 max_rowid=max_rowid,
                 anchor=_anchor(conn, max_rowid),
-                count=0,
                 verified_at=time.monotonic(),
             )
-            for row in scan(conn, "WHERE rowid <= ?", [max_rowid]):
+            for row in scan(conn, "", []):
                 st.fold(row)
         return st
 
+    def _evict(self, st: _State) -> None:
+        if st.evict(self._max_entries) and not self._evicted:
+            self._evicted = True
+            _log.warning(
+                "cell cache is over USAGE_CELL_CACHE_MAX_MB; "
+                "intervals before the oldest kept one are read from the DB"
+            )
+
     def _install(self, st: _State) -> None:
+        self._evict(st)
         self._state = st
         self.builds += 1
 

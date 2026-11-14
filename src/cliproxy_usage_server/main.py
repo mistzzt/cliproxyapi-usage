@@ -149,7 +149,11 @@ def create_app(
 
     aliases = load_key_aliases(config.key_aliases)
     cache = (
-        CellCache(config.db_path, verify_seconds=config.cell_cache_verify_seconds)
+        CellCache(
+            config.db_path,
+            verify_seconds=config.cell_cache_verify_seconds,
+            max_mb=config.cell_cache_max_mb,
+        )
         if config.cell_cache
         else None
     )

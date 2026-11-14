@@ -103,12 +103,12 @@ class _RangeParams:
         self.models = _parse_list(models)
         self.credentials = _parse_list(credentials)
 
-    def filters(self, conn: sqlite3.Connection) -> Filters:
+    def filters(self, conn: sqlite3.Connection, cache: CellCache | None) -> Filters:
         """Resolve the display-key filters to raw column values."""
         return Filters(
-            api_keys=resolve_filter(conn, "api_key", self.people),
-            models=resolve_filter(conn, "model", self.models),
-            sources=resolve_filter(conn, "source", self.credentials),
+            api_keys=resolve_filter(conn, "api_key", self.people, cache),
+            models=resolve_filter(conn, "model", self.models, cache),
+            sources=resolve_filter(conn, "source", self.credentials, cache),
         )
 
 
@@ -122,7 +122,7 @@ def build_router(
     """Build the usage API router.
 
     DB connections are opened read-only from *db_path* per-request; *aliases*
-    maps redacted keys to display names; *cache*, when given, serves whole slots.
+    maps redacted keys to display names; *cache*, when given, serves whole intervals.
     Access control is delegated upstream.
     """
     r = APIRouter(prefix="/usage", tags=["usage"])
@@ -148,7 +148,7 @@ def build_router(
             rng.window,
             _bucket(bucket),
             rng.tz,
-            rng.filters(conn),
+            rng.filters(conn, cache),
             pricing,
             cache=cache,
         )
@@ -168,7 +168,7 @@ def build_router(
             rng.window,
             _bucket(bucket),
             rng.tz,
-            rng.filters(conn),
+            rng.filters(conn, cache),
             pricing,
             aliases,
             cache=cache,
@@ -187,7 +187,7 @@ def build_router(
             rng.window,
             _bucket(bucket),
             rng.tz,
-            rng.filters(conn),
+            rng.filters(conn, cache),
             pricing,
             aliases,
             cache=cache,

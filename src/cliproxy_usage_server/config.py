@@ -80,6 +80,11 @@ class ServerConfig(BaseSettings):
         default=True,
         validation_alias=AliasChoices("cell_cache", "USAGE_CELL_CACHE"),
     )
+    cell_cache_max_mb: float = Field(
+        default=512.0,
+        ge=0,
+        validation_alias=AliasChoices("cell_cache_max_mb", "USAGE_CELL_CACHE_MAX_MB"),
+    )
     cell_cache_verify_seconds: float = Field(
         default=60.0,
         validation_alias=AliasChoices(

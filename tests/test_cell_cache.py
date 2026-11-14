@@ -1,15 +1,19 @@
-"""The slot cache returns exactly what the direct query does.
+"""The cell cache returns exactly what the direct query does.
 
-Each check runs an endpoint query with and without a built ``CellCache`` and
-compares the responses with ``==``, so floats must match bit for bit.
+Each check runs an endpoint query with and without a ``CellCache`` and compares
+the JSON (or CSV) bytes, so floats must match bit for bit.
 """
 
 from __future__ import annotations
 
 import contextlib
+import gc
+import os
 import random
 import sqlite3
+import threading
 import time
+import tracemalloc
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from test_pricing_ccusage import CLAUDE, GPT_LONG
 
 from cliproxy_usage_collect.db import insert_records, open_db
@@ -29,9 +34,9 @@ from cliproxy_usage_server.aggregate import (
     query_options,
     query_summary,
 )
-from cliproxy_usage_server.cell_cache import CellCache
+from cliproxy_usage_server.cell_cache import ENTRY_BYTES, CellCache
 from cliproxy_usage_server.config import ServerConfig
-from cliproxy_usage_server.db import open_ro
+from cliproxy_usage_server.db import SLICE_SECONDS, open_ro
 from cliproxy_usage_server.main import create_app
 from cliproxy_usage_server.pricing import ModelPricing
 
@@ -99,14 +104,24 @@ def _insert(db: Path, records: list[RequestRecord]) -> None:
         insert_records(conn, records)
 
 
-@pytest.fixture
-def db(tmp_path: Path) -> Path:
-    path = tmp_path / "usage.db"
+def _write(db: Path, sql: str) -> None:
+    with contextlib.closing(sqlite3.connect(db)) as w, w:
+        w.execute(sql)
+
+
+def _make_db(path: Path) -> Path:
     pinned = _records(4, 1, T0)[0].model_copy(
         update={"timestamp": "2026-10-31T04:15:00.200Z"}
     )
     _insert(path, [*_records(1, 3_000, T0), pinned])
+    # Python parses this timestamp but SQLite cannot, so its row has no interval.
+    _insert(path, [pinned.model_copy(update={"timestamp": "20261031T041500.2Z"})])
     return path
+
+
+@pytest.fixture
+def db(tmp_path: Path) -> Path:
+    return _make_db(tmp_path / "usage.db")
 
 
 @pytest.fixture
@@ -127,10 +142,12 @@ def _at(h: int, m: int = 0, s: int = 0, us: int = 0, day: int = 1) -> datetime:
 
 
 WINDOWS = {
-    "mid-slot edges": Window(_at(3, 7, 13, 250_000), _at(17, 52, 1, 999_000, day=2)),
+    "mid-interval edges": Window(
+        _at(3, 7, 13, 250_000), _at(17, 52, 1, 999_000, day=2)
+    ),
     "aligned": Window(_at(0), _at(12)),
-    "one slot": Window(_at(5, 1), _at(5, 14)),
-    "adjacent slots": Window(_at(5, 1), _at(5, 29)),
+    "inside one interval": Window(_at(5, 1), _at(5, 14)),
+    "adjacent intervals": Window(_at(5, 1), _at(5, 29)),
     # SQLite compares whole seconds, so the 04:15:00.2 row is inside this start.
     "sub-second bounds": Window(_at(4, 15, 0, 999_600), _at(9, 29, 59, 999_700)),
     "open start": Window(None, _at(20, 3, day=2)),
@@ -144,7 +161,7 @@ FILTERS = {
     "empty": Filters(sources=[]),
 }
 
-type Query = Callable[[sqlite3.Connection, CellCache | None], object]
+type Query = Callable[[sqlite3.Connection, CellCache | None], BaseModel | str]
 
 
 def _queries(window: Window, filters: Filters) -> dict[str, Query]:
@@ -170,10 +187,25 @@ def _queries(window: Window, filters: Filters) -> dict[str, Query]:
     }
 
 
+def _options(c: sqlite3.Connection, k: CellCache | None) -> BaseModel:
+    return query_options(c, PRICING, {"sk-c...bob": "Bob"}, cache=k)
+
+
+def _bytes(body: BaseModel | str) -> str:
+    return body if isinstance(body, str) else body.model_dump_json()
+
+
 def _same(conn: sqlite3.Connection, cache: CellCache, query: Query) -> None:
+    """The cached read hits the cache and gives the direct query's bytes."""
     hits = cache.hits
-    assert query(conn, cache) == query(conn, None)
+    assert _bytes(query(conn, cache)) == _bytes(query(conn, None))
     assert cache.hits > hits
+
+
+def _all_same(conn: sqlite3.Connection, cache: CellCache, window: Window) -> None:
+    for name, query in _queries(window, Filters()).items():
+        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+    _same(conn, cache, _options)
 
 
 @pytest.mark.parametrize("window", WINDOWS.values(), ids=list(WINDOWS))
@@ -182,36 +214,43 @@ def test_cached_queries_match_direct(
     conn: sqlite3.Connection, cache: CellCache, window: Window, filters: Filters
 ) -> None:
     for name, query in _queries(window, filters).items():
-        hits = cache.hits
-        cached, direct = query(conn, cache), query(conn, None)
-        assert cached == direct, name
-        if window.start is None or window.end - window.start > timedelta(hours=1):
-            assert cache.hits > hits, name
+        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
 
 
 def test_options_match_direct(conn: sqlite3.Connection, cache: CellCache) -> None:
-    _same(conn, cache, lambda c, k: query_options(c, PRICING, {}, cache=k))
+    _same(conn, cache, _options)
 
 
-def test_window_inside_one_slot_falls_back(
+def test_window_inside_one_interval_skips_the_cache(
     conn: sqlite3.Connection, cache: CellCache
 ) -> None:
-    window = WINDOWS["one slot"]
+    query = _queries(WINDOWS["inside one interval"], Filters())["breakdown model"]
+    query(conn, cache)
     hits = cache.hits
-    query_summary(conn, window, None, TZ, Filters(), PRICING, cache=cache)
+    query_export(
+        conn,
+        WINDOWS["inside one interval"],
+        "hour",
+        TZ,
+        Filters(),
+        PRICING,
+        {},
+        cache=cache,
+    )
     assert cache.hits == hits
 
 
 def test_insert_between_requests(
     db: Path, conn: sqlite3.Connection, cache: CellCache
 ) -> None:
-    window = WINDOWS["mid-slot edges"]
+    window = WINDOWS["mid-interval edges"]
     query = _queries(window, Filters())["breakdown model"]
     _same(conn, cache, query)
-    # New rows land in cached slots, edge slots and new slots.
+    # New rows land in held intervals, edge intervals and new intervals.
     _insert(db, _records(2, 500, T0 + timedelta(days=1)))
     _same(conn, cache, query)
-    _same(conn, cache, lambda c, k: query_options(c, PRICING, {}, cache=k))
+    _same(conn, cache, _options)
+    assert sorted(cache.values(conn, "model") or []) == sorted(MODELS)
     assert cache.builds == 1
 
 
@@ -222,63 +261,202 @@ def _wait_ready(cache: CellCache, builds: int) -> None:
         time.sleep(0.01)
 
 
-def _write(db: Path, sql: str) -> None:
-    with contextlib.closing(sqlite3.connect(db)) as w, w:
-        w.execute(sql)
+def _replace_file(db: Path) -> None:
+    copy = db.with_name("copy.db")
+    with contextlib.closing(sqlite3.connect(db)) as src:
+        src.execute("VACUUM INTO ?", [str(copy)])
+    _write(copy, "DELETE FROM requests WHERE rowid % 7 = 0")
+    os.replace(copy, db)
 
 
-@pytest.mark.parametrize(
-    "rewrite",
-    [
-        "DELETE FROM requests WHERE rowid = 100",
-        "DELETE FROM requests WHERE rowid = (SELECT MAX(rowid) FROM requests)",
-    ],
-    ids=["middle", "last"],
-)
-def test_rebuild_after_deletion(
-    db: Path, conn: sqlite3.Connection, cache: CellCache, rewrite: str
+def _reuse_last_rowid(db: Path) -> None:
+    _write(db, "DELETE FROM requests WHERE rowid = (SELECT MAX(rowid) FROM requests)")
+    _insert(db, _records(3, 1, T0))
+
+
+REWRITES: dict[str, Callable[[Path], None]] = {
+    "file replaced": _replace_file,
+    "schema changed": lambda db: _write(db, "CREATE INDEX idx_x ON requests(failed)"),
+    "max rowid lower": lambda db: _write(
+        db, "DELETE FROM requests WHERE rowid > (SELECT MAX(rowid) - 3 FROM requests)"
+    ),
+    "last rowid reused": _reuse_last_rowid,
+    "row count changed": lambda db: _write(
+        db, "DELETE FROM requests WHERE rowid = 100"
+    ),
+}
+
+
+@pytest.mark.parametrize("rewrite", REWRITES.values(), ids=list(REWRITES))
+def test_rebuild_after_rewrite(
+    db: Path, conn: sqlite3.Connection, rewrite: Callable[[Path], None]
 ) -> None:
-    query = _queries(WINDOWS["mid-slot edges"], Filters())["summary"]
-    _same(conn, cache, query)
-    _write(db, rewrite)
-    # The read that notices falls back to the direct query.
-    assert query(conn, cache) == query(conn, None)
-    _wait_ready(cache, 2)
-    _same(conn, cache, query)
-
-
-def test_rebuild_when_last_rowid_is_reused(db: Path, conn: sqlite3.Connection) -> None:
-    # A long verify interval leaves only the anchor row to catch this rewrite.
-    cache = CellCache(db, verify_seconds=3600)
+    # Only the count check needs a due verification; the others must not rely on it.
+    verify = 0 if rewrite is REWRITES["row count changed"] else 3600
+    cache = CellCache(db, verify_seconds=verify)
     cache.build()
     query = _queries(WINDOWS["open start"], Filters())["breakdown person"]
     _same(conn, cache, query)
-    _write(db, "DELETE FROM requests WHERE rowid = (SELECT MAX(rowid) FROM requests)")
-    _insert(db, _records(3, 1, T0))
-    assert query(conn, cache) == query(conn, None)
-    _wait_ready(cache, 2)
-    _same(conn, cache, query)
+    rewrite(db)
+    with contextlib.closing(open_ro(db)) as fresh:
+        hits = cache.hits
+        # The read that notices falls back to the direct query.
+        assert _bytes(query(fresh, cache)) == _bytes(query(fresh, None))
+        assert cache.hits == hits
+        _wait_ready(cache, 2)
+        _all_same(fresh, cache, WINDOWS["mid-interval edges"])
+    assert cache.builds == 2
+
+
+def test_requests_during_build_use_the_direct_query(
+    db: Path, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = threading.Event()
+    load = CellCache._load  # pyright: ignore[reportPrivateUsage]
+
+    def slow_load(self: CellCache) -> object:
+        release.wait(10)
+        return load(self)
+
+    monkeypatch.setattr(CellCache, "_load", slow_load)
+    cache = CellCache(db)
+    cache.start()
+    window = WINDOWS["mid-interval edges"]
+    for name, query in _queries(window, Filters()).items():
+        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+    assert not cache.ready
+    assert cache.hits == 0
+    release.set()
+    _wait_ready(cache, 1)
+    _all_same(conn, cache, window)
+
+
+def _evicting_cache(db: Path, kept: int) -> CellCache:
+    cache = CellCache(db, verify_seconds=0, max_mb=kept * ENTRY_BYTES / 2**20)
+    cache.build()
+    return cache
+
+
+def test_eviction_matches_direct(
+    db: Path, conn: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache = _evicting_cache(db, 600)
+    state = cache._state  # pyright: ignore[reportPrivateUsage]
+    assert state is not None and state.floor is not None
+    assert state.entries <= 600
+    assert "USAGE_CELL_CACHE_MAX_MB" in caplog.text
+    floor = datetime.fromtimestamp(state.floor * SLICE_SECONDS, UTC)
+    near = timedelta(minutes=37, seconds=11)
+    windows = {
+        "before": Window(floor - 8 * near, floor - near),
+        "across": Window(floor - near, floor + near),
+        "after": Window(floor + near, floor + 8 * near),
+        "open start": Window(None, floor + near),
+    }
+    for window in windows.values():
+        for filters in FILTERS.values():
+            for name, query in _queries(window, filters).items():
+                assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+    _same(conn, cache, _options)
+    assert cache.values(conn, "model") is None
+
+
+def test_rows_in_evicted_intervals_count_as_seen(db: Path) -> None:
+    cache = _evicting_cache(db, 600)
+    with contextlib.closing(open_ro(db)) as conn:
+        _same(conn, cache, _options)
+        # Rows before every held interval are read from SQL, not rebuilt.
+        _insert(db, _records(5, 200, T0 - timedelta(days=2)))
+        _all_same(conn, cache, Window(T0 - timedelta(days=3), _at(9, 1)))
+    assert cache.builds == 1
+
+
+def test_entry_bytes_cover_sums_and_priced_result(tmp_path: Path) -> None:
+    keys = [f"sk-{i:02d}" + "x" * 45 for i in range(10)]
+    models = [f"claude-sonnet-4-5-2025092{i}" for i in range(4)]
+    sources = [f"someone.{i}@example-company.com" for i in range(4)]
+    combos = [(k, m, s) for k in keys for m in models for s in sources]
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    template = _records(6, 1, T0)[0]
+    # One entry per interval, so per-interval overhead counts in full.
+    records = [
+        template.model_copy(
+            update={
+                "timestamp": (start + timedelta(minutes=15 * n)).isoformat(),
+                "api_key": key,
+                "model": model,
+                "source": source,
+                "latency_ms": 1_000 + n,
+                "input_tokens": 300_000 + n,
+                "output_tokens": 5_000 + n,
+                "reasoning_tokens": 1_000 + n,
+                "cache_read_tokens": 100_000 + n,
+                "cache_creation_tokens": 20_000 + n,
+                "cache_creation_1h_tokens": 10_000 + n,
+            }
+        )
+        for n, (key, model, source) in enumerate(combos * 10)
+    ]
+    db = tmp_path / "big.db"
+    _insert(db, records)
+    with contextlib.closing(open_ro(db)) as conn:
+        cache = CellCache(db)
+        gc.collect()
+        tracemalloc.start()
+        try:
+            before = tracemalloc.get_traced_memory()[0]
+            cache.build()
+            query_options(conn, dict.fromkeys(models, CLAUDE), {}, cache=cache)
+            gc.collect()
+            used = tracemalloc.get_traced_memory()[0] - before
+        finally:
+            tracemalloc.stop()
+    state = cache._state  # pyright: ignore[reportPrivateUsage]
+    assert state is not None and state.entries == len(records)
+    assert set(state.priced) == set(state.cells)
+    print(f"{used / state.entries:.0f} bytes per entry")
+    assert used / state.entries <= ENTRY_BYTES
+
+
+def _client(db: Path, enabled: bool) -> TestClient:
+    cfg = ServerConfig(db_path=db, cell_cache=enabled)
+    return TestClient(create_app(cfg, pricing_provider=lambda: PRICING))
 
 
 def test_server_builds_cache_and_matches_direct(db: Path) -> None:
-    def client(enabled: bool) -> TestClient:
-        cfg = ServerConfig(db_path=db, cell_cache=enabled)
-        return TestClient(create_app(cfg, pricing_provider=lambda: PRICING))
-
     params = {
         "start": "2026-10-31T03:07:13.25Z",
         "end": "2026-11-01T17:52:01Z",
         "tz": "America/Chicago",
     }
-    with client(True) as cached, client(False) as direct:
+    filters = [
+        {},
+        {"people": "sk-a...lice,sk-c...bob"},
+        {"models": "gpt-l"},
+        {"credentials": "al@x.io"},
+    ]
+    with _client(db, True) as cached, _client(db, False) as direct:
         cache = cached.app.state.cell_cache  # type: ignore[attr-defined]
         assert direct.app.state.cell_cache is None  # type: ignore[attr-defined]
         _wait_ready(cache, 1)
-        for path, extra in (("summary", {}), ("breakdown", {"dim": "model"})):
-            url, query = f"/api/usage/{path}", params | extra
-            assert cached.get(url, params=query).json() == (
-                direct.get(url, params=query).json()
-            )
+        for extra in filters:
+            for path, dim in (
+                ("summary", {}),
+                ("breakdown", {"dim": "person"}),
+                ("breakdown", {"dim": "model"}),
+                ("breakdown", {"dim": "credential"}),
+                ("export", {}),
+            ):
+                url, query = f"/api/usage/{path}", params | extra | dim
+                assert cached.get(url, params=query).content == (
+                    direct.get(url, params=query).content
+                )
         url = "/api/usage/options"
-        assert cached.get(url).json() == direct.get(url).json()
+        assert cached.get(url).content == direct.get(url).content
         assert cache.hits > 0
+
+
+def test_off_switch(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
+    monkeypatch.setenv("USAGE_CELL_CACHE", "0")
+    monkeypatch.setenv("USAGE_DB_PATH", str(db))
+    assert ServerConfig().cell_cache is False
