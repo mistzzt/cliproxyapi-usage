@@ -423,9 +423,7 @@ def _cached_cells(
             if lo > hi:
                 # The window lies inside one interval, so the cache holds none of it.
                 return _scan_cells(conn, window, filters, price, by_time=True)
-    hit = cache.read(
-        conn, lo, hi, unslotted=window is None, pricing=price.pricing, price=price
-    )
+    hit = cache.read(conn, lo, hi, unslotted=window is None, price=price)
     if hit is None:
         return None
 

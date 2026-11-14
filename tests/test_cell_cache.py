@@ -157,7 +157,8 @@ WINDOWS = {
         _at(3, 7, 13, 250_000), _at(17, 52, 1, 999_000, day=2)
     ),
     "aligned": Window(_at(0), _at(12)),
-    "inside one interval": Window(_at(5, 1), _at(5, 14)),
+    # Its previous period lies inside the same interval too.
+    "inside one interval": Window(_at(5, 8, 30), _at(5, 14, 50)),
     "adjacent intervals": Window(_at(5, 1), _at(5, 29)),
     # SQLite compares whole seconds, so the 04:15:00.2 row is inside this start.
     "sub-second bounds": Window(_at(4, 15, 0, 999_600), _at(9, 29, 59, 999_700)),
@@ -206,17 +207,31 @@ def _bytes(body: BaseModel | str) -> str:
     return body if isinstance(body, str) else body.model_dump_json()
 
 
-def _same(conn: sqlite3.Connection, cache: CellCache, query: Query) -> None:
-    """The cached read hits the cache and gives the direct query's bytes."""
+def _same(
+    conn: sqlite3.Connection,
+    cache: CellCache,
+    query: Query,
+    *,
+    hit: bool = True,
+    label: str = "",
+) -> None:
+    """The cached read gives the direct query's bytes and counts a hit iff *hit*."""
     hits = cache.hits
-    assert _bytes(query(conn, cache)) == _bytes(query(conn, None))
-    assert cache.hits > hits
+    cached = _bytes(query(conn, cache))
+    assert (cache.hits > hits) == hit, label
+    assert cached == _bytes(query(conn, None)), label
 
 
-def _all_same(conn: sqlite3.Connection, cache: CellCache, window: Window) -> None:
-    for name, query in _queries(window, Filters()).items():
-        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
-    _same(conn, cache, _options)
+def _all_same(
+    conn: sqlite3.Connection,
+    cache: CellCache,
+    window: Window,
+    filters: Filters = Filters(),  # noqa: B008
+) -> None:
+    """Every query of *window* matches; only one inside an interval skips the cache."""
+    inside = window is WINDOWS["inside one interval"]
+    for name, query in _queries(window, filters).items():
+        _same(conn, cache, query, hit=not inside, label=name)
 
 
 @pytest.mark.parametrize("window", WINDOWS.values(), ids=list(WINDOWS))
@@ -224,31 +239,11 @@ def _all_same(conn: sqlite3.Connection, cache: CellCache, window: Window) -> Non
 def test_cached_queries_match_direct(
     conn: sqlite3.Connection, cache: CellCache, window: Window, filters: Filters
 ) -> None:
-    for name, query in _queries(window, filters).items():
-        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+    _all_same(conn, cache, window, filters)
 
 
 def test_options_match_direct(conn: sqlite3.Connection, cache: CellCache) -> None:
     _same(conn, cache, _options)
-
-
-def test_window_inside_one_interval_skips_the_cache(
-    conn: sqlite3.Connection, cache: CellCache
-) -> None:
-    query = _queries(WINDOWS["inside one interval"], Filters())["breakdown model"]
-    query(conn, cache)
-    hits = cache.hits
-    query_export(
-        conn,
-        WINDOWS["inside one interval"],
-        "hour",
-        TZ,
-        Filters(),
-        PRICING,
-        {},
-        cache=cache,
-    )
-    assert cache.hits == hits
 
 
 def test_insert_between_requests(
@@ -302,12 +297,11 @@ def test_rebuild_after_rewrite(
     _same(conn, cache, query)
     rewrite(db)
     with contextlib.closing(open_ro(db)) as fresh:
-        hits = cache.hits
         # The read that notices falls back to the direct query.
-        assert _bytes(query(fresh, cache)) == _bytes(query(fresh, None))
-        assert cache.hits == hits
+        _same(fresh, cache, query, hit=False)
         _wait_ready(cache, 2)
         _all_same(fresh, cache, WINDOWS["mid-interval edges"])
+        _same(fresh, cache, _options)
     assert cache.builds == 2
 
 
@@ -326,12 +320,12 @@ def test_requests_during_build_use_the_direct_query(
     cache.start()
     window = WINDOWS["mid-interval edges"]
     for name, query in _queries(window, Filters()).items():
-        assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+        _same(conn, cache, query, hit=False, label=name)
     assert not cache.ready
-    assert cache.hits == 0
     release.set()
     _wait_ready(cache, 1)
     _all_same(conn, cache, window)
+    _same(conn, cache, _options)
 
 
 def _evicting_cache(db: Path, kept: int) -> CellCache:
@@ -356,8 +350,7 @@ def test_eviction_matches_direct(
     }
     for window in windows.values():
         for filters in FILTERS.values():
-            for name, query in _queries(window, filters).items():
-                assert _bytes(query(conn, cache)) == _bytes(query(conn, None)), name
+            _all_same(conn, cache, window, filters)
     _same(conn, cache, _options)
     assert cache.values(conn, "model") is None
 
@@ -369,6 +362,7 @@ def test_rows_in_evicted_intervals_count_as_seen(db: Path) -> None:
         # Rows before every held interval are read from SQL, not rebuilt.
         _insert(db, _records(5, 200, T0 - timedelta(days=2)))
         _all_same(conn, cache, Window(T0 - timedelta(days=3), _at(9, 1)))
+        _same(conn, cache, _options)
     assert cache.builds == 1
 
 
@@ -469,9 +463,7 @@ def test_edges_work_without_the_timestamp_index(db: Path) -> None:
     with contextlib.closing(open_ro(db)) as conn:
         for key in ("mid-interval edges", "inside one interval"):
             for filters in FILTERS.values():
-                for name, query in _queries(WINDOWS[key], filters).items():
-                    cached, direct = query(conn, cache), query(conn, None)
-                    assert _bytes(cached) == _bytes(direct), (key, name)
+                _all_same(conn, cache, WINDOWS[key], filters)
 
 
 def test_filtered_edges_use_the_timestamp_index(

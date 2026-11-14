@@ -14,10 +14,10 @@ import threading
 import time
 from array import array
 from bisect import bisect_left, insort
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, NamedTuple, Protocol, cast
 
 from cliproxy_usage_server.db import SLICE_SECONDS, open_ro
 from cliproxy_usage_server.pricing import PLAN_SHAPES, Amounts, PlanShape
@@ -114,6 +114,15 @@ def scan(conn: sqlite3.Connection, where: str, params: Sequence[object]) -> list
         list(params),
     ).fetchall()
     return [(r[0], r[1], r[2], r[3], r[4], r[5:]) for r in rows]
+
+
+class Pricer[T](Protocol):
+    """Prices a cell's sums under one pricing map."""
+
+    @property
+    def pricing(self) -> object: ...
+
+    def __call__(self, row: Row, /) -> T: ...
 
 
 @dataclass(slots=True)
@@ -230,7 +239,6 @@ class CellCache:
         self._max_entries = int(max_mb * 2**20) // ENTRY_BYTES
         self._lock = threading.Lock()
         self._state: _State | None = None
-        self._generation = 0
         self._building = False
         self._retry_at = 0.0
         self._evicted = False  # the first eviction was logged
@@ -254,18 +262,17 @@ class CellCache:
         hi: int | None,
         *,
         unslotted: bool,
-        pricing: object,
-        price: Callable[[Row], T],
+        price: Pricer[T],
     ) -> Hit[T] | None:
         """Priced cells of the held intervals in ``[lo, hi)`` (None: unbounded), or
-        None until ready; *price* prices for *pricing*, whose identity keys the memo."""
+        None until ready; the identity of ``price.pricing`` keys the memo."""
         with self._lock:
             st = self._synced(conn)
             if st is None:
                 return None
-            if st.priced_by is not pricing:
+            if st.priced_by is not price.pricing:
                 st.priced = {}
-                st.priced_by = pricing
+                st.priced_by = price.pricing
             start = lo
             if st.floor is not None and (lo is None or lo < st.floor):
                 start = st.floor
@@ -290,7 +297,7 @@ class CellCache:
 
     @staticmethod
     def _priced[T](
-        st: _State, slot: int | None, price: Callable[[Row], T]
+        st: _State, slot: int | None, price: Pricer[T]
     ) -> list[tuple[Key, T]]:
         memo = st.priced.get(slot)
         if memo is None:
@@ -322,7 +329,6 @@ class CellCache:
         if not intact:
             _log.info("usage DB rewritten; rebuilding the cell cache")
             self._state = None
-            self._generation += 1
             self._kick()
             return None
         if verify:
@@ -369,34 +375,26 @@ class CellCache:
                 "intervals before the oldest kept one are read from the DB"
             )
 
-    def _install(self, st: _State) -> None:
-        self._evict(st)
-        self._state = st
-        self.builds += 1
-
     def _kick(self) -> None:
         """Start a background build; the caller holds the lock."""
         if self._building or time.monotonic() < self._retry_at:
             return
         self._building = True
         threading.Thread(
-            target=self._build_loop, name="usage-cell-cache", daemon=True
+            target=self._build, name="usage-cell-cache", daemon=True
         ).start()
 
-    def _build_loop(self) -> None:
-        while True:
-            with self._lock:
-                generation = self._generation
-            try:
-                state = self._load()
-            except Exception as exc:
-                _log.warning("cell cache build failed: %s", exc)
-                with self._lock:
-                    self._building = False
-                    self._retry_at = time.monotonic() + _RETRY_SECONDS
-                return
-            with self._lock:
-                if generation == self._generation:
-                    self._install(state)
-                    self._building = False
-                    return
+    def _build(self) -> None:
+        try:
+            state = self._load()
+        except Exception as exc:
+            _log.warning("cell cache build failed: %s", exc)
+            state = None
+        with self._lock:
+            self._building = False
+            if state is None:
+                self._retry_at = time.monotonic() + _RETRY_SECONDS
+            else:
+                self._evict(state)
+                self._state = state
+                self.builds += 1
