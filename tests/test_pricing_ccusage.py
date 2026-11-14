@@ -80,7 +80,7 @@ def test_missing_cache_rates_fall_back_like_ccusage() -> None:
         litellm_provider="anthropic", input_cost_per_token=1e-6, output_cost_per_token=0
     )
     assert request_cost(claude, 1_000, 0, 1_000, 0) == pytest.approx(0.0001)
-    assert cost_plan(claude).base.cache_creation == pytest.approx(1.25e-6)
+    assert cost_plan(claude).base.cache_creation_5m == pytest.approx(1.25e-6)
 
     gpt = GPT_LONG.model_copy(update={"cache_read_input_token_cost": None})
     assert request_cost(gpt, 1_000, 0, 1_000, 0) == pytest.approx(0.005)

@@ -128,7 +128,7 @@ class Rates(NamedTuple):
 
     input: float
     output: float
-    cache_creation: float
+    cache_creation_5m: float
     cache_read: float
     cache_creation_1h: float
 
@@ -138,7 +138,7 @@ class Amounts(NamedTuple):
 
     input: int  # uncached
     output: int
-    cache_creation: int  # the 5-minute part
+    cache_creation_5m: int
     cache_read: int
     cache_creation_1h: int
 
@@ -171,11 +171,11 @@ class CostPlan(NamedTuple):
 
     def costs(self, base: Amounts, above: Amounts) -> Costs:
         """Per-type cost of token sums billed at the base and above rates."""
-        inp, out, cache_creation, cache_read, cache_creation_1h = (
+        inp, out, cache_creation_5m, cache_read, cache_creation_1h = (
             b * rb + a * ra
             for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
         )
-        return Costs(inp, out, cache_creation + cache_creation_1h, cache_read)
+        return Costs(inp, out, cache_creation_5m + cache_creation_1h, cache_read)
 
     def long_cost(self, above: Amounts) -> float:
         """Cost of the tokens billed at long-context rates; 0 without a long tier."""
@@ -235,13 +235,13 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
 
 
 def _rates(
-    inp: float, output: float, cache_creation: float, cache_read: float
+    inp: float, output: float, cache_creation_5m: float, cache_read: float
 ) -> Rates:
     """Rates from the four published ones; 1-hour writes bill at twice input."""
     return Rates(
         inp,
         output,
-        cache_creation,
+        cache_creation_5m,
         cache_read,
         inp * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
     )

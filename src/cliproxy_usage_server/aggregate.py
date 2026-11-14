@@ -23,7 +23,6 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from operator import sub
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -299,7 +298,9 @@ def _fetch_cells(
                 requests.*,
                 COALESCE(switch, 0) AS switch,
                 COALESCE(threshold, 0) AS t,
-                {_PRICED_COLUMNS}
+                input_tokens - cache_read_tokens - cache_creation_tokens
+                    AS uncached_input,
+                cache_creation_tokens - cache_creation_1h_tokens AS cache_creation_5m
             FROM requests LEFT JOIN plan ON plan_model = model
             {where}
         )
@@ -313,10 +314,26 @@ def _fetch_cells(
             SUM(input_tokens) AS input_tokens,
             SUM(reasoning_tokens) AS reasoning_tokens,
             SUM(CASE WHEN failed THEN 0 ELSE latency_ms END) AS ok_latency_sum,
-            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END)
-                AS long_requests,
+            -- Whole-request plans: input passes the threshold; marginal plans: any
+            -- one token type exceeds it.
+            SUM(
+                CASE WHEN NOT failed AND (
+                    CASE WHEN switch THEN input_tokens > t
+                    ELSE MAX(uncached_input, output_tokens, cache_creation_5m,
+                             cache_read_tokens, cache_creation_1h_tokens) > t END
+                ) THEN 1 ELSE 0 END
+            ) AS long_requests,
             MAX(timestamp) AS last_used,
-            {_PRICED_SUMS}
+            SUM(uncached_input) AS total_input,
+            SUM(output_tokens) AS total_output,
+            SUM(cache_creation_5m) AS total_cache_creation_5m,
+            SUM(cache_read_tokens) AS total_cache_read,
+            SUM(cache_creation_1h_tokens) AS total_cache_creation_1h,
+            SUM({_base_rate("uncached_input")}) AS base_input,
+            SUM({_base_rate("output_tokens")}) AS base_output,
+            SUM({_base_rate("cache_creation_5m")}) AS base_cache_creation_5m,
+            SUM({_base_rate("cache_read_tokens")}) AS base_cache_read,
+            SUM({_base_rate("cache_creation_1h_tokens")}) AS base_cache_creation_1h
         FROM r
         GROUP BY slice_no, api_key, model, source
         """,
@@ -326,7 +343,6 @@ def _fetch_cells(
     people: dict[str, str] = {}
     credentials: dict[str, str] = {}
     cells: list[_Cell] = []
-    n = len(Amounts._fields)
     for (
         slice_no,
         api_key,
@@ -339,13 +355,33 @@ def _fetch_cells(
         ok_latency_sum,
         long_requests,
         last_used,
-        *priced,
+        total_input,
+        total_output,
+        total_cache_creation_5m,
+        total_cache_read,
+        total_cache_creation_1h,
+        base_input,
+        base_output,
+        base_cache_creation_5m,
+        base_cache_read,
+        base_cache_creation_1h,
     ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        total = Amounts._make(priced[:n])
-        base = Amounts._make(priced[n:])
-        above = Amounts._make(map(sub, total, base, strict=True))
+        base = Amounts(
+            input=base_input,
+            output=base_output,
+            cache_creation_5m=base_cache_creation_5m,
+            cache_read=base_cache_read,
+            cache_creation_1h=base_cache_creation_1h,
+        )
+        above = Amounts(
+            input=total_input - base_input,
+            output=total_output - base_output,
+            cache_creation_5m=total_cache_creation_5m - base_cache_creation_5m,
+            cache_read=total_cache_read - base_cache_read,
+            cache_creation_1h=total_cache_creation_1h - base_cache_creation_1h,
+        )
         if plan is None or not plan.has_long_tier:
             long_requests = 0
         if api_key not in people:
@@ -361,11 +397,11 @@ def _fetch_cells(
                 requests=requests,
                 failed=failed,
                 input_tokens=input_tokens,
-                output_tokens=total.output,
+                output_tokens=total_output,
                 reasoning_tokens=reasoning_tokens,
-                cache_read_tokens=total.cache_read,
-                cache_creation_tokens=total.cache_creation + total.cache_creation_1h,
-                cache_creation_1h_tokens=total.cache_creation_1h,
+                cache_read_tokens=total_cache_read,
+                cache_creation_tokens=total_cache_creation_5m + total_cache_creation_1h,
+                cache_creation_1h_tokens=total_cache_creation_1h,
                 ok_latency_sum=ok_latency_sum,
                 long_requests=long_requests,
                 last_used=_parse_ts(last_used),
@@ -392,28 +428,6 @@ def _base_rate(column: str) -> str:
         f"CASE WHEN switch THEN (CASE WHEN input_tokens > t THEN 0 ELSE {column} END) "
         f"ELSE MIN({column}, t) END"
     )
-
-
-# Per-request tokens of each priced type, by ``Amounts`` field.
-_PRICED: dict[str, str] = {
-    "input": "input_tokens - cache_read_tokens - cache_creation_tokens",
-    "output": "output_tokens",
-    "cache_creation": "cache_creation_tokens - cache_creation_1h_tokens",
-    "cache_read": "cache_read_tokens",
-    "cache_creation_1h": "cache_creation_1h_tokens",
-}
-_PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in Amounts._fields)
-# Every type's total, then every type's base-rate share, in ``Amounts`` order.
-_PRICED_SUMS = ", ".join(
-    [f"SUM(priced_{f}) AS total_{f}" for f in Amounts._fields]
-    + [f"SUM({_base_rate(f'priced_{f}')}) AS base_{f}" for f in Amounts._fields]
-)
-# A request has tokens at the long rate: whole-request plans when its input passes
-# the threshold, marginal plans when any one token type exceeds it.
-_LONG_REQUEST = (
-    "(CASE WHEN switch THEN input_tokens > t "
-    f"ELSE MAX({', '.join(f'priced_{f}' for f in Amounts._fields)}) > t END)"
-)
 
 
 def _data_start(conn: sqlite3.Connection) -> datetime | None:
@@ -545,7 +559,7 @@ def _unit_prices(rates: Rates) -> UnitPrices:
         input=m(rates.input),
         output=m(rates.output),
         cache_read=m(rates.cache_read),
-        cache_write=m(rates.cache_creation),
+        cache_write=m(rates.cache_creation_5m),
     )
 
 
