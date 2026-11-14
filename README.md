@@ -37,11 +37,11 @@ Running it again is safe: a record whose timestamp is already stored is skipped.
 | --- | --- |
 | 0 | Success. |
 | 1 | Temporary failure (network, timeout, database or migration error). The next run retries. |
-| 2 | Configuration error, including a database written by a newer version. |
+| 2 | Configuration error, including a database written by a newer version or a CLIProxyAPI older than v7.2.97. |
 | 3 | CLIProxyAPI rejected the management key. |
 | 4 | A queue record has an unexpected shape, for example from a CLIProxyAPI older than v7.2.97. |
 
-Exit codes 1 and 2 caused by the database happen before the queue is touched, so no records are lost.
+Exit codes 1 and 2 caused by the database happen before the queue is touched, so no records are lost. Before popping the queue, the collector also reads the CLIProxyAPI version from the `X-CPA-VERSION` header of a management API response and exits 2 if it is older than v7.2.97. When the version cannot be read (a `dev` or commit-hash build), it logs a warning and continues; an old proxy then fails with exit 4.
 
 ## Dashboard
 

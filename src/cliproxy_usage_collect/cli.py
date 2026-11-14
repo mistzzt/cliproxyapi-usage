@@ -14,6 +14,7 @@ from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.queue_client import (
     AuthError,
     TransientError,
+    UnsupportedVersionError,
     pop_usage_records,
 )
 from cliproxy_usage_collect.schema_version import SchemaVersionError
@@ -34,7 +35,8 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
     -------
     int
         Exit code: 0 success, 1 transient error (migration and DB failures included),
-        2 config error (a DB from a newer version included), 3 auth error,
+        2 config error (a DB from a newer version or an old CLIProxyAPI included),
+        3 auth error,
         4 schema error.
     """
     try:
@@ -59,6 +61,9 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
         queued_records = list(queue_client(cfg))
         batch = parse_records(queued_records)
         inserted = insert_records(conn, batch.records)
+    except UnsupportedVersionError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
     except AuthError as exc:
         print(f"Authentication error: {exc}", file=sys.stderr)
         return 3

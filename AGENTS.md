@@ -20,7 +20,7 @@ No CI is configured, so run the relevant checks above before committing.
 ## Rules
 
 - **Real data.** `test/cpa-usage.tar.gz` (gitignored) holds a real `usage.db` and `pricing.json` for manual testing: extract it outside the repo and point `USAGE_DB_PATH` at it. It contains real API keys and accounts, so never copy anything from it into tests, fixtures, docs, commits or PR text. Test data is synthetic only.
-- **Collector exit codes are stable** because cron and alerts depend on them: 0 ok, 1 transient (network, SQLite and migration errors), 2 config (including a DB from a newer version), 3 auth, 4 schema. DB errors return before the queue is popped.
+- **Collector exit codes are stable** because cron and alerts depend on them: 0 ok, 1 transient (network, SQLite and migration errors), 2 config (including a DB from a newer version or a CLIProxyAPI older than v7.2.97), 3 auth, 4 schema. DB and version errors return before the queue is popped.
 - **The schema in `src/cliproxy_usage_collect/db.py` is authoritative and versioned.** `_DDL` is the layout of `SCHEMA_VERSION` in `schema_version.py`, stored in `PRAGMA user_version` and read only through `user_version(conn)`. Changing the layout means bumping `SCHEMA_VERSION`. Run `_DDL` statements one `execute` at a time inside `write_transaction(conn)`, because `executescript` would commit the open transaction. Every insert into the current layout names its columns.
 - **No migration or backward-compatibility code** unless asked. The one exception is `migration.py` (0.3.x only, removed in 0.4.0 with `tests/test_migration.py`); it is the only code that knows the pre-0.3.0 layout or classifies rows by model name.
 - **The server opens `usage.db` read-only** (`open_ro`) and never imports the collector's `db.py`; it shares only `config.py` and `schema_version.py`.
@@ -34,7 +34,7 @@ No CI is configured, so run the relevant checks above before committing.
 The collector is a one-shot CLI meant for cron: it pops a bounded batch from CLIProxyAPI's management usage queue and inserts rows with `INSERT OR IGNORE` on the `timestamp` primary key, so re-running is safe. Modules in `src/cliproxy_usage_collect/`:
 
 - `config.py`: env settings via pydantic-settings; `load_settings` (shared with the server) raises `ConfigError` naming env vars; `management_url` accepts the CLIProxyAPI origin or the `/v0/management` base.
-- `queue_client.py`: httpx call to `usage-queue`; maps failures to `AuthError` or `TransientError`.
+- `queue_client.py`: reads `X-CPA-VERSION` from `usage-statistics-enabled` (older than `MIN_PROXY_VERSION` raises `UnsupportedVersionError`, unparseable warns), then pops `usage-queue`; maps failures to `AuthError` or `TransientError`.
 - `parser.py`: validates queue records into a `ParsedBatch` (`records`, `incomplete`). Token counts come only from `token_breakdown` (its `schema_version` must be 2, else `SchemaError`); a breakdown whose quality is not `complete` stores zero tokens except `total_tokens`.
 - `schema_version.py`, `db.py`, `migration.py`: version check, schema creation, insert, and the one-time 0.3.x migration (backup to `<db>.pre-cache-columns`, then one transaction).
 - `cli.py`: wires these together and maps errors to exit codes.

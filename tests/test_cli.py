@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
+import httpx
 import pytest
 from conftest import db_at_version, forbidden_queue_client, read_version
 
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
-from cliproxy_usage_collect.queue_client import AuthError, TransientError
+from cliproxy_usage_collect.queue_client import (
+    AuthError,
+    TransientError,
+    pop_usage_records,
+)
 from cliproxy_usage_collect.schema_version import SCHEMA_VERSION
 
 QueueRecord = dict[str, Any]
@@ -207,3 +214,40 @@ def test_summary_counts_records_without_a_token_split(env_vars, capsys):
     assert captured.err == (
         "inserted 2 new records from 2 queued records, 1 without a token split\n"
     )
+
+
+def _proxy(respond: Callable[[httpx.Request], httpx.Response]):
+    """Real queue client against a fake proxy that must never pop the queue."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/usage-statistics-enabled")
+        return respond(request)
+
+    def factory(*, timeout: float) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), timeout=timeout)
+
+    return partial(pop_usage_records, http_client_factory=factory)
+
+
+def test_old_proxy_exits_2_before_popping_the_queue(env_vars, capsys):
+    client = _proxy(lambda r: httpx.Response(200, headers={"X-CPA-VERSION": "v7.2.96"}))
+
+    assert main(queue_client=client) == 2
+    err = capsys.readouterr().err
+    assert "v7.2.96" in err and "7.2.97" in err and "upgrade CLIProxyAPI" in err
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_probe_auth_failure_exits_3(env_vars, status_code: int):
+    client = _proxy(
+        lambda r: httpx.Response(status_code, headers={"X-CPA-VERSION": "v8.0.72"})
+    )
+
+    assert main(queue_client=client) == 3
+
+
+def test_probe_connection_error_exits_1(env_vars):
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    assert main(queue_client=_proxy(refuse)) == 1
