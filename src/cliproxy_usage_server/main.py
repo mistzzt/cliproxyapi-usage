@@ -21,6 +21,7 @@ from cliproxy_usage_collect.schema_version import (
     mismatch_message,
     user_version,
 )
+from cliproxy_usage_server.cell_cache import CellCache
 from cliproxy_usage_server.config import ServerConfig, load_config, load_key_aliases
 from cliproxy_usage_server.db import open_ro
 from cliproxy_usage_server.pricing import ModelPricing, fetch_pricing
@@ -147,9 +148,20 @@ def create_app(
         service = factory(config)
 
     aliases = load_key_aliases(config.key_aliases)
+    cache = (
+        CellCache(
+            config.db_path,
+            verify_seconds=config.cell_cache_verify_seconds,
+            max_mb=config.cell_cache_max_mb,
+        )
+        if config.cell_cache
+        else None
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if cache is not None:
+            cache.start()
         if pricing_provider is not None:
             app.state.pricing = dict(pricing_provider())
             try:
@@ -179,7 +191,10 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(_api, prefix=api_prefix)
-    app.include_router(build_usage_router(config.db_path, aliases), prefix=api_prefix)
+    app.state.cell_cache = cache
+    app.include_router(
+        build_usage_router(config.db_path, aliases, cache), prefix=api_prefix
+    )
 
     @app.get(_prefixed(config.base_path, "/usage-config.js"), include_in_schema=False)
     async def _runtime_config() -> Response:

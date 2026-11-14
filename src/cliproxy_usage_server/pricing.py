@@ -20,10 +20,12 @@ import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 __all__ = [
+    "PLAN_SHAPES",
     "CostPlan",
     "CostStatus",
     "Costs",
     "ModelPricing",
+    "PlanShape",
     "PricingResolution",
     "Rates",
     "cost_plan",
@@ -152,10 +154,25 @@ class Costs(NamedTuple):
     cache_read: float
 
 
+class PlanShape(NamedTuple):
+    """Which tokens of a request bill at the base rate, independent of the rates."""
+
+    switch: bool
+    threshold: int
+
+
+# Every shape ``cost_plan`` returns; aggregation sums each one's base-rate share.
+PLAN_SHAPES: tuple[PlanShape, ...] = (
+    PlanShape(False, _THRESHOLD_200K),
+    PlanShape(True, _THRESHOLD_200K),
+    PlanShape(True, _THRESHOLD_272K),
+)
+
+
 class CostPlan(NamedTuple):
     """How one model bills a request, following ccusage.
 
-    ``aggregate._fetch_cells`` applies it per request in SQL; ``costs`` prices the sums.
+    Cell sums hold each shape's base-rate share; ``costs`` prices those of ``shape``.
     """
 
     # True: once input_tokens passes the threshold the whole request bills at `above`.
@@ -164,6 +181,10 @@ class CostPlan(NamedTuple):
     threshold: int
     base: Rates
     above: Rates
+
+    @property
+    def shape(self) -> PlanShape:
+        return PlanShape(self.switch, self.threshold)
 
     @property
     def has_long_tier(self) -> bool:

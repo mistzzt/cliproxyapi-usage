@@ -1,11 +1,12 @@
 """Usage aggregation behind the ``/api/usage/*`` endpoints.
 
-Every endpoint is built from one grouped query: rows per (15-minute UTC slice,
-api_key, model, source). The query tiers each request with its model's
-``CostPlan`` and sums the base-rate and above-rate tokens, so cells price
-exactly as the sum of per-request costs. Totals, per-entity rows, trends and
-mixes are sums of the same priced cells, so they always agree, and cost is
-independent of the chosen bucket.
+Every endpoint is built from cells per (15-minute UTC slice, api_key, model,
+source) from ``cell_cache``: each holds every plan shape's per-request base-rate
+share, so pricing a cell with its model's ``CostPlan`` equals the sum of its
+per-request costs. A ready ``CellCache`` serves whole intervals; the partial
+and evicted ones, and all of them until it is ready, come from ``requests``.
+Totals, per-entity rows, trends and mixes are sums of the same priced cells, so
+they always agree, and cost is independent of the chosen bucket.
 
 People are redacted API keys (raw keys that redact alike merge into one
 person); credentials are redacted sources. Responses carry only raw token
@@ -22,11 +23,25 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from operator import sub
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from cliproxy_usage_server.cell_cache import (
+    FAILED,
+    INPUT_TOKENS,
+    LONG_AT,
+    OK_LATENCY_SUM,
+    REASONING_TOKENS,
+    REQUESTS,
+    TOTAL,
+    CellCache,
+    Key,
+    Row,
+    base_slice,
+    scan,
+)
 from cliproxy_usage_server.db import (
     SLICE_SECONDS,
     Bucket,
@@ -35,6 +50,7 @@ from cliproxy_usage_server.db import (
     effective_bucket,
 )
 from cliproxy_usage_server.pricing import (
+    PLAN_SHAPES,
     Amounts,
     CostPlan,
     Costs,
@@ -100,7 +116,7 @@ class Filters:
 
 @dataclass(frozen=True, slots=True)
 class _Cell:
-    slice_no: int
+    slice_no: int | None  # None: SQLite cannot parse the timestamp
     person: str
     model: str
     credential: str
@@ -244,16 +260,26 @@ def _ts_param(dt: datetime) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _where(window: Window | None, filters: Filters) -> tuple[str, list[str]]:
-    """Build the WHERE clause; ``datetime(timestamp)`` matches idx_requests_ts_utc."""
+def _where(
+    window: Window | None,
+    filters: Filters,
+    max_rowid: int | None = None,
+    *,
+    by_time: bool = False,
+) -> tuple[str, list[str | int]]:
+    """Build the WHERE clause; ``datetime(timestamp)`` matches idx_requests_ts_utc.
+    *by_time* writes filters as ``+column`` so SQLite prefers that index."""
     clauses: list[str] = []
-    params: list[str] = []
+    params: list[str | int] = []
     if window is not None:
         if window.start is not None:
             clauses.append("datetime(timestamp) >= datetime(?)")
             params.append(_ts_param(window.start))
         clauses.append("datetime(timestamp) < datetime(?)")
         params.append(_ts_param(window.end))
+    if max_rowid is not None:
+        clauses.append("rowid <= ?")
+        params.append(max_rowid)
     for column, values in (
         ("api_key", filters.api_keys),
         ("model", filters.models),
@@ -264,7 +290,8 @@ def _where(window: Window | None, filters: Filters) -> tuple[str, list[str]]:
         if not values:
             clauses.append("0 = 1")
             continue
-        clauses.append(f"{column} IN ({', '.join('?' * len(values))})")
+        prefix = "+" if by_time else ""
+        clauses.append(f"{prefix}{column} IN ({', '.join('?' * len(values))})")
         params.extend(values)
     return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), params
 
@@ -273,147 +300,163 @@ def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(UTC)
 
 
+_NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
+
+
+type _ModelInfo = tuple[str, PricingResolution, CostPlan | None, int]
+
+
+class _Pricer:
+    """Prices cell sums under one pricing map, picking each model's plan shape."""
+
+    def __init__(self, pricing: Mapping[str, ModelPricing]) -> None:
+        self.pricing = pricing
+        self._models: dict[str, _ModelInfo] = {}  # key, status, plan, shape index
+        self._people: dict[str, str] = {}
+        self._credentials: dict[str, str] = {}
+
+    def _model(self, model: str) -> _ModelInfo:
+        found = self._models.get(model)
+        if found is None:
+            key = model_key(model)
+            entry, status = resolve(key, self.pricing)
+            plan = cost_plan(entry) if entry is not None else None
+            shape = PLAN_SHAPES.index(plan.shape) if plan is not None else 0
+            found = self._models[model] = (key, status, plan, shape)
+        return found
+
+    def __call__(self, row: Row) -> _Cell:
+        slice_no, api_key, model, source, last_used, sums = row
+        key, status, plan, shape = self._model(model)
+        total = Amounts._make(sums[TOTAL])
+        base = Amounts._make(sums[base_slice(shape)])
+        above = Amounts._make(map(sub, total, base, strict=True))
+        has_long = plan is not None and plan.has_long_tier
+        person = self._people.get(api_key)
+        if person is None:
+            person = self._people[api_key] = redact_key(api_key)
+        credential = self._credentials.get(source)
+        if credential is None:
+            credential = self._credentials[source] = redact_source(source)
+        return _Cell(
+            slice_no=slice_no,
+            person=person,
+            model=key,
+            credential=credential,
+            requests=sums[REQUESTS],
+            failed=sums[FAILED],
+            input_tokens=sums[INPUT_TOKENS],
+            output_tokens=total.output,
+            reasoning_tokens=sums[REASONING_TOKENS],
+            cache_read_tokens=total.cache_read,
+            cache_creation_tokens=total.cache_creation + total.cache_creation_1h,
+            cache_creation_1h_tokens=total.cache_creation_1h,
+            ok_latency_sum=sums[OK_LATENCY_SUM],
+            long_requests=sums[LONG_AT + shape] if has_long else 0,
+            last_used=_parse_ts(last_used),
+            costs=plan.costs(base, above) if plan is not None else _NO_COST,
+            long_cost=plan.long_cost(above) if plan is not None else 0.0,
+            cache_savings=(
+                plan.cache_savings(base.cache_read, above.cache_read)
+                if plan is not None
+                else 0.0
+            ),
+            status=status,
+            plan=plan,
+        )
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _seconds(dt: datetime) -> int:
+    """Whole epoch seconds of *dt*, as ``_where``'s ``datetime(?)`` compares it."""
+    return (dt - _EPOCH) // timedelta(seconds=1)
+
+
+def _slot_start(slot: int) -> datetime:
+    return _EPOCH + timedelta(seconds=slot * SLICE_SECONDS)
+
+
+def _matches(filters: Filters) -> Callable[[Key], bool]:
+    """Whether a cache key passes *filters*; key positions follow ``COLUMNS``."""
+    sets = [
+        (i, frozenset(v))
+        for i, v in enumerate((filters.api_keys, filters.models, filters.sources))
+        if v is not None
+    ]
+    return lambda key: all(key[i] in s for i, s in sets)
+
+
+def _scan_cells(
+    conn: sqlite3.Connection,
+    window: Window | None,
+    filters: Filters,
+    price: _Pricer,
+    *,
+    max_rowid: int | None = None,
+    by_time: bool = False,
+) -> list[_Cell]:
+    rows = scan(conn, *_where(window, filters, max_rowid, by_time=by_time))
+    return [price(r) for r in rows]
+
+
+def _cached_cells(
+    conn: sqlite3.Connection,
+    window: Window | None,
+    filters: Filters,
+    price: _Pricer,
+    cache: CellCache,
+) -> list[_Cell] | None:
+    """Whole intervals from *cache*; the rest from ``requests`` up to its last rowid."""
+    first: datetime | None = None
+    start = lo = hi = None
+    tail: Window | None = None
+    if window is not None:
+        end = _seconds(window.end)
+        hi = end // SLICE_SECONDS
+        if hi * SLICE_SECONDS < end:
+            tail = Window(_slot_start(hi), window.end)
+        if window.start is not None:
+            first, start = window.start, _seconds(window.start)
+            lo = -(-start // SLICE_SECONDS)
+            if lo > hi:
+                # The window lies inside one interval, so the cache holds none of it.
+                return _scan_cells(conn, window, filters, price, by_time=True)
+    hit = cache.read(conn, lo, hi, unslotted=window is None, price=price)
+    if hit is None:
+        return None
+
+    def edge(w: Window) -> list[_Cell]:
+        return _scan_cells(
+            conn, w, filters, price, max_rowid=hit.max_rowid, by_time=True
+        )
+
+    # Unparseable timestamps, head, held intervals, tail: the direct query's order.
+    match = _matches(filters)
+    cells = [c for key, c in hit.unslotted if match(key)]
+    if hit.start is not None and (start is None or hit.start * SLICE_SECONDS > start):
+        cells += edge(Window(first, _slot_start(hit.start)))
+    cells += (c for key, c in hit.cells if match(key))
+    if tail is not None:
+        cells += edge(tail)
+    return cells
+
+
 def _fetch_cells(
     conn: sqlite3.Connection,
     window: Window | None,
     filters: Filters,
     pricing: Mapping[str, ModelPricing],
+    cache: CellCache | None = None,
 ) -> list[_Cell]:
     """Group the window into priced (slice, api_key, model, source) cells."""
-    keys = {
-        m: model_key(m) for (m,) in conn.execute("SELECT DISTINCT model FROM requests")
-    }
-    resolved = {m: resolve(k, pricing) for m, k in keys.items()}
-    plans: dict[str, CostPlan] = {
-        m: cost_plan(entry) for m, (entry, _) in resolved.items() if entry is not None
-    }
-    # The NULL row keeps VALUES non-empty; unpriced models get no plan row.
-    plan_rows = ", ".join(["(NULL, 0, 0)", *["(?, ?, ?)"] * len(plans)])
-    plan_params = [v for m, p in plans.items() for v in (m, p.switch, p.threshold)]
-    where, params = _where(window, filters)
-    rows = conn.execute(
-        f"""
-        WITH plan(plan_model, switch, threshold) AS (VALUES {plan_rows}),
-        r AS (
-            SELECT
-                requests.*,
-                COALESCE(switch, 0) AS switch,
-                COALESCE(threshold, 0) AS t,
-                {_PRICED_COLUMNS}
-            FROM requests LEFT JOIN plan ON plan_model = model
-            {where}
-        )
-        SELECT
-            CAST(strftime('%s', timestamp) AS INTEGER) / {SLICE_SECONDS} AS slice_no,
-            api_key,
-            model,
-            source,
-            COUNT(*) AS requests,
-            SUM(failed) AS failed,
-            SUM(input_tokens) AS input_tokens,
-            SUM(reasoning_tokens) AS reasoning_tokens,
-            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END) AS ok_latency_sum,
-            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END)
-                AS long_requests,
-            MAX(timestamp) AS last_used,
-            {_PRICED_SUMS}
-        FROM r
-        GROUP BY slice_no, api_key, model, source
-        """,
-        [*plan_params, *params],
-    ).fetchall()
-
-    people: dict[str, str] = {}
-    credentials: dict[str, str] = {}
-    cells: list[_Cell] = []
-    n = len(Amounts._fields)
-    for (
-        slice_no,
-        api_key,
-        model,
-        source,
-        requests,
-        failed,
-        input_tokens,
-        reasoning_tokens,
-        ok_latency_sum,
-        long_requests,
-        last_used,
-        *priced,
-    ) in rows:
-        _, status = resolved[model]
-        plan = plans.get(model)
-        total = Amounts._make(priced[:n])
-        base = Amounts._make(priced[n:])
-        above = Amounts._make(map(sub, total, base, strict=True))
-        if plan is None or not plan.has_long_tier:
-            long_requests = 0
-        if api_key not in people:
-            people[api_key] = redact_key(api_key)
-        if source not in credentials:
-            credentials[source] = redact_source(source)
-        cells.append(
-            _Cell(
-                slice_no=slice_no,
-                person=people[api_key],
-                model=keys[model],
-                credential=credentials[source],
-                requests=requests,
-                failed=failed,
-                input_tokens=input_tokens,
-                output_tokens=total.output,
-                reasoning_tokens=reasoning_tokens,
-                cache_read_tokens=total.cache_read,
-                cache_creation_tokens=total.cache_creation + total.cache_creation_1h,
-                cache_creation_1h_tokens=total.cache_creation_1h,
-                ok_latency_sum=ok_latency_sum,
-                long_requests=long_requests,
-                last_used=_parse_ts(last_used),
-                costs=plan.costs(base, above) if plan is not None else _NO_COST,
-                long_cost=plan.long_cost(above) if plan is not None else 0.0,
-                cache_savings=(
-                    plan.cache_savings(base.cache_read, above.cache_read)
-                    if plan is not None
-                    else 0.0
-                ),
-                status=status,
-                plan=plan,
-            )
-        )
-    return cells
-
-
-_NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
-
-
-def _base_rate(column: str) -> str:
-    """Per-request share of *column* billed at its CostPlan's base rate."""
-    return (
-        f"CASE WHEN switch THEN (CASE WHEN input_tokens > t THEN 0 ELSE {column} END) "
-        f"ELSE MIN({column}, t) END"
-    )
-
-
-# Per-request tokens of each priced type, by ``Amounts`` field.
-_PRICED: dict[str, str] = {
-    "input": "input_tokens - cache_read_tokens - cache_creation_tokens",
-    "output": "output_tokens",
-    "cache_creation": "cache_creation_tokens - cache_creation_1h_tokens",
-    "cache_read": "cache_read_tokens",
-    "cache_creation_1h": "cache_creation_1h_tokens",
-}
-_PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in Amounts._fields)
-# Every type's total, then every type's base-rate share, in ``Amounts`` order.
-_PRICED_SUMS = ", ".join(
-    [f"SUM(priced_{f}) AS total_{f}" for f in Amounts._fields]
-    + [f"SUM({_base_rate(f'priced_{f}')}) AS base_{f}" for f in Amounts._fields]
-)
-# A request has tokens at the long rate: whole-request plans when its input passes
-# the threshold, marginal plans when any one token type exceeds it.
-_LONG_REQUEST = (
-    "(CASE WHEN switch THEN input_tokens > t "
-    f"ELSE MAX({', '.join(f'priced_{f}' for f in Amounts._fields)}) > t END)"
-)
+    price = _Pricer(pricing)
+    if cache is not None:
+        cells = _cached_cells(conn, window, filters, price, cache)
+        if cells is not None:
+            return cells
+    return _scan_cells(conn, window, filters, price)
 
 
 def _data_start(conn: sqlite3.Connection) -> datetime | None:
@@ -467,14 +510,18 @@ def resolve_filter(
     conn: sqlite3.Connection,
     column: FilterColumn,
     keys: list[str] | None,
+    cache: CellCache | None = None,
 ) -> list[str] | None:
     """Raw *column* values whose display key is in *keys*; None means no filter."""
     if keys is None:
         return None
+    values = cache.values(conn, column) if cache is not None else None
+    if values is None:
+        sql = f"SELECT DISTINCT {column} FROM requests"
+        values = [v for (v,) in conn.execute(sql)]
     key_of = _FILTER_KEY[column]
     target = set(keys)
-    rows = conn.execute(f"SELECT DISTINCT {column} FROM requests").fetchall()
-    return [r[0] for r in rows if key_of(r[0]) in target]
+    return [v for v in values if key_of(v) in target]
 
 
 # ---------------------------------------------------------------------------
@@ -489,11 +536,13 @@ def query_summary(
     tz: ZoneInfo,
     filters: Filters,
     pricing: Mapping[str, ModelPricing],
+    *,
+    cache: CellCache | None = None,
 ) -> SummaryResponse:
     """Totals for the window and its previous period, plus per-bucket series."""
     has_pricing = bool(pricing)
     axis = _axis(conn, window, requested_bucket, tz)
-    cells = _fetch_cells(conn, window, filters, pricing)
+    cells = _fetch_cells(conn, window, filters, pricing, cache)
 
     current = _Acc()
     n = len(axis.starts)
@@ -523,7 +572,7 @@ def query_summary(
     previous: Totals | None = None
     if prev_window is not None:
         prev = _Acc()
-        for c in _fetch_cells(conn, prev_window, filters, pricing):
+        for c in _fetch_cells(conn, prev_window, filters, pricing, cache):
             prev.add(c)
         previous = prev.totals(has_pricing)
 
@@ -577,6 +626,8 @@ def query_breakdown(
     filters: Filters,
     pricing: Mapping[str, ModelPricing],
     aliases: Mapping[str, str],
+    *,
+    cache: CellCache | None = None,
 ) -> BreakdownResponse:
     """One row per entity of *dim* with totals, previous totals, trend and mix."""
     has_pricing = bool(pricing)
@@ -595,7 +646,7 @@ def query_breakdown(
         }
     )
     plans: dict[str, CostPlan | None] = {}
-    for c in _fetch_cells(conn, window, filters, pricing):
+    for c in _fetch_cells(conn, window, filters, pricing, cache):
         key = c.key(dim)
         plans[c.model] = c.plan
         per[key].add(c)
@@ -610,7 +661,10 @@ def query_breakdown(
 
     prev_window = window.previous()
     prev = (
-        _group(_fetch_cells(conn, prev_window, filters, pricing), lambda c: c.key(dim))
+        _group(
+            _fetch_cells(conn, prev_window, filters, pricing, cache),
+            lambda c: c.key(dim),
+        )
         if prev_window is not None
         else None
     )
@@ -652,9 +706,11 @@ def query_options(
     conn: sqlite3.Connection,
     pricing: Mapping[str, ModelPricing],
     aliases: Mapping[str, str],
+    *,
+    cache: CellCache | None = None,
 ) -> OptionsResponse:
     """Every entity per dimension ordered by all-time spend; the top 7 get slots."""
-    cells = _fetch_cells(conn, None, Filters(), pricing)
+    cells = _fetch_cells(conn, None, Filters(), pricing, cache)
 
     def entities(dim: Dimension) -> list[Entity]:
         groups = _group(cells, lambda c: c.key(dim))
@@ -701,12 +757,14 @@ def query_export(
     filters: Filters,
     pricing: Mapping[str, ModelPricing],
     aliases: Mapping[str, str],
+    *,
+    cache: CellCache | None = None,
 ) -> str:
     """CSV with one row per (bucket, person, model, credential) that has requests."""
     axis = _axis(conn, window, requested_bucket, tz)
     groups: dict[tuple[int, str, str, str], _Acc] = defaultdict(_Acc)
     priced: dict[str, bool] = {}
-    for c in _fetch_cells(conn, window, filters, pricing):
+    for c in _fetch_cells(conn, window, filters, pricing, cache):
         pos = axis.position(c.slice_no)
         if pos is None:
             continue
