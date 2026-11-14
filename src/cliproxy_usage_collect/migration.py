@@ -57,9 +57,13 @@ def migrate(conn: sqlite3.Connection, path: Path) -> None:
     backup = path.with_name(path.name + BACKUP_SUFFIX)
     try:
         if not backup.exists():
-            conn.execute("VACUUM INTO ?", (str(backup),))
+            # Write to a temporary name so a killed run never leaves a partial backup.
+            temp = backup.with_name(backup.name + ".tmp")
+            temp.unlink(missing_ok=True)
+            conn.execute("VACUUM INTO ?", (str(temp),))
             # VACUUM INTO does not sync its output; make the backup durable first.
-            _fsync(backup)
+            _fsync(temp)
+            os.replace(temp, backup)
             _fsync(path.parent)
         with write_transaction(conn):
             for statement in _MIGRATE:

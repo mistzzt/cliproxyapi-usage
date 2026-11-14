@@ -122,6 +122,17 @@ def test_migration_keeps_an_existing_backup(tmp_path: Path) -> None:
     assert backup.read_text() == "an earlier backup"
 
 
+def test_leftover_temporary_backup_is_replaced(tmp_path: Path) -> None:
+    db = _old_db(tmp_path / "usage.db")
+    leftover = tmp_path / f"usage.db{BACKUP_SUFFIX}.tmp"
+    leftover.write_text("partial copy from a killed run")
+
+    open_db(db).close()
+
+    assert _backup_rows(tmp_path / f"usage.db{BACKUP_SUFFIX}") == sorted(OLD_ROWS)
+    assert not leftover.exists()
+
+
 def test_second_open_changes_nothing(tmp_path: Path) -> None:
     db = _old_db(tmp_path / "usage.db")
     backup = tmp_path / f"usage.db{BACKUP_SUFFIX}"
