@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
-import pytest
-from conftest import db_at_version, read_version
-
-from cliproxy_usage_collect import db as db_module
 from cliproxy_usage_collect.db import insert_records, open_db
 from cliproxy_usage_collect.schema_version import (
     SCHEMA_VERSION,
-    SchemaVersionError,
-    supported_version,
     user_version,
 )
 from cliproxy_usage_collect.schemas import RequestRecord
@@ -84,27 +77,6 @@ def test_open_db_creates_a_db_at_the_current_schema_version(tmp_path: Path) -> N
     conn = open_db(tmp_path / "usage.db")
     assert user_version(conn) == SCHEMA_VERSION
     conn.close()
-
-
-def test_fresh_db_created_by_a_newer_run_meanwhile_is_not_downgraded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    db = tmp_path / "usage.db"
-
-    def read_then_race(conn: sqlite3.Connection, path: Path) -> int:
-        # After this run's first read, a newer collector creates its layout.
-        version = supported_version(conn, path)
-        newer = db_at_version(db, SCHEMA_VERSION + 1)
-        other = sqlite3.connect(newer)
-        other.execute("CREATE TABLE IF NOT EXISTS requests (timestamp TEXT)")
-        other.close()
-        return version
-
-    monkeypatch.setattr(db_module, "supported_version", read_then_race)
-    with pytest.raises(SchemaVersionError):
-        open_db(db)
-
-    assert read_version(db) == SCHEMA_VERSION + 1
 
 
 def test_open_db_is_idempotent(tmp_path: Path) -> None:

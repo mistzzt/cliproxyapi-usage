@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import tempfile
 from pathlib import Path
 
-from cliproxy_usage_collect.schema_version import write_lock
+from cliproxy_usage_collect.schema_version import write_transaction
 
 BACKUP_SUFFIX = ".pre-cache-columns"
 
@@ -51,30 +50,21 @@ def _fsync(path: Path) -> None:
 
 
 def migrate(conn: sqlite3.Connection, path: Path) -> None:
-    """Migrate a version-0 ``requests`` table to version 1, backing it up first.
+    """Migrate a version-0 ``requests`` table, backing it up first.
 
-    The backup is a consistent copy at ``<path>.pre-cache-columns``, replaced only
-    by the run that migrates (VACUUM INTO cannot run inside the write transaction).
+    The backup is ``<path>.pre-cache-columns``; one from an earlier failed run is kept.
     """
     backup = path.with_name(path.name + BACKUP_SUFFIX)
-    temp: Path | None = None
     try:
-        fd, name = tempfile.mkstemp(dir=path.parent, prefix=backup.name, suffix=".tmp")
-        os.close(fd)
-        temp = Path(name)
-        conn.execute("VACUUM INTO ?", (name,))
-        with write_lock(conn, path) as version:
-            if version == 0:
-                # VACUUM INTO does not sync its output; make the backup durable first.
-                _fsync(temp)
-                os.replace(temp, backup)
-                _fsync(path.parent)
-                for statement in _MIGRATE:
-                    conn.execute(statement)
-                conn.execute("PRAGMA user_version = 1")
+        if not backup.exists():
+            conn.execute("VACUUM INTO ?", (str(backup),))
+            # VACUUM INTO does not sync its output; make the backup durable first.
+            _fsync(backup)
+            _fsync(path.parent)
+        with write_transaction(conn):
+            for statement in _MIGRATE:
+                conn.execute(statement)
+            conn.execute("PRAGMA user_version = 1")
     except (sqlite3.Error, OSError) as exc:
         msg = f"could not migrate {path}: {exc}"
         raise MigrationError(msg) from exc
-    finally:
-        if temp is not None:
-            temp.unlink(missing_ok=True)

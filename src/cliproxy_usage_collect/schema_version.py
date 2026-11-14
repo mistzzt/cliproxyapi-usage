@@ -29,25 +29,12 @@ def mismatch_message(path: Path, version: int, action: str) -> str:
     )
 
 
-def supported_version(conn: sqlite3.Connection, path: Path) -> int:
-    """Return the DB's version; raise ``SchemaVersionError`` if it is too new."""
-    version = user_version(conn)
-    if version > SCHEMA_VERSION:
-        raise SchemaVersionError(
-            mismatch_message(path, version, "upgrade the collector")
-        )
-    return version
-
-
 @contextmanager
-def write_lock(conn: sqlite3.Connection, path: Path) -> Iterator[int]:
-    """Hold the write lock for the block and yield the re-read version.
-
-    Raises ``SchemaVersionError`` for a newer DB; commits on success, else rolls back.
-    """
+def write_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Run the block in one write transaction; commit on success, else roll back."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        yield supported_version(conn, path)
+        yield
         conn.commit()
     except BaseException:
         conn.rollback()

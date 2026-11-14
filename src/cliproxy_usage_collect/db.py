@@ -9,8 +9,10 @@ from pathlib import Path
 from cliproxy_usage_collect.migration import migrate
 from cliproxy_usage_collect.schema_version import (
     SCHEMA_VERSION,
-    supported_version,
-    write_lock,
+    SchemaVersionError,
+    mismatch_message,
+    user_version,
+    write_transaction,
 )
 from cliproxy_usage_collect.schemas import RequestRecord
 
@@ -91,13 +93,16 @@ def _has_requests_table(conn: sqlite3.Connection) -> bool:
 
 
 def _prepare_schema(conn: sqlite3.Connection, path: Path) -> None:
-    version = supported_version(conn, path)
+    version = user_version(conn)
+    if version > SCHEMA_VERSION:
+        raise SchemaVersionError(
+            mismatch_message(path, version, "upgrade the collector")
+        )
     if not _has_requests_table(conn):
-        with write_lock(conn, path):
-            if not _has_requests_table(conn):
-                for statement in _DDL:
-                    conn.execute(statement)
-                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        with write_transaction(conn):
+            for statement in _DDL:
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     elif version == 0:
         migrate(conn, path)
 
