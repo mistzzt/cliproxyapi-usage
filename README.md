@@ -96,20 +96,23 @@ The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage
 
 ### Server environment variables
 
-| Variable                    | Default                                                | Required      |
-| --------------------------- | ------------------------------------------------------ | ------------- |
-| `USAGE_DB_PATH`             | `./usage.db`                                           | no            |
-| `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no            |
-| `USAGE_SERVER_PORT`         | `8318`                                                 | no            |
-| `USAGE_BASE_PATH`           | `/`                                                    | no            |
-| `USAGE_PAGE_TITLE`          | `CLIProxyAPI Usage Dashboard`                          | no            |
-| `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no            |
-| `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no            |
-| `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no            |
-| `USAGE_KEY_ALIASES`         | unset (redacted keys are shown)                        | no            |
-| `CLIPROXY_BASE_URL`         | none                                                   | for `/limits` |
-| `CLIPROXY_MANAGEMENT_KEY`   | none                                                   | for `/limits` |
-| `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no            |
+| Variable                          | Default                                                | Required      |
+| --------------------------------- | ------------------------------------------------------ | ------------- |
+| `USAGE_DB_PATH`                   | `./usage.db`                                           | no            |
+| `USAGE_SERVER_HOST`               | `127.0.0.1`                                            | no            |
+| `USAGE_SERVER_PORT`               | `8318`                                                 | no            |
+| `USAGE_BASE_PATH`                 | `/`                                                    | no            |
+| `USAGE_PAGE_TITLE`                | `CLIProxyAPI Usage Dashboard`                          | no            |
+| `USAGE_PRICING_CACHE`             | `<db_parent>/pricing.json`                             | no            |
+| `USAGE_PRICING_TTL_SECONDS`       | `86400`                                                | no            |
+| `USAGE_PRICING_URL`               | litellm `model_prices_and_context_window.json` raw URL | no            |
+| `USAGE_KEY_ALIASES`               | unset (redacted keys are shown)                        | no            |
+| `USAGE_CELL_CACHE`                | `1` (set `0` to disable)                               | no            |
+| `USAGE_CELL_CACHE_MAX_MB`         | `512`                                                  | no            |
+| `USAGE_CELL_CACHE_VERIFY_SECONDS` | `60`                                                   | no            |
+| `CLIPROXY_BASE_URL`               | none                                                   | for `/limits` |
+| `CLIPROXY_MANAGEMENT_KEY`         | none                                                   | for `/limits` |
+| `QUOTA_CACHE_TTL_SECONDS`         | `300`                                                  | no            |
 
 `CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota API. As for the collector, `CLIPROXY_BASE_URL` may be the CLIProxyAPI origin or its `/v0/management` base. When both are set, the server serves live OAuth quota for Claude and Codex auth-files at `/limits` (UI) and `/api/quota/*` (JSON). Successful quota responses and the auth-file list are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); a failure to reach CLIProxyAPI or read a vendor's answer shows as an error on that account's card only; clicking "Refresh" within the TTL returns the cached value rather than re-hitting the upstream OAuth endpoints. When either variable is unset, `/api/quota/*` returns `503` and the UI shows a disabled banner; the dashboard remains available.
 
@@ -125,6 +128,8 @@ Codex window labels come from each window's declared duration. A duration of 18,
   "*******0a1b": "Shared CI key"
 }
 ```
+
+The server keeps usage grouped by 15-minute interval, API key, model and source in memory, so a page reads SQLite only for rows inserted since the last request and for the partial intervals at the edges of the window. At startup it builds this cache with one scan of the DB in the background (a few seconds for about 1.5M rows); until it is ready, requests query SQLite directly and return the same results, only slower. It notices when the DB is replaced, its schema changes or rows are deleted (the row count is compared every `USAGE_CELL_CACHE_VERIFY_SECONDS`) and then rebuilds; changes to existing rows go unnoticed, which is fine because the collector only appends. `USAGE_CELL_CACHE_MAX_MB` bounds its estimated size: past the cap it drops the oldest intervals, logs a warning once, and reads windows reaching into them from SQLite. `USAGE_CELL_CACHE=0` turns the cache off.
 
 ### Cost accuracy
 
