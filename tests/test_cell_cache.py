@@ -130,11 +130,22 @@ def conn(db: Path) -> Iterator[sqlite3.Connection]:
         yield c
 
 
+def _wait_ready(cache: CellCache, builds: int) -> None:
+    deadline = time.monotonic() + 10
+    while not (cache.ready and cache.builds >= builds):
+        assert time.monotonic() < deadline, "cache did not rebuild"
+        time.sleep(0.01)
+
+
+def _built(cache: CellCache) -> CellCache:
+    cache.start()
+    _wait_ready(cache, 1)
+    return cache
+
+
 @pytest.fixture
 def cache(db: Path) -> CellCache:
-    c = CellCache(db, verify_seconds=0)
-    c.build()
-    return c
+    return _built(CellCache(db, verify_seconds=0))
 
 
 def _at(h: int, m: int = 0, s: int = 0, us: int = 0, day: int = 1) -> datetime:
@@ -254,13 +265,6 @@ def test_insert_between_requests(
     assert cache.builds == 1
 
 
-def _wait_ready(cache: CellCache, builds: int) -> None:
-    deadline = time.monotonic() + 10
-    while not (cache.ready and cache.builds >= builds):
-        assert time.monotonic() < deadline, "cache did not rebuild"
-        time.sleep(0.01)
-
-
 def _replace_file(db: Path) -> None:
     copy = db.with_name("copy.db")
     with contextlib.closing(sqlite3.connect(db)) as src:
@@ -293,8 +297,7 @@ def test_rebuild_after_rewrite(
 ) -> None:
     # Only the count check needs a due verification; the others must not rely on it.
     verify = 0 if rewrite is REWRITES["row count changed"] else 3600
-    cache = CellCache(db, verify_seconds=verify)
-    cache.build()
+    cache = _built(CellCache(db, verify_seconds=verify))
     query = _queries(WINDOWS["open start"], Filters())["breakdown person"]
     _same(conn, cache, query)
     rewrite(db)
@@ -332,9 +335,7 @@ def test_requests_during_build_use_the_direct_query(
 
 
 def _evicting_cache(db: Path, kept: int) -> CellCache:
-    cache = CellCache(db, verify_seconds=0, max_mb=kept * ENTRY_BYTES / 2**20)
-    cache.build()
-    return cache
+    return _built(CellCache(db, verify_seconds=0, max_mb=kept * ENTRY_BYTES / 2**20))
 
 
 def test_eviction_matches_direct(
@@ -405,7 +406,7 @@ def test_entry_bytes_cover_sums_and_priced_result(tmp_path: Path) -> None:
         tracemalloc.start()
         try:
             before = tracemalloc.get_traced_memory()[0]
-            cache.build()
+            _built(cache)
             query_options(conn, dict.fromkeys(models, CLAUDE), {}, cache=cache)
             gc.collect()
             used = tracemalloc.get_traced_memory()[0] - before
@@ -460,3 +461,30 @@ def test_off_switch(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
     monkeypatch.setenv("USAGE_CELL_CACHE", "0")
     monkeypatch.setenv("USAGE_DB_PATH", str(db))
     assert ServerConfig().cell_cache is False
+
+
+def test_edges_work_without_the_timestamp_index(db: Path) -> None:
+    _write(db, "DROP INDEX idx_requests_ts_utc")
+    cache = _built(CellCache(db, verify_seconds=0))
+    with contextlib.closing(open_ro(db)) as conn:
+        for key in ("mid-interval edges", "inside one interval"):
+            for filters in FILTERS.values():
+                for name, query in _queries(WINDOWS[key], filters).items():
+                    cached, direct = query(conn, cache), query(conn, None)
+                    assert _bytes(cached) == _bytes(direct), (key, name)
+
+
+def test_filtered_edges_use_the_timestamp_index(
+    conn: sqlite3.Connection, cache: CellCache
+) -> None:
+    edges: list[str] = []
+    conn.set_trace_callback(
+        lambda sql: edges.append(sql) if "datetime(timestamp) >=" in sql else None
+    )
+    filters = Filters(api_keys=KEYS[:2], models=["gpt-l"], sources=SOURCES[:1])
+    _queries(WINDOWS["mid-interval edges"], filters)["summary"](conn, cache)
+    conn.set_trace_callback(None)
+    assert edges
+    for sql in edges:
+        plan = conn.execute(f"EXPLAIN QUERY PLAN {sql}").fetchall()
+        assert any("idx_requests_ts_utc" in row[-1] for row in plan), plan

@@ -95,16 +95,8 @@ _SUMS = ",\n".join(
 _PRICED_COLUMNS = ", ".join(f"{_PRICED[f]} AS priced_{f}" for f in _FIELDS)
 
 
-def scan(
-    conn: sqlite3.Connection,
-    where: str,
-    params: Sequence[object],
-    *,
-    by_time: bool = False,
-) -> list[Row]:
-    """Cell sums of the requests matching *where*, ordered by interval then key.
-    *by_time* makes SQLite use the timestamp index whatever else *where* filters."""
-    index = "INDEXED BY idx_requests_ts_utc" if by_time else ""
+def scan(conn: sqlite3.Connection, where: str, params: Sequence[object]) -> list[Row]:
+    """Cell sums of the requests matching *where*, ordered by interval then key."""
     rows = conn.execute(
         f"""
         SELECT
@@ -114,7 +106,7 @@ def scan(
         FROM (
             SELECT timestamp, api_key, model, source, failed, latency_ms,
                 input_tokens, reasoning_tokens, {_PRICED_COLUMNS}
-            FROM requests {index} {where}
+            FROM requests {where}
         )
         GROUP BY slice_no, api_key, model, source
         ORDER BY slice_no, api_key, model, source
@@ -160,7 +152,7 @@ class _State:
     order: list[int] = field(default_factory=list)  # sorted intervals, None excluded
     values: _Interned = field(default_factory=_interned)  # by COLUMNS
     priced: dict[int | None, list[tuple[Key, Any]]] = field(default_factory=dict)
-    priced_by: object = None
+    priced_by: object = None  # the pricing map the memo was priced with
 
     def fold(self, row: Row) -> None:
         slot, api_key, model, source, last_used, sums = row
@@ -255,15 +247,6 @@ class CellCache:
             if self._state is None:
                 self._kick()
 
-    def build(self) -> None:
-        """Build synchronously and install the result."""
-        with self._lock:
-            generation = self._generation
-        state = self._load()
-        with self._lock:
-            if generation == self._generation:
-                self._install(state)
-
     def read[T](
         self,
         conn: sqlite3.Connection,
@@ -271,17 +254,18 @@ class CellCache:
         hi: int | None,
         *,
         unslotted: bool,
+        pricing: object,
         price: Callable[[Row], T],
     ) -> Hit[T] | None:
-        """Priced cells of the held intervals in ``[lo, hi)`` (None: unbounded).
-        None until ready; *price* keys the memo of priced cells."""
+        """Priced cells of the held intervals in ``[lo, hi)`` (None: unbounded), or
+        None until ready; *price* prices for *pricing*, whose identity keys the memo."""
         with self._lock:
             st = self._synced(conn)
             if st is None:
                 return None
-            if st.priced_by is not price:
+            if st.priced_by is not pricing:
                 st.priced = {}
-                st.priced_by = price
+                st.priced_by = pricing
             start = lo
             if st.floor is not None and (lo is None or lo < st.floor):
                 start = st.floor

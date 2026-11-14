@@ -261,9 +261,14 @@ def _ts_param(dt: datetime) -> str:
 
 
 def _where(
-    window: Window | None, filters: Filters, max_rowid: int | None = None
+    window: Window | None,
+    filters: Filters,
+    max_rowid: int | None = None,
+    *,
+    by_time: bool = False,
 ) -> tuple[str, list[str | int]]:
-    """Build the WHERE clause; ``datetime(timestamp)`` matches idx_requests_ts_utc."""
+    """Build the WHERE clause; ``datetime(timestamp)`` matches idx_requests_ts_utc.
+    *by_time* writes filters as ``+column`` so SQLite prefers that index."""
     clauses: list[str] = []
     params: list[str | int] = []
     if window is not None:
@@ -285,7 +290,8 @@ def _where(
         if not values:
             clauses.append("0 = 1")
             continue
-        clauses.append(f"{column} IN ({', '.join('?' * len(values))})")
+        prefix = "+" if by_time else ""
+        clauses.append(f"{prefix}{column} IN ({', '.join('?' * len(values))})")
         params.extend(values)
     return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), params
 
@@ -360,18 +366,6 @@ class _Pricer:
         )
 
 
-_last_pricer: _Pricer | None = None
-
-
-def _pricer(pricing: Mapping[str, ModelPricing]) -> _Pricer:
-    """The pricer of *pricing*, reused while the same map object is passed."""
-    global _last_pricer
-    pricer = _last_pricer
-    if pricer is None or pricer.pricing is not pricing:
-        pricer = _last_pricer = _Pricer(pricing)
-    return pricer
-
-
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -403,7 +397,7 @@ def _scan_cells(
     max_rowid: int | None = None,
     by_time: bool = False,
 ) -> list[_Cell]:
-    rows = scan(conn, *_where(window, filters, max_rowid), by_time=by_time)
+    rows = scan(conn, *_where(window, filters, max_rowid, by_time=by_time))
     return [price(r) for r in rows]
 
 
@@ -415,20 +409,27 @@ def _cached_cells(
     cache: CellCache,
 ) -> list[_Cell] | None:
     """Whole intervals from *cache*; the rest from ``requests`` up to its last rowid."""
-    first = None if window is None else window.start
-    start = None if first is None else _seconds(first)
-    end = None if window is None else _seconds(window.end)
-    lo = None if start is None else -(-start // SLICE_SECONDS)
-    hi = None if end is None else end // SLICE_SECONDS
-    if lo is not None and hi is not None and lo > hi:
-        # The window lies inside one interval, so the cache holds none of it.
-        return _scan_cells(conn, window, filters, price, by_time=True)
-    hit = cache.read(conn, lo, hi, unslotted=window is None, price=price)
+    first: datetime | None = None
+    start = lo = hi = None
+    tail: Window | None = None
+    if window is not None:
+        end = _seconds(window.end)
+        hi = end // SLICE_SECONDS
+        if hi * SLICE_SECONDS < end:
+            tail = Window(_slot_start(hi), window.end)
+        if window.start is not None:
+            first, start = window.start, _seconds(window.start)
+            lo = -(-start // SLICE_SECONDS)
+            if lo > hi:
+                # The window lies inside one interval, so the cache holds none of it.
+                return _scan_cells(conn, window, filters, price, by_time=True)
+    hit = cache.read(
+        conn, lo, hi, unslotted=window is None, pricing=price.pricing, price=price
+    )
     if hit is None:
         return None
 
-    def edge(edge_start: datetime | None, edge_end: datetime) -> list[_Cell]:
-        w = Window(edge_start, edge_end)
+    def edge(w: Window) -> list[_Cell]:
         return _scan_cells(
             conn, w, filters, price, max_rowid=hit.max_rowid, by_time=True
         )
@@ -437,14 +438,10 @@ def _cached_cells(
     match = _matches(filters)
     cells = [c for key, c in hit.unslotted if match(key)]
     if hit.start is not None and (start is None or hit.start * SLICE_SECONDS > start):
-        cells += edge(first, _slot_start(hit.start))
+        cells += edge(Window(first, _slot_start(hit.start)))
     cells += (c for key, c in hit.cells if match(key))
-    if (
-        window is not None
-        and hi is not None
-        and hi * SLICE_SECONDS < _seconds(window.end)
-    ):
-        cells += edge(_slot_start(hi), window.end)
+    if tail is not None:
+        cells += edge(tail)
     return cells
 
 
@@ -456,7 +453,7 @@ def _fetch_cells(
     cache: CellCache | None = None,
 ) -> list[_Cell]:
     """Group the window into priced (slice, api_key, model, source) cells."""
-    price = _pricer(pricing)
+    price = _Pricer(pricing)
     if cache is not None:
         cells = _cached_cells(conn, window, filters, price, cache)
         if cells is not None:
