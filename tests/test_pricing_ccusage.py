@@ -3,9 +3,6 @@
 Each case prices one request through the production query (``request_cost``:
 input with its cache reads and creation, output, cache read, cache creation, and
 its 1-hour part) and compares it with a fixed, hand-checked dollar amount.
-
-TODO: check these cases against ccusage itself (e.g. run its Rust cost
-calculator on the same inputs) instead of hand-checked amounts.
 """
 
 from __future__ import annotations
