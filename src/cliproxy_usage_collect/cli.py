@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from cliproxy_usage_collect.config import Config, ConfigError, load_config
 from cliproxy_usage_collect.db import insert_records, open_db
-from cliproxy_usage_collect.parser import SchemaError, iter_records
+from cliproxy_usage_collect.migration import MigrationError
+from cliproxy_usage_collect.parser import SchemaError, parse_records
 from cliproxy_usage_collect.queue_client import (
     AuthError,
     TransientError,
     pop_usage_records,
 )
+from cliproxy_usage_collect.schema_version import SchemaVersionError
 
 QueueClient = Callable[[Config], Sequence[Mapping[str, Any]]]
 
@@ -30,8 +33,9 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
     Returns
     -------
     int
-        Exit code: 0 success, 1 transient error, 2 config error,
-        3 auth error, 4 schema error.
+        Exit code: 0 success, 1 transient error (migration and DB failures included),
+        2 config error (a DB from a newer version included), 3 auth error,
+        4 schema error.
     """
     try:
         cfg = load_config()
@@ -41,8 +45,20 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
 
     try:
         conn = open_db(cfg.db_path)
+    except SchemaVersionError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except MigrationError as exc:
+        print(f"Migration error: {exc}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as exc:
+        print(f"Database error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
         queued_records = list(queue_client(cfg))
-        inserted = insert_records(conn, iter_records(queued_records))
+        batch = parse_records(queued_records)
+        inserted = insert_records(conn, batch.records)
     except AuthError as exc:
         print(f"Authentication error: {exc}", file=sys.stderr)
         return 3
@@ -54,7 +70,8 @@ def main(*, queue_client: QueueClient = pop_usage_records) -> int:
         return 1
 
     print(
-        f"inserted {inserted} new records from {len(queued_records)} queued records",
+        f"inserted {inserted} new records from {len(queued_records)} queued records, "
+        f"{batch.incomplete} without a token split",
         file=sys.stderr,
     )
     return 0

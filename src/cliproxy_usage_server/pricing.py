@@ -43,8 +43,8 @@ _OPENAI_LITELLM_PROVIDERS: frozenset[str] = frozenset(
 )
 
 
-def _uses_openai_token_accounting(pricing: ModelPricing) -> bool:
-    """Return True when cached input is reported as a subset of input tokens."""
+def _uses_codex_billing(pricing: ModelPricing) -> bool:
+    """Return True for models ccusage bills with its Codex (OpenAI) adapter."""
     provider = (pricing.litellm_provider or "").strip().lower()
     return provider in _OPENAI_LITELLM_PROVIDERS
 
@@ -119,16 +119,28 @@ def rollup_cost_status(statuses: Collection[PricingResolution]) -> CostStatus:
     return "partial_missing" if "live" in statuses else "missing"
 
 
+# ccusage bills 1-hour cache writes at twice the input rate of their tier.
+_CACHE_CREATION_1H_INPUT_MULTIPLIER = 2.0
+
+
 class Rates(NamedTuple):
     """USD per token for each token type."""
 
     input: float
     output: float
-    cache_creation: float
+    cache_creation_5m: float
     cache_read: float
+    cache_creation_1h: float
 
 
-Amounts = tuple[int, int, int, int]  # token counts in ``Rates`` field order
+class Amounts(NamedTuple):
+    """Token counts in ``Rates`` field order."""
+
+    input: int  # uncached
+    output: int
+    cache_creation_5m: int
+    cache_read: int
+    cache_creation_1h: int
 
 
 class Costs(NamedTuple):
@@ -136,7 +148,7 @@ class Costs(NamedTuple):
 
     input: float
     output: float
-    cache_creation: float
+    cache_creation: float  # 5-minute and 1-hour writes
     cache_read: float
 
 
@@ -146,8 +158,7 @@ class CostPlan(NamedTuple):
     ``aggregate._fetch_cells`` applies it per request in SQL; ``costs`` prices the sums.
     """
 
-    openai: bool  # cached tokens are reported inside input_tokens
-    # True: past the threshold the whole request bills at `above`.
+    # True: once input_tokens passes the threshold the whole request bills at `above`.
     # False: only each token type's excess over the threshold does.
     switch: bool
     threshold: int
@@ -160,12 +171,11 @@ class CostPlan(NamedTuple):
 
     def costs(self, base: Amounts, above: Amounts) -> Costs:
         """Per-type cost of token sums billed at the base and above rates."""
-        return Costs(
-            *(
-                b * rb + a * ra
-                for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
-            )
+        inp, out, cache_creation_5m, cache_read, cache_creation_1h = (
+            b * rb + a * ra
+            for b, a, rb, ra in zip(base, above, self.base, self.above, strict=True)
         )
+        return Costs(inp, out, cache_creation_5m + cache_creation_1h, cache_read)
 
     def long_cost(self, above: Amounts) -> float:
         """Cost of the tokens billed at long-context rates; 0 without a long tier."""
@@ -185,17 +195,18 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
 
     LiteLLM ``*_above_200k_tokens`` rates are marginal per token type. Rates only
     published above 272k (the models.dev tier ccusage uses) switch the whole
-    request. OpenAI-accounting models always switch, as in ccusage's Codex adapter.
+    request. OpenAI models always switch, as in ccusage's Codex adapter.
     """
-    openai = _uses_openai_token_accounting(pricing)
+    openai = _uses_codex_billing(pricing)
     inp = pricing.input_cost_per_token
     cache_read = pricing.cache_read_input_token_cost
-    base = Rates(
-        input=inp,
-        output=pricing.output_cost_per_token,
-        cache_creation=_or(pricing.cache_creation_input_token_cost, inp * 1.25),
-        cache_read=_or(cache_read, inp if openai else inp * 0.1),
+    published = (
+        inp,
+        pricing.output_cost_per_token,
+        _or(pricing.cache_creation_input_token_cost, inp * 1.25),
+        _or(cache_read, inp if openai else inp * 0.1),
     )
+    base = _rates(*published)
     above_200k = (
         pricing.input_cost_per_token_above_200k_tokens,
         pricing.output_cost_per_token_above_200k_tokens,
@@ -216,11 +227,24 @@ def cost_plan(pricing: ModelPricing) -> CostPlan:
         if switch and has_272k
         else (_THRESHOLD_200K, above_200k)
     )
-    above = Rates(*(_or(a, b) for a, b in zip(tier, base, strict=True)))
+    above = _rates(*(_or(a, b) for a, b in zip(tier, published, strict=True)))
     if openai and cache_read is None:
         # Codex bills unpriced cache reads of long requests at the long input rate.
         above = above._replace(cache_read=above.input)
-    return CostPlan(openai, switch, threshold, base, above)
+    return CostPlan(switch, threshold, base, above)
+
+
+def _rates(
+    inp: float, output: float, cache_creation_5m: float, cache_read: float
+) -> Rates:
+    """Rates from the four published ones; 1-hour writes bill at twice input."""
+    return Rates(
+        inp,
+        output,
+        cache_creation_5m,
+        cache_read,
+        inp * _CACHE_CREATION_1H_INPUT_MULTIPLIER,
+    )
 
 
 def _or(value: float | None, default: float) -> float:

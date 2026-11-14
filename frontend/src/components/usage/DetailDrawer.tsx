@@ -13,7 +13,8 @@ import { shareItems } from '@/utils/usage/share';
 import { breakdownChart } from '@/utils/usage/stack';
 import {
   avgLatency,
-  cacheReadRate,
+  cacheHitRate,
+  cacheWriteShare,
   failureRate,
   fmtLatency,
   fmtSpeed,
@@ -81,7 +82,8 @@ export default function DetailDrawer({
   const prev = summary.data?.previous ?? null;
   const latency = cur ? avgLatency(cur) : null;
   const reasoning = cur ? reasoningShare(cur) : null;
-  const hitRate = cur ? cacheReadRate(cur) : null;
+  const hitRate = cur ? cacheHitRate(cur) : null;
+  const writeShare = cur ? cacheWriteShare(cur) : null;
   const long = cur ? longContext(cur) : null;
 
   return (
@@ -143,12 +145,12 @@ export default function DetailDrawer({
               <StatTile
                 className={s.tile}
                 label="Input"
-                value={fmtCompact(cur.uncached_input_tokens)}
-                title="Uncached input tokens"
+                value={fmtCompact(cur.input_tokens)}
+                title="All input tokens, cache reads and writes included"
                 foot={
                   <Foot
-                    sub={`${fmtPct(share(cur.uncached_input_tokens, pageTotals?.uncached_input_tokens))} of total`}
-                    change={change(cur.uncached_input_tokens, prev?.uncached_input_tokens)}
+                    sub={hitRate === null ? 'no input' : `${fmtPct(hitRate)} from cache reads`}
+                    change={change(cur.input_tokens, prev?.input_tokens)}
                   />
                 }
               />
@@ -163,18 +165,20 @@ export default function DetailDrawer({
                   />
                 }
               />
-              <StatTile
-                className={s.tile}
-                label="Cached"
-                value={fmtCompact(cur.cache_read_tokens)}
-                title="Cache read tokens"
-                foot={
-                  <Foot
-                    sub={hitRate === null ? 'no input' : `${fmtPct(hitRate)} hit rate`}
-                    change={change(cur.cache_read_tokens, prev?.cache_read_tokens)}
-                  />
-                }
-              />
+              {cur.cache_creation_tokens > 0 && (
+                <StatTile
+                  className={s.tile}
+                  label="Cache writes"
+                  value={fmtCompact(cur.cache_creation_tokens)}
+                  title="Input tokens written to the cache"
+                  foot={
+                    <Foot
+                      sub={writeShare === null ? 'no input' : `${fmtPct(writeShare)} of input`}
+                      change={change(cur.cache_creation_tokens, prev?.cache_creation_tokens)}
+                    />
+                  }
+                />
+              )}
             </div>
             <h3 className={s.section}>Over time by {DIMENSION_LABEL[splitDim].toLowerCase()}</h3>
             <Loaded query={{ data: chart, isError: split.isError }}>

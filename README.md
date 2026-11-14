@@ -1,160 +1,108 @@
 # cliproxy-usage
 
-A cron-runnable collector that drains request records from CLIProxyAPI's HTTP management usage queue and stores them in a local SQLite database. Each run pops a bounded batch from the upstream queue and inserts new rows by timestamp, so running the collector repeatedly is safe. Transient errors exit non-zero so a cron scheduler will retry on the next tick.
+cliproxy-usage records who uses a [CLIProxyAPI](https://help.router-for.me/) instance, and how much it costs. It has two parts:
 
-Before running the collector, enable usage publishing and the HTTP management usage queue in CLIProxyAPI. See the upstream API docs: https://help.router-for.me/management/api.html#usage-telemetry-queue
+- `cliproxy-usage-collect`, a collector you run from cron. Each run takes a batch of request records from CLIProxyAPI's usage queue and stores them in a local SQLite database.
+- `cliproxy-usage-server`, a dashboard that reads that database and shows spend, tokens, requests, failures and latency by person, model and credential. It can also show the live OAuth quota of the proxy's Claude and Codex accounts.
 
-## Environment variables
+## Requirements
 
-| Variable                              | Default                 | Required |
-| ------------------------------------- | ----------------------- | -------- |
-| `CLIPROXY_BASE_URL`                   | `http://localhost:8317` | no       |
-| `CLIPROXY_MANAGEMENT_KEY`             | none                    | **yes**  |
-| `USAGE_DB_PATH`                       | `./usage.db`            | no       |
-| `USAGE_QUEUE_POP_COUNT`               | `500`                   | no       |
-| `USAGE_HTTP_TIMEOUT_SECONDS`          | `10.0`                  | no       |
+- CLIProxyAPI v7.2.97 or later, with usage publishing and the HTTP management usage queue enabled (see the [upstream docs](https://help.router-for.me/management/api.html#usage-telemetry-queue)). Use v8.0.48 or later to record 1-hour cache writes; with an earlier proxy, every cache write is priced at the 5-minute rate.
+- [uv](https://docs.astral.sh/uv/) for Python 3.12 or later, and [bun](https://bun.sh/) to build the dashboard. The Nix flake provides both (`nix develop`), and `nix build` produces a package with the dashboard already built.
 
-## Install and run
+## Collector
 
 ```sh
 uv sync
 CLIPROXY_MANAGEMENT_KEY=your-key uv run cliproxy-usage-collect
 ```
 
-With every variable set explicitly (values shown are the defaults for optional settings):
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CLIPROXY_MANAGEMENT_KEY` | required | Bearer token for the CLIProxyAPI management API. |
+| `CLIPROXY_BASE_URL` | `http://localhost:8317` | The CLIProxyAPI origin or its `/v0/management` base URL. |
+| `USAGE_DB_PATH` | `./usage.db` | SQLite database file, relative to the working directory. Use an absolute path under cron. |
+| `USAGE_QUEUE_POP_COUNT` | `500` | Most queue records taken per run (1 to 10000). |
+| `USAGE_HTTP_TIMEOUT_SECONDS` | `10.0` | Timeout for the management API request. |
 
-```sh
-CLIPROXY_MANAGEMENT_KEY=your-key \
-CLIPROXY_BASE_URL=http://localhost:8317 \
-USAGE_DB_PATH=./usage.db \
-USAGE_QUEUE_POP_COUNT=500 \
-USAGE_HTTP_TIMEOUT_SECONDS=10.0 \
-uv run cliproxy-usage-collect
-```
-
-- `CLIPROXY_MANAGEMENT_KEY`: required. Used as the Bearer token for the CLIProxyAPI management API.
-- `CLIPROXY_BASE_URL`: optional, defaults to `http://localhost:8317`. This is the CLIProxyAPI origin or `/v0/management` base. Override if your proxy is on a different host/port (e.g. `https://proxy.internal.example.com` or `https://proxy.internal.example.com/v0/management`).
-- `USAGE_DB_PATH`: optional, defaults to `./usage.db` (relative to the working directory). For a cron deployment, point it at a stable absolute path like `/var/lib/cliproxy/usage.db`.
-- `USAGE_QUEUE_POP_COUNT`: optional, defaults to `500`. This is the maximum number of queue elements drained per collector run; valid values are 1-10000.
-- `USAGE_HTTP_TIMEOUT_SECONDS`: optional, defaults to `10.0`. Applies to the management API request timeout.
-
-## Cron example (every 5 minutes)
+Records leave CLIProxyAPI's queue when the collector takes them, and records left in the queue longer than its retention window are dropped upstream. Run the collector more often than that window, for example every 5 minutes:
 
 ```cron
-*/5 * * * * CLIPROXY_MANAGEMENT_KEY=REPLACE_WITH_YOUR_KEY USAGE_DB_PATH=/var/lib/cliproxy/usage.db /path/to/uv --directory /path/to/cliproxyapi-usage run cliproxy-usage-collect >> /var/log/cliproxy-usage.log 2>&1
+*/5 * * * * CLIPROXY_MANAGEMENT_KEY=your-key USAGE_DB_PATH=/var/lib/cliproxy/usage.db /path/to/uv --directory /path/to/cliproxyapi-usage run cliproxy-usage-collect >> /var/log/cliproxy-usage.log 2>&1
 ```
 
-The tool writes logs to stderr. Redirecting both stdout and stderr (`2>&1`) to a log file captures everything. Alternatively, omit the redirect and let cron mail you the output.
+Running it again is safe: a record whose timestamp is already stored is skipped. The collector logs to stderr, ending each run with how many records it inserted. Its exit code tells cron or an alert what went wrong:
 
-Choose a cron frequency shorter than the upstream queue retention window. The collector removes records as it drains them, but any records left in CLIProxyAPI's queue longer than its configured retention may be discarded upstream before this tool can store them.
+| Code | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Temporary failure (network, timeout, database or migration error). The next run retries. |
+| 2 | Configuration error, including a database written by a newer version. |
+| 3 | CLIProxyAPI rejected the management key. |
+| 4 | A queue record has an unexpected shape, for example from a CLIProxyAPI older than v7.2.97. |
 
-## Example SQL queries
+Exit codes 1 and 2 caused by the database happen before the queue is touched, so no records are lost.
 
-**Tokens per person (API key) per day**
+## Dashboard
 
-Tokens here match the dashboard: input + output, cached tokens excluded.
-
-```sql
-SELECT
-    api_key                               AS person,
-    date(timestamp)                       AS day,
-    SUM(input_tokens)                     AS input_tokens,
-    SUM(output_tokens)                    AS output_tokens,
-    SUM(input_tokens + output_tokens)     AS tokens
-FROM requests
-GROUP BY api_key, date(timestamp)
-ORDER BY day DESC, tokens DESC;
+```sh
+(cd frontend && bun install && bun run build)
+uv run cliproxy-usage-server
 ```
 
-**Top models by request count**
+Then open `http://127.0.0.1:8318/usage`. The server serves the dashboard and its JSON API (`/api/*`) from one process.
 
-```sql
-SELECT
-    model,
-    COUNT(*)  AS requests
-FROM requests
-GROUP BY model
-ORDER BY requests DESC
-LIMIT 10;
-```
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `USAGE_DB_PATH` | `./usage.db` | The collector's database, opened read-only. |
+| `USAGE_SERVER_HOST` | `127.0.0.1` | Address to listen on. |
+| `USAGE_SERVER_PORT` | `8318` | Port to listen on. |
+| `USAGE_BASE_PATH` | `/` | URL prefix, for example `/api-usage`. |
+| `USAGE_PAGE_TITLE` | `CLIProxyAPI Usage Dashboard` | Browser tab title. Applied at startup, so no rebuild is needed. |
+| `USAGE_KEY_ALIASES` | unset | Path to a JSON file of display names for API keys (see below). |
+| `USAGE_PRICING_URL` | liteLLM's `model_prices_and_context_window.json` on GitHub | Source of model prices. |
+| `USAGE_PRICING_CACHE` | `pricing.json` next to the database | Local copy of the prices. |
+| `USAGE_PRICING_TTL_SECONDS` | `86400` | How often prices are fetched again. |
+| `CLIPROXY_BASE_URL` | unset | Needed for the Limits page, same meaning as for the collector. |
+| `CLIPROXY_MANAGEMENT_KEY` | unset | Needed for the Limits page. |
+| `QUOTA_CACHE_TTL_SECONDS` | `300` | How long a quota answer is reused. |
 
-## Webapp
+**Authentication.** The server does not check who is calling. Put it behind a reverse proxy that does (for example nginx with oauth2-proxy, or Cloudflare Access), and keep the default `127.0.0.1` bind until that proxy is in place. If the dashboard shares a host with CLIProxyAPI, set `USAGE_BASE_PATH=/api-usage` and route only `/api-usage/` to it, so `/api/` stays with CLIProxyAPI.
 
-A local dashboard (`cliproxy-usage-server`) serves a read-only FastAPI backend plus a React SPA built with Vite, backed by the same `usage.db` produced by the collector.
-
-The usage page (`/usage`; `/` redirects there) answers how much each person uses and what share of the total that is; a person is one API key, shown redacted or by its alias from `USAGE_KEY_ALIASES`. It shows spend, tokens, requests, failure rate, and average latency with the change against the previous period of equal length, a share bar and per-row trends for people, a people by model heatmap, and Models / Credentials tabs. Clicking a row opens a detail drawer with that entity's trend and mix. Tokens always mean input + output tokens (cached tokens excluded). Time buckets (hour, day, or week) follow the browser's timezone. Filters and view settings live in the URL, so links are shareable, and opening the page without them restores the last view. Entity colors are fixed by all-time spend, so they do not change with filters.
-
-The JSON endpoints are `/api/usage/summary`, `/api/usage/breakdown`, `/api/usage/options`, and the quota endpoints under `/api/quota/*`. The usage endpoints report only the raw token components (`input_tokens`, `output_tokens`, `cached_tokens`); the dashboard derives tokens from them.
-
-### Server environment variables
-
-| Variable                    | Default                                                | Required      |
-| --------------------------- | ------------------------------------------------------ | ------------- |
-| `USAGE_DB_PATH`             | `./usage.db`                                           | no            |
-| `USAGE_SERVER_HOST`         | `127.0.0.1`                                            | no            |
-| `USAGE_SERVER_PORT`         | `8318`                                                 | no            |
-| `USAGE_BASE_PATH`           | `/`                                                    | no            |
-| `USAGE_PAGE_TITLE`          | `CLIProxyAPI Usage Dashboard`                          | no            |
-| `USAGE_PRICING_CACHE`       | `<db_parent>/pricing.json`                             | no            |
-| `USAGE_PRICING_TTL_SECONDS` | `86400`                                                | no            |
-| `USAGE_PRICING_URL`         | litellm `model_prices_and_context_window.json` raw URL | no            |
-| `USAGE_KEY_ALIASES`         | unset (redacted keys are shown)                        | no            |
-| `CLIPROXY_BASE_URL`         | none                                                   | for `/limits` |
-| `CLIPROXY_MANAGEMENT_KEY`   | none                                                   | for `/limits` |
-| `QUOTA_CACHE_TTL_SECONDS`   | `300`                                                  | no            |
-
-`CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are only needed for the quota API. As for the collector, `CLIPROXY_BASE_URL` may be the CLIProxyAPI origin or its `/v0/management` base. When both are set, the server serves live OAuth quota for Claude and Codex auth-files at `/limits` (UI) and `/api/quota/*` (JSON). Successful quota responses and the auth-file list are cached for `QUOTA_CACHE_TTL_SECONDS` (error envelopes for 60 s); a failure to reach CLIProxyAPI or read a vendor's answer shows as an error on that account's card only; clicking "Refresh" within the TTL returns the cached value rather than re-hitting the upstream OAuth endpoints. When either variable is unset, `/api/quota/*` returns `503` and the UI shows a disabled banner; the dashboard remains available.
-
-Codex window labels come from each window's declared duration. A duration of 18,000 seconds is a five-hour limit, 604,800 seconds is a weekly limit, and missing or unknown durations use a neutral account or named-limit label. The Codex card shows the manual reset count when OpenAI supplies it, including zero, and lists the expiry of each available reset credit (fetched from the `rate-limit-reset-credits` endpoint after the usage call; if that call fails the count still shows with a note that expiry is unavailable). When resets are available, the user must confirm before consuming one; the prompt names the expiry of the earliest-expiring credit, which is the one spent. Claude accounts get a "7-day Fable 5" row read from Anthropic's `limits[]` array (weekly Fable entry, active one preferred). `POST /api/quota/{provider}/{auth_name}/reset` exposes this as a provider capability, returns `405` for registered providers without reset support, and returns `204` after a supported provider accepts the reset. A successful reset invalidates both successful and error quota cache entries, including older in-flight fetches, so the following quota read goes upstream. A failed reset preserves the last cached quota.
-
-`USAGE_PAGE_TITLE` sets the browser tab title (default `CLIProxyAPI Usage Dashboard`). It is injected at runtime, so a single prebuilt `frontend/dist/` can be relabeled by restarting the server, no rebuild required.
-
-`USAGE_KEY_ALIASES` is an optional path to a JSON file that gives people display names. The file holds one JSON object that maps a redacted key, exactly as the UI shows it (for example `sk-*******-alice` or `*******0a1b`), to a display name. Full API keys are never needed in this file. Keys without an entry keep their redacted label. If the file does not exist, the server logs a warning and shows redacted keys; if it is not a JSON object of strings, the server refuses to start. Entries that match no recorded key are logged as warnings once, the first time the dashboard loads its filter options.
+**Names for people.** Each API key counts as one person, shown redacted (for example `sk-*******-alice`). To show names instead, point `USAGE_KEY_ALIASES` at a JSON object that maps the redacted key, exactly as the dashboard shows it, to a name. Full keys are never needed. A missing file logs a warning; a file that is not a JSON object of strings stops the server from starting.
 
 ```json
-{
-  "sk-*******-alice": "Alice",
-  "*******0a1b": "Shared CI key"
-}
+{ "sk-*******-alice": "Alice", "*******0a1b": "Shared CI key" }
 ```
 
-### Cost accuracy
+## How it works
 
-The webapp prices every request on its own with liteLLM's pricing data (`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`, disk-cached locally), following the cost rules of [ccusage](https://github.com/ccusage/ccusage). What to know:
+**Token counting.** Every stored request splits its input into uncached input, cache reads and cache writes, and a cache write can have a 5-minute or a 1-hour lifetime. Output includes reasoning. Wherever the dashboard says "tokens", it means all input plus all output, and the cache hit rate is cache reads divided by input. When CLIProxyAPI cannot split a request's tokens, the request is stored with no tokens: it counts as a request but adds no tokens or cost, and the collector's log line says how many such requests each run had.
 
-- **Long-context rates apply per request.** For models with liteLLM `*_above_200k_tokens` rates, only the tokens of each type above 200k in a single request bill at the higher rate. Models whose higher rates are only published above 272k (such as gpt-5.x), and every OpenAI-accounting model, bill the whole request at the long-context rates once its context passes the threshold. Summed usage never crosses a threshold on its own.
-- **Codex/OpenAI rows** report `cached_tokens` as a *subset* of `input_tokens`, so the cached portion bills at the cache-read rate and only the rest at the input rate. Which models use this accounting comes from liteLLM's `litellm_provider` (`openai`, `azure`), and the models table's cache hit rate uses the same convention.
-- **Fallback rates.** A missing cache-read rate is 10% of the input rate (the full input rate for OpenAI-accounting models), and a missing cache-write rate is 125% of the input rate. liteLLM entries without both a base input and output rate are ignored.
-- **Anthropic rows undercount cache writes.** Upstream CLIProxyAPI collapses Anthropic's `cache_creation_input_tokens` and `cache_read_input_tokens` into a single `cached_tokens` value before pushing to its usage queue. The webapp bills that combined value at the cache-read rate (~10% of input) rather than the cache-creation rate (~125% of input) for the creation portion. Claude totals are therefore a **lower bound** when prompt caching is in use; the magnitude of the undercount depends on your cache-write/read ratio. There is no purely-backend fix because the data needed to split the two buckets is not in the queue payload.
-- **Missing pricing.** When liteLLM has no usable entry for a model, or the model id is empty (shown as `<empty>`), the dashboard renders that model's cost as `n/a` ("missing"). Totals that combine some priced and some unpriced models show the priced part with a trailing `*` ("partial_missing"), so they are a lower bound. The models table shows the rates each model is billed at per 1M tokens (input / output / cache read, with cache write and any long-context rates in the tooltip), the same rates the cost uses, or `n/a` when unpriced. The pricing map is refreshed periodically (`USAGE_PRICING_TTL_SECONDS`, default daily); restart the server or shorten the TTL if you need a newly-released model picked up sooner.
+**Pricing.** The dashboard prices each request on its own with liteLLM's price list, following the rules of [ccusage](https://github.com/ccusage/ccusage). Each token type has its own rate; a 1-hour cache write costs twice the input rate. A missing cache read rate falls back to 10% of the input rate (the full input rate for OpenAI models), and a missing cache write rate to 125%. Long-context rates apply per request, never to summed usage. For a model with higher rates above 200k tokens, only the tokens of each type beyond 200k cost more. OpenAI models, and models whose higher rates start at 272k, instead pay the higher rates on the whole request once its input passes the threshold. A model with no usable price shows its cost as `n/a`, and a total that includes such a model is marked with `*` because it is a lower bound. The models table lists the rates each model was priced at. Prices are fetched again every `USAGE_PRICING_TTL_SECONDS`; restart the server to pick up a new model sooner.
 
-### Production run (single process)
+**The usage page.** For the chosen time range, the page shows spend, tokens, requests, failure rate and average latency, each compared with the previous range of the same length. Below that, people, models and credentials each get a share bar and a table with trends, and a heatmap shows which people use which models. Clicking a row opens a detail panel for that person, model or credential. Filters live in the URL, so a link reproduces the view, and opening the page without filters restores your last view. Time buckets follow your browser's time zone, and each entity keeps one color regardless of filters. The CSV button downloads the current view.
 
-```sh
-cd frontend && bun install && bun run build && cd ..
-uv run cliproxy-usage-server
-```
+**The Limits page.** When `CLIPROXY_BASE_URL` and `CLIPROXY_MANAGEMENT_KEY` are set, `/limits` shows each Claude and Codex account's quota windows, read through CLIProxyAPI's management API. Without them, the page shows a disabled notice and the rest of the dashboard still works. A failure to reach an account shows as an error on that account's card only. Answers are reused for `QUOTA_CACHE_TTL_SECONDS` (errors for 60 seconds), so Refresh within that time does not call the vendor again. Codex cards show the account's manual reset credits and when they expire; using one asks for confirmation, spends the credit that expires first, and fetches that account's quota fresh.
 
-The SPA is built into `frontend/dist/` and served at `/` by default; FastAPI handles `/api/*`. Visit `http://127.0.0.1:8318/usage` (or `/`, which redirects there) and browse.
+**Database version check.** The database records its layout version. The server checks it at startup and refuses to start when the database is older (run the collector once to migrate it) or newer (upgrade the server). The collector migrates an older database itself and refuses a newer one with exit code 2.
 
-To deploy the same build under a URL prefix, set `USAGE_BASE_PATH` before starting the server. For example, `USAGE_BASE_PATH=/api-usage` serves the SPA at `/api-usage/`, client routes such as `/api-usage/usage` and `/api-usage/limits`, static assets at `/api-usage/assets/*`, and JSON endpoints at `/api-usage/api/*`.
+## Upgrading
 
-### Dev workflow
+Upgrade steps for each release are in [CHANGELOG.md](CHANGELOG.md). Upgrading from 0.2.x changes the database: run the 0.3.x collector once before starting the 0.3.x server.
 
-Run backend and frontend in two terminals:
+## Development
+
+Run the server and the Vite dev server side by side, then open `http://localhost:5173`. Vite forwards `/api/*` to the server on port 8318.
 
 ```sh
-# terminal 1
 uv run cliproxy-usage-server
-
-# terminal 2
 cd frontend && bun run dev
 ```
 
-Open `http://localhost:5173`. Root mode is the local default, and Vite proxies `/api/*` to `127.0.0.1:8318` so the SPA stays in sync with the live backend. Hot-module reload works for both TS and SCSS.
+The token columns of the `requests` table can be queried directly; `input_tokens` already includes `cache_read_tokens` and `cache_creation_tokens`:
 
-### Authentication
-
-The server itself does not authenticate its API requests. Deploy it behind a reverse proxy (e.g. nginx + oauth2-proxy, or Cloudflare Access) that enforces authentication before traffic reaches uvicorn. If this dashboard shares a host with CLIProxyAPI, set `USAGE_BASE_PATH=/api-usage` and route only `/api-usage/` to the dashboard/auth proxy; `/api/` then remains available for CLIProxyAPI. The included bind default of `127.0.0.1` ensures the server is only reachable through such a proxy on a single host; override `USAGE_SERVER_HOST` only after you have put that proxy in place.
-
-> **TODO:** CI not configured. When a workflow is added (e.g. `.github/workflows/ci.yml`), include both a Python job (`uv run ruff check`, `uv run basedpyright`, `uv run pytest`) and a frontend job (`bun install --frozen-lockfile && bun test && bun run lint && bun run build`, where `build` runs `tsc -b`).
+```sql
+SELECT api_key, date(timestamp) AS day, SUM(input_tokens + output_tokens) AS tokens
+FROM requests GROUP BY api_key, day ORDER BY day DESC, tokens DESC;
+```

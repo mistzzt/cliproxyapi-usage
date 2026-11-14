@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from cliproxy_usage_collect.db import insert_records, open_db
+from cliproxy_usage_collect.schema_version import (
+    SCHEMA_VERSION,
+    user_version,
+)
 from cliproxy_usage_collect.schemas import RequestRecord
 
 # ---------------------------------------------------------------------------
@@ -23,8 +27,12 @@ def make_record(timestamp: str, failed: bool = False) -> RequestRecord:
         input_tokens=10,
         output_tokens=20,
         reasoning_tokens=0,
-        cached_tokens=5,
+        cache_read_tokens=5,
+        cache_creation_tokens=0,
+        cache_creation_1h_tokens=0,
         total_tokens=30,
+        service_tier=None,
+        ttft_ms=None,
         failed=failed,
     )
 
@@ -65,15 +73,17 @@ def test_open_db_creates_five_indexes(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_open_db_creates_a_db_at_the_current_schema_version(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "usage.db")
+    assert user_version(conn) == SCHEMA_VERSION
+    conn.close()
+
+
 def test_open_db_is_idempotent(tmp_path: Path) -> None:
     """Calling open_db on an existing DB does not error and preserves rows."""
     db_path = tmp_path / "usage.db"
     conn = open_db(db_path)
-    conn.execute(
-        "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("ts-1", "key-a", "model-a", "src", "0", 1, 1, 1, 0, 0, 2, 0),
-    )
-    conn.commit()
+    insert_records(conn, [make_record("ts-1")])
     conn.close()
 
     conn2 = open_db(db_path)
@@ -144,4 +154,26 @@ def test_insert_records_single_transaction(tmp_path: Path) -> None:
     insert_records(conn, records)
     after = conn.total_changes
     assert after - before == 10
+    conn.close()
+
+
+def test_insert_records_round_trips_token_tier_and_ttft_columns(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "usage.db")
+    rec = make_record("ts-1").model_copy(
+        update={
+            "input_tokens": 100,
+            "cache_creation_tokens": 7,
+            "cache_creation_1h_tokens": 3,
+            "reasoning_tokens": 2,
+            "service_tier": "priority",
+            "ttft_ms": 40,
+        }
+    )
+    insert_records(conn, [rec])
+    row = conn.execute(
+        "SELECT input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, "
+        "cache_creation_tokens, cache_creation_1h_tokens, total_tokens, "
+        "service_tier, ttft_ms FROM requests"
+    ).fetchone()
+    assert row == (100, 20, 2, 5, 7, 3, 30, "priority", 40)
     conn.close()

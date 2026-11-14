@@ -98,7 +98,7 @@ export function buildRichRows(rows: readonly RichRowInput[], dim: Dimension, met
       peak: trendPeak(trend),
       parts: mixParts(r.mix, metric),
       fail: failureRate(r.current),
-      cacheHit: dim === 'model' ? cacheHitRate(r.current, r.price?.cached_in_input ?? false) : null,
+      cacheHit: dim === 'model' ? cacheHitRate(r.current) : null,
       price: dim === 'model' ? r.price : null,
       lastUsed: r.current.last_used === null ? null : Date.parse(r.current.last_used),
     };

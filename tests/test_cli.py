@@ -6,15 +6,19 @@ import sqlite3
 from typing import Any
 
 import pytest
+from conftest import db_at_version, forbidden_queue_client, read_version
 
 from cliproxy_usage_collect.cli import main
 from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.queue_client import AuthError, TransientError
+from cliproxy_usage_collect.schema_version import SCHEMA_VERSION
 
 QueueRecord = dict[str, Any]
 
 
-def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> QueueRecord:
+def _queue_payload(
+    timestamp: str, *, model: str = "claude-sonnet-4-5", unclassified: int = 0
+) -> QueueRecord:
     return {
         "timestamp": timestamp,
         "api_key": "api-key-1",
@@ -23,12 +27,22 @@ def _queue_payload(timestamp: str, *, model: str = "claude-sonnet-4-5") -> Queue
         "auth_index": "0",
         "latency_ms": 1234,
         "failed": False,
-        "tokens": {
-            "input_tokens": 10,
-            "output_tokens": 20,
-            "reasoning_tokens": 3,
-            "cached_tokens": 4,
-            "total_tokens": 37,
+        "token_breakdown": {
+            "schema_version": 2,
+            "quality": "unclassified" if unclassified else "complete",
+            "total_tokens": 34 + unclassified,
+            "input": {
+                "total_tokens": 14,
+                "uncached_tokens": 10,
+                "cache_read_tokens": 4,
+                "cache_write_tokens": 0,
+            },
+            "output": {
+                "total_tokens": 20,
+                "non_reasoning_tokens": 17,
+                "reasoning_tokens": 3,
+            },
+            "unclassified_tokens": unclassified,
         },
     }
 
@@ -67,12 +81,14 @@ def test_happy_path_inserts_all_valid_queued_records(env_vars, capsys):
     ).fetchall()
     conn.close()
     assert rows == [
-        ("2026-04-22T19:22:30.001Z", "claude-sonnet-4-5", 37),
-        ("2026-04-22T19:22:31.001Z", "gpt-5", 37),
+        ("2026-04-22T19:22:30.001Z", "claude-sonnet-4-5", 34),
+        ("2026-04-22T19:22:31.001Z", "gpt-5", 34),
     ]
 
     captured = capsys.readouterr()
-    assert captured.err == "inserted 2 new records from 2 queued records\n"
+    assert captured.err == (
+        "inserted 2 new records from 2 queued records, 0 without a token split\n"
+    )
 
 
 def test_second_run_with_duplicate_timestamps_inserts_zero(env_vars, capsys):
@@ -92,7 +108,9 @@ def test_second_run_with_duplicate_timestamps_inserts_zero(env_vars, capsys):
     assert row_count == 2
 
     captured = capsys.readouterr()
-    assert captured.err.endswith("inserted 0 new records from 2 queued records\n")
+    assert captured.err.endswith(
+        "inserted 0 new records from 2 queued records, 0 without a token split\n"
+    )
 
 
 def test_empty_queue_returns_success(env_vars, capsys):
@@ -100,7 +118,9 @@ def test_empty_queue_returns_success(env_vars, capsys):
 
     assert result == 0
     captured = capsys.readouterr()
-    assert captured.err == "inserted 0 new records from 0 queued records\n"
+    assert captured.err == (
+        "inserted 0 new records from 0 queued records, 0 without a token split\n"
+    )
 
 
 def test_missing_management_key(monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
@@ -150,7 +170,40 @@ def test_queue_client_is_not_called_after_config_error(
     monkeypatch.delenv("CLIPROXY_MANAGEMENT_KEY", raising=False)
     monkeypatch.setenv("USAGE_DB_PATH", str(tmp_path / "u.db"))
 
-    def queue_client(cfg: Config) -> list[QueueRecord]:
-        raise AssertionError("queue client should not be called")
+    assert main(queue_client=forbidden_queue_client) == 2
 
-    assert main(queue_client=queue_client) == 2
+
+def test_db_from_a_newer_version_exits_2_before_popping_the_queue(env_vars, capsys):
+    db_at_version(env_vars, SCHEMA_VERSION + 1)
+
+    assert main(queue_client=forbidden_queue_client) == 2
+    assert f"schema version {SCHEMA_VERSION + 1}" in capsys.readouterr().err
+    assert read_version(env_vars) == SCHEMA_VERSION + 1
+
+
+def test_unreadable_db_exits_1_before_popping_the_queue(env_vars, capsys):
+    env_vars.write_text("not a database, but long enough to fail the header check")
+
+    assert main(queue_client=forbidden_queue_client) == 1
+    assert capsys.readouterr().err.startswith("Database error: ")
+
+
+def test_summary_counts_records_without_a_token_split(env_vars, capsys):
+    records = [
+        _queue_payload("2026-04-22T19:22:30.001Z", unclassified=3),
+        _queue_payload("2026-04-22T19:22:31.001Z"),
+    ]
+
+    assert main(queue_client=_queue_client(records)) == 0
+
+    conn = sqlite3.connect(env_vars)
+    rows = conn.execute(
+        "SELECT input_tokens, output_tokens, total_tokens FROM requests "
+        "ORDER BY timestamp"
+    ).fetchall()
+    conn.close()
+    assert rows == [(0, 0, 37), (14, 20, 34)]
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "inserted 2 new records from 2 queued records, 1 without a token split\n"
+    )
