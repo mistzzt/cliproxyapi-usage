@@ -67,6 +67,22 @@ def test_openai_without_long_rates_is_flat() -> None:
     assert request_cost(p, 500_000, 0, 0, 0) == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize(("inp", "expected"), [(200_000, 0.2195), (200_001, 0.401502)])
+def test_openai_200k_rates_bill_whole_request(inp: int, expected: float) -> None:
+    p = ModelPricing(
+        litellm_provider="openai",
+        input_cost_per_token=1e-6,
+        output_cost_per_token=2e-6,
+        input_cost_per_token_above_200k_tokens=2e-6,
+        output_cost_per_token_above_200k_tokens=4e-6,
+    )
+    assert (cost_plan(p).switch, cost_plan(p).threshold) == (True, 200_000)
+    # Past 200k input every type bills long; cache reads at the long input rate.
+    assert request_cost(p, inp, 1_000, 60_000, 40_000, 10_000) == pytest.approx(
+        expected
+    )
+
+
 def test_272k_only_rates_switch_on_whole_context() -> None:
     p = GPT_LONG.model_copy(update={"litellm_provider": "xai"})
     plan = cost_plan(p)
