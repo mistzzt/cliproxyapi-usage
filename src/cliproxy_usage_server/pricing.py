@@ -155,7 +155,7 @@ class Costs(NamedTuple):
 class CostPlan(NamedTuple):
     """How one model bills a request, following ccusage.
 
-    ``aggregate._fetch_cells`` applies it per request in SQL; ``costs`` prices the sums.
+    ``cell_cache.Sums.base`` picks its rule's per-request sums; ``costs`` prices them.
     """
 
     # True: once input_tokens passes the threshold the whole request bills at `above`.
