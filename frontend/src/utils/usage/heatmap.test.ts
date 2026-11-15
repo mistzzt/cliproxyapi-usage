@@ -3,7 +3,7 @@ import type { MixEntry } from '@/types/api';
 import { buildHeatmap, heatBin, personModelCells } from './heatmap';
 
 function mix(key: string, cost: number | null, input: number, output: number): MixEntry {
-  return { key, label: key, cost, input_tokens: input, output_tokens: output, cached_tokens: 7 };
+  return { key, label: key, cost, input_tokens: input, output_tokens: output, cache_read_tokens: 7 };
 }
 
 test('person mix entries become person x model cells valued by the metric', () => {

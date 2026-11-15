@@ -17,13 +17,15 @@ export interface PriceCell {
 
 const rates = (p: UnitPrices) => [p.input, p.output, p.cache_read].map(fmtUnitPrice).join(' / ');
 
-export function priceCell(p: ModelPrice | null): PriceCell {
+/** The cache write rate is listed only when the model has cache writes in the range. */
+export function priceCell(p: ModelPrice | null, hasCacheWrites: boolean): PriceCell {
   if (p === null) return { text: 'n/a', tiered: false, title: null };
   const long = p.long_context;
-  const lines = [`Cache write: ${fmtUnitPrice(p.cache_write)}`];
+  const lines: string[] = [];
   if (long) {
     const scope = long.whole_request ? 'whole request' : 'excess only';
-    lines.unshift(`Above ${long.threshold / 1000}k (${scope}): ${rates(long)}`);
+    lines.push(`Above ${long.threshold / 1000}k (${scope}): ${rates(long)}`);
   }
-  return { text: rates(p), tiered: long !== null, title: lines.join('\n') };
+  if (hasCacheWrites) lines.push(`Cache write: ${fmtUnitPrice(p.cache_write)}`);
+  return { text: rates(p), tiered: long !== null, title: lines.length > 0 ? lines.join('\n') : null };
 }

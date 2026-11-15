@@ -3,7 +3,7 @@ import type { Totals } from '@/types/api';
 import {
   avgLatency,
   cacheHitRate,
-  cacheReadRate,
+  cacheWriteShare,
   failureRateSeries,
   latencySeries,
   longContext,
@@ -12,30 +12,22 @@ import {
   tokens,
 } from './totals';
 
-test('tokens are input + output, cached excluded', () => {
-  const totals = { input_tokens: 300, output_tokens: 30, cached_tokens: 5000 };
+test('tokens are all input + output; cache reads and writes are already in input', () => {
+  const totals = { input_tokens: 300, output_tokens: 30, cache_read_tokens: 200, cache_creation_tokens: 50 };
   expect(tokens(totals)).toBe(330);
-});
-
-test('cache hit rate follows the model accounting the API reports', () => {
-  const t = { input_tokens: 800, cached_tokens: 200 };
-  expect(cacheHitRate(t, true)).toBe(0.25);
-  expect(cacheHitRate(t, false)).toBe(0.2);
-  expect(cacheHitRate({ input_tokens: 0, cached_tokens: 0 }, false)).toBeNull();
 });
 
 const base: Totals = {
   requests: 10,
   failed: 4,
-  input_tokens: 1000,
-  output_tokens: 600,
-  cached_tokens: 3000,
-  reasoning_tokens: 450,
-  uncached_input_tokens: 1000,
+  input_tokens: 4000,
   cache_read_tokens: 3000,
+  cache_creation_tokens: 400,
+  output_tokens: 600,
+  reasoning_tokens: 450,
   cost: 2,
   cost_status: 'live',
-  cost_by_type: { input: 0.5, output: 1, cache_read: 0.5 },
+  cost_by_type: { input: 0.25, output: 1, cache_read: 0.5, cache_creation: 0.25 },
   long_context_cost: 0.5,
   cache_savings: 1,
   latency_ms: 12_000,
@@ -51,9 +43,11 @@ test('latency and output speed count successful requests only', () => {
   expect(outputSpeed({ output_tokens: 0, latency_ms: 0 })).toBeNull();
 });
 
-test('cache read rate and reasoning share', () => {
-  expect(cacheReadRate(base)).toBe(0.75);
-  expect(cacheReadRate({ uncached_input_tokens: 0, cache_read_tokens: 0 })).toBeNull();
+test('cache hit rate, cache write share and reasoning share', () => {
+  expect(cacheHitRate(base)).toBe(0.75);
+  expect(cacheHitRate({ input_tokens: 0, cache_read_tokens: 0 })).toBeNull();
+  expect(cacheWriteShare(base)).toBe(0.1);
+  expect(cacheWriteShare({ input_tokens: 0, cache_creation_tokens: 0 })).toBeNull();
   expect(reasoningShare(base)).toBe(0.75);
   expect(reasoningShare({ output_tokens: 0, reasoning_tokens: 0 })).toBeNull();
 });

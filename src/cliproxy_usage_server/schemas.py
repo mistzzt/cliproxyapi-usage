@@ -14,12 +14,12 @@ from cliproxy_usage_server.db import Bucket
 from cliproxy_usage_server.pricing import CostStatus
 
 Dimension = Literal["person", "model", "credential"]
-TrendMetric = Literal["cost", "input_tokens", "output_tokens", "cached_tokens"]
+TrendMetric = Literal["cost", "input_tokens", "output_tokens", "cache_read_tokens"]
 SeriesMetric = Literal[
     "cost",
     "input_tokens",
     "output_tokens",
-    "cached_tokens",
+    "cache_read_tokens",
     "requests",
     "failed",
     "latency_ms",
@@ -31,27 +31,24 @@ class CostByType(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    input: float
+    input: float  # uncached input
     output: float
     cache_read: float
+    cache_creation: float
 
 
 class Totals(BaseModel):
-    """Aggregate usage over a window; ratios such as "tokens" are a frontend concern.
-
-    Uncached input and cache read tokens follow each model's token accounting.
-    """
+    """Aggregate usage over a window; ratios such as "tokens" are a frontend concern."""
 
     model_config = ConfigDict(frozen=True)
 
     requests: int
     failed: int
-    input_tokens: int
-    output_tokens: int
-    cached_tokens: int
-    reasoning_tokens: int
-    uncached_input_tokens: int
-    cache_read_tokens: int
+    input_tokens: int  # all input: uncached + cache read + cache creation
+    cache_read_tokens: int  # part of input_tokens
+    cache_creation_tokens: int  # part of input_tokens
+    output_tokens: int  # all output, reasoning included
+    reasoning_tokens: int  # part of output_tokens
     cost: float | None
     cost_status: CostStatus
     cost_by_type: CostByType | None  # None exactly when cost is None, as below
@@ -84,7 +81,7 @@ class MixEntry(BaseModel):
     cost: float | None
     input_tokens: int
     output_tokens: int
-    cached_tokens: int
+    cache_read_tokens: int
 
 
 class UnitPrices(BaseModel):
@@ -109,7 +106,6 @@ class ModelPrice(UnitPrices):
     """The rates cost is computed with (base tier, no speed multiplier)."""
 
     long_context: LongContextPrice | None  # None when the model has no long tier
-    cached_in_input: bool  # OpenAI accounting: cached tokens are a subset of input
 
 
 class BreakdownRow(BaseModel):

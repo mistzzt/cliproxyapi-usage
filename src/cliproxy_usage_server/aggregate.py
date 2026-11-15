@@ -10,7 +10,7 @@ independent of the chosen bucket.
 People are redacted API keys (raw keys that redact alike merge into one
 person); credentials are redacted sources. Responses carry only raw token
 components (the frontend derives "tokens"); the stored ``total_tokens`` column
-is never summed. Query helpers return the response DTOs from ``schemas.py``
+is never read. Query helpers return the response DTOs from ``schemas.py``
 directly.
 """
 
@@ -34,6 +34,7 @@ from cliproxy_usage_server.db import (
     effective_bucket,
 )
 from cliproxy_usage_server.pricing import (
+    Amounts,
     CostPlan,
     Costs,
     CostStatus,
@@ -106,10 +107,10 @@ class _Cell:
     failed: int
     input_tokens: int
     output_tokens: int
-    cached_tokens: int
     reasoning_tokens: int
-    uncached_input_tokens: int
     cache_read_tokens: int
+    cache_creation_tokens: int
+    cache_creation_1h_tokens: int
     ok_latency_sum: int
     long_requests: int
     last_used: datetime
@@ -139,15 +140,16 @@ class _Acc:
     failed: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cached_tokens: int = 0
     reasoning_tokens: int = 0
-    uncached_input_tokens: int = 0
     cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
     ok_latency_sum: int = 0
     long_requests: int = 0
     cost_input: float = 0.0
     cost_output: float = 0.0
     cost_cache_read: float = 0.0
+    cost_cache_creation: float = 0.0
     long_cost: float = 0.0
     cache_savings: float = 0.0
     last_used: datetime | None = None
@@ -158,15 +160,16 @@ class _Acc:
         self.failed += c.failed
         self.input_tokens += c.input_tokens
         self.output_tokens += c.output_tokens
-        self.cached_tokens += c.cached_tokens
         self.reasoning_tokens += c.reasoning_tokens
-        self.uncached_input_tokens += c.uncached_input_tokens
         self.cache_read_tokens += c.cache_read_tokens
+        self.cache_creation_tokens += c.cache_creation_tokens
+        self.cache_creation_1h_tokens += c.cache_creation_1h_tokens
         self.ok_latency_sum += c.ok_latency_sum
         self.long_requests += c.long_requests
         self.cost_input += c.costs.input
         self.cost_output += c.costs.output
         self.cost_cache_read += c.costs.cache_read
+        self.cost_cache_creation += c.costs.cache_creation
         self.long_cost += c.long_cost
         self.cache_savings += c.cache_savings
         self.statuses.add(c.status)
@@ -180,7 +183,12 @@ class _Acc:
 
     @property
     def cost(self) -> float:
-        return self.cost_input + self.cost_output + self.cost_cache_read
+        return (
+            self.cost_input
+            + self.cost_output
+            + self.cost_cache_read
+            + self.cost_cache_creation
+        )
 
     def cost_value(self, has_pricing: bool) -> float | None:
         return None if self.cost_status(has_pricing) == "missing" else self.cost
@@ -191,11 +199,10 @@ class _Acc:
             requests=self.requests,
             failed=self.failed,
             input_tokens=self.input_tokens,
-            output_tokens=self.output_tokens,
-            cached_tokens=self.cached_tokens,
-            reasoning_tokens=self.reasoning_tokens,
-            uncached_input_tokens=self.uncached_input_tokens,
             cache_read_tokens=self.cache_read_tokens,
+            cache_creation_tokens=self.cache_creation_tokens,
+            output_tokens=self.output_tokens,
+            reasoning_tokens=self.reasoning_tokens,
             cost=self.cost if priced else None,
             cost_status=self.cost_status(has_pricing),
             cost_by_type=(
@@ -203,6 +210,7 @@ class _Acc:
                     input=self.cost_input,
                     output=self.cost_output,
                     cache_read=self.cost_cache_read,
+                    cache_creation=self.cost_cache_creation,
                 )
                 if priced
                 else None
@@ -279,23 +287,20 @@ def _fetch_cells(
         m: cost_plan(entry) for m, (entry, _) in resolved.items() if entry is not None
     }
     # The NULL row keeps VALUES non-empty; unpriced models get no plan row.
-    plan_rows = ", ".join(["(NULL, 0, 0, 0)", *["(?, ?, ?, ?)"] * len(plans)])
-    plan_params = [
-        v for m, p in plans.items() for v in (m, p.openai, p.switch, p.threshold)
-    ]
+    plan_rows = ", ".join(["(NULL, 0, 0)", *["(?, ?, ?)"] * len(plans)])
+    plan_params = [v for m, p in plans.items() for v in (m, p.switch, p.threshold)]
     where, params = _where(window, filters)
     rows = conn.execute(
         f"""
-        WITH plan(plan_model, openai, switch, threshold) AS (VALUES {plan_rows}),
+        WITH plan(plan_model, switch, threshold) AS (VALUES {plan_rows}),
         r AS (
             SELECT
                 requests.*,
                 COALESCE(switch, 0) AS switch,
                 COALESCE(threshold, 0) AS t,
-                CASE WHEN openai THEN MIN(cached_tokens, input_tokens)
-                     ELSE cached_tokens END AS cr,
-                input_tokens - CASE WHEN openai THEN MIN(cached_tokens, input_tokens)
-                                    ELSE 0 END AS inp
+                input_tokens - cache_read_tokens - cache_creation_tokens
+                    AS uncached_input,
+                cache_creation_tokens - cache_creation_1h_tokens AS cache_creation_5m
             FROM requests LEFT JOIN plan ON plan_model = model
             {where}
         )
@@ -304,20 +309,31 @@ def _fetch_cells(
             api_key,
             model,
             source,
-            COUNT(*),
-            SUM(failed),
-            SUM(input_tokens),
-            SUM(output_tokens),
-            SUM(cached_tokens),
-            SUM(reasoning_tokens),
-            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END),
-            SUM(CASE WHEN NOT failed AND {_LONG_REQUEST} THEN 1 ELSE 0 END),
-            MAX(timestamp),
-            SUM(inp),
-            SUM(cr),
-            SUM({_base_rate("inp")}),
-            SUM({_base_rate("output_tokens")}),
-            SUM({_base_rate("cr")})
+            COUNT(*) AS requests,
+            SUM(failed) AS failed,
+            SUM(input_tokens) AS input_tokens,
+            SUM(reasoning_tokens) AS reasoning_tokens,
+            SUM(CASE WHEN failed THEN 0 ELSE latency_ms END) AS ok_latency_sum,
+            -- Whole-request plans: input passes the threshold; marginal plans: any
+            -- one token type exceeds it.
+            SUM(
+                CASE WHEN NOT failed AND (
+                    CASE WHEN switch THEN input_tokens > t
+                    ELSE MAX(uncached_input, output_tokens, cache_creation_5m,
+                             cache_read_tokens, cache_creation_1h_tokens) > t END
+                ) THEN 1 ELSE 0 END
+            ) AS long_requests,
+            MAX(timestamp) AS last_used,
+            SUM(uncached_input) AS total_input,
+            SUM(output_tokens) AS total_output,
+            SUM(cache_creation_5m) AS total_cache_creation_5m,
+            SUM(cache_read_tokens) AS total_cache_read,
+            SUM(cache_creation_1h_tokens) AS total_cache_creation_1h,
+            SUM({_base_rate("uncached_input")}) AS base_input,
+            SUM({_base_rate("output_tokens")}) AS base_output,
+            SUM({_base_rate("cache_creation_5m")}) AS base_cache_creation_5m,
+            SUM({_base_rate("cache_read_tokens")}) AS base_cache_read,
+            SUM({_base_rate("cache_creation_1h_tokens")}) AS base_cache_creation_1h
         FROM r
         GROUP BY slice_no, api_key, model, source
         """,
@@ -332,27 +348,42 @@ def _fetch_cells(
         api_key,
         model,
         source,
-        req,
+        requests,
         failed,
-        inp,
-        out,
-        cac,
-        rea,
-        lat,
-        long_req,
-        last,
-        cost_inp,
-        cost_cr,
-        base_inp,
-        base_out,
-        base_cr,
+        input_tokens,
+        reasoning_tokens,
+        ok_latency_sum,
+        long_requests,
+        last_used,
+        total_input,
+        total_output,
+        total_cache_creation_5m,
+        total_cache_read,
+        total_cache_creation_1h,
+        base_input,
+        base_output,
+        base_cache_creation_5m,
+        base_cache_read,
+        base_cache_creation_1h,
     ) in rows:
         _, status = resolved[model]
         plan = plans.get(model)
-        base = (base_inp, base_out, 0, base_cr)
-        above = (cost_inp - base_inp, out - base_out, 0, cost_cr - base_cr)
+        base = Amounts(
+            input=base_input,
+            output=base_output,
+            cache_creation_5m=base_cache_creation_5m,
+            cache_read=base_cache_read,
+            cache_creation_1h=base_cache_creation_1h,
+        )
+        above = Amounts(
+            input=total_input - base_input,
+            output=total_output - base_output,
+            cache_creation_5m=total_cache_creation_5m - base_cache_creation_5m,
+            cache_read=total_cache_read - base_cache_read,
+            cache_creation_1h=total_cache_creation_1h - base_cache_creation_1h,
+        )
         if plan is None or not plan.has_long_tier:
-            long_req = 0
+            long_requests = 0
         if api_key not in people:
             people[api_key] = redact_key(api_key)
         if source not in credentials:
@@ -363,21 +394,23 @@ def _fetch_cells(
                 person=people[api_key],
                 model=keys[model],
                 credential=credentials[source],
-                requests=req,
+                requests=requests,
                 failed=failed,
-                input_tokens=inp,
-                output_tokens=out,
-                cached_tokens=cac,
-                reasoning_tokens=rea,
-                uncached_input_tokens=cost_inp,
-                cache_read_tokens=cost_cr,
-                ok_latency_sum=lat,
-                long_requests=long_req,
-                last_used=_parse_ts(last),
+                input_tokens=input_tokens,
+                output_tokens=total_output,
+                reasoning_tokens=reasoning_tokens,
+                cache_read_tokens=total_cache_read,
+                cache_creation_tokens=total_cache_creation_5m + total_cache_creation_1h,
+                cache_creation_1h_tokens=total_cache_creation_1h,
+                ok_latency_sum=ok_latency_sum,
+                long_requests=long_requests,
+                last_used=_parse_ts(last_used),
                 costs=plan.costs(base, above) if plan is not None else _NO_COST,
                 long_cost=plan.long_cost(above) if plan is not None else 0.0,
                 cache_savings=(
-                    plan.cache_savings(base[3], above[3]) if plan is not None else 0.0
+                    plan.cache_savings(base.cache_read, above.cache_read)
+                    if plan is not None
+                    else 0.0
                 ),
                 status=status,
                 plan=plan,
@@ -386,19 +419,13 @@ def _fetch_cells(
     return cells
 
 
-# A request has tokens at the long rate: whole-request plans past the threshold,
-# marginal plans when any one token type exceeds it.
-_LONG_REQUEST = (
-    "(CASE WHEN switch THEN inp + cr > t ELSE MAX(inp, output_tokens, cr) > t END)"
-)
-
 _NO_COST = Costs(0.0, 0.0, 0.0, 0.0)
 
 
 def _base_rate(column: str) -> str:
     """Per-request share of *column* billed at its CostPlan's base rate."""
     return (
-        f"CASE WHEN switch THEN (CASE WHEN inp + cr > t THEN 0 ELSE {column} END) "
+        f"CASE WHEN switch THEN (CASE WHEN input_tokens > t THEN 0 ELSE {column} END) "
         f"ELSE MIN({column}, t) END"
     )
 
@@ -488,7 +515,7 @@ def query_summary(
         "cost": [0.0] * n,
         "input_tokens": [0.0] * n,
         "output_tokens": [0.0] * n,
-        "cached_tokens": [0.0] * n,
+        "cache_read_tokens": [0.0] * n,
         "requests": [0.0] * n,
         "failed": [0.0] * n,
         "latency_ms": [0.0] * n,
@@ -501,7 +528,7 @@ def query_summary(
         series["cost"][pos] += c.cost
         series["input_tokens"][pos] += c.input_tokens
         series["output_tokens"][pos] += c.output_tokens
-        series["cached_tokens"][pos] += c.cached_tokens
+        series["cache_read_tokens"][pos] += c.cache_read_tokens
         series["requests"][pos] += c.requests
         series["failed"][pos] += c.failed
         series["latency_ms"][pos] += c.ok_latency_sum
@@ -532,7 +559,7 @@ def _unit_prices(rates: Rates) -> UnitPrices:
         input=m(rates.input),
         output=m(rates.output),
         cache_read=m(rates.cache_read),
-        cache_write=m(rates.cache_creation),
+        cache_write=m(rates.cache_creation_5m),
     )
 
 
@@ -541,18 +568,17 @@ def _model_price(plan: CostPlan | None) -> ModelPrice | None:
     if plan is None:
         return None
     long_context = (
-        None
-        if plan.above == plan.base
-        else LongContextPrice(
+        LongContextPrice(
             **_unit_prices(plan.above).model_dump(),
             threshold=plan.threshold,
             whole_request=plan.switch,
         )
+        if plan.has_long_tier
+        else None
     )
     return ModelPrice(
         **_unit_prices(plan.base).model_dump(),
         long_context=long_context,
-        cached_in_input=plan.openai,
     )
 
 
@@ -579,7 +605,7 @@ def query_breakdown(
             "cost": [0.0] * n,
             "input_tokens": [0.0] * n,
             "output_tokens": [0.0] * n,
-            "cached_tokens": [0.0] * n,
+            "cache_read_tokens": [0.0] * n,
         }
     )
     plans: dict[str, CostPlan | None] = {}
@@ -594,7 +620,7 @@ def query_breakdown(
             t["cost"][pos] += c.cost
             t["input_tokens"][pos] += c.input_tokens
             t["output_tokens"][pos] += c.output_tokens
-            t["cached_tokens"][pos] += c.cached_tokens
+            t["cache_read_tokens"][pos] += c.cache_read_tokens
 
     prev_window = window.previous()
     prev = (
@@ -624,7 +650,7 @@ def query_breakdown(
                         cost=parts[k].cost_value(has_pricing),
                         input_tokens=parts[k].input_tokens,
                         output_tokens=parts[k].output_tokens,
-                        cached_tokens=parts[k].cached_tokens,
+                        cache_read_tokens=parts[k].cache_read_tokens,
                     )
                     for k in sorted(parts, key=lambda k: parts[k].rank(k))
                 ],
@@ -673,7 +699,9 @@ EXPORT_COLUMNS = (
     "failed",
     "input_tokens",
     "output_tokens",
-    "cached_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "cache_creation_1h_tokens",
     "reasoning_tokens",
     "cost",
 )
@@ -714,7 +742,9 @@ def query_export(
                 acc.failed,
                 acc.input_tokens,
                 acc.output_tokens,
-                acc.cached_tokens,
+                acc.cache_read_tokens,
+                acc.cache_creation_tokens,
+                acc.cache_creation_1h_tokens,
                 acc.reasoning_tokens,
                 repr(acc.cost) if priced[model] else "",
             )

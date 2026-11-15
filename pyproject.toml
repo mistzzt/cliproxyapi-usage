@@ -1,6 +1,6 @@
 [project]
 name = "cliproxy-usage"
-version = "0.2.0"
+version = "0.3.0"
 description = "CLI proxy usage reporter"
 authors = [
     { name = "Ziteng Wang", email = "z@wzt.me" }

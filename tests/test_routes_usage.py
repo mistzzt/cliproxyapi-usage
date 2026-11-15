@@ -51,7 +51,7 @@ def test_summary_totals_and_previous(client: TestClient) -> None:
     cur = body["current"]
     assert (cur["requests"], cur["input_tokens"], cur["output_tokens"]) == (
         5,
-        8300,
+        8900,
         1730,
     )
     assert cur["cost"] == pytest.approx(COST_TOTAL)
@@ -71,7 +71,7 @@ def test_breakdowns_and_person_mix_sum_to_totals(client: TestClient) -> None:
             )
     people = _get(client, f"/api/usage/breakdown?dim=person&{Q}")["rows"]
     cells = [m for r in people for m in r["mix"]]
-    assert sum(c["input_tokens"] for c in cells) == 8300
+    assert sum(c["input_tokens"] for c in cells) == 8900
     assert sum(c["output_tokens"] for c in cells) == 1730
 
 
@@ -163,14 +163,6 @@ def test_price_only_on_model_rows(client: TestClient) -> None:
         1.25,
         None,
     )
-    # Token accounting comes from the pricing provider, not the model name.
-    assert (
-        price["claude-t"]["cached_in_input"],
-        price["gpt-t"]["cached_in_input"],
-    ) == (
-        False,
-        True,
-    )
     people = _get(client, f"/api/usage/breakdown?dim=person&{Q}")["rows"]
     assert all(r["price"] is None for r in people)
 
@@ -261,7 +253,7 @@ def test_tiers_apply_per_request_not_per_cell(tmp_path: pathlib.Path) -> None:
             "sk-a-bob",
             "claude-x",
             "al@x.io",
-            50_000,
+            150_000,
             1_000,
             100_000,
         )

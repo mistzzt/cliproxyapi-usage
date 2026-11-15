@@ -16,7 +16,9 @@ def test_open_ro_read_only_rejects_write(synthetic_db_path: Path) -> None:
     conn = open_ro(synthetic_db_path)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         conn.execute(
-            "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO requests (timestamp, api_key, model, source, auth_index, "
+            "latency_ms, input_tokens, output_tokens, reasoning_tokens, "
+            "cache_read_tokens, total_tokens, failed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             ("ts", "key", "model", "src", "auth", 0, 0, 0, 0, 0, 0, 0),
         )
     conn.close()

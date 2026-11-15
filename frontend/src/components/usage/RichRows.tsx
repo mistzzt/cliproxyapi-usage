@@ -185,7 +185,7 @@ function Row({
 }
 
 function PriceTd({ row }: { row: RichRow }) {
-  const cell = priceCell(row.price);
+  const cell = priceCell(row.price, row.totals.cache_creation_tokens > 0);
   return (
     <td className={s.num} title={cell.title ?? undefined}>
       {cell.text}

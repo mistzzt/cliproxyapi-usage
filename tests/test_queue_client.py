@@ -13,6 +13,8 @@ from cliproxy_usage_collect.config import Config
 from cliproxy_usage_collect.queue_client import (
     AuthError,
     TransientError,
+    UnsupportedVersionError,
+    parse_version,
     pop_usage_records,
 )
 
@@ -59,13 +61,11 @@ def test_gets_usage_queue_with_count_and_bearer_token():
         http_client_factory=_client_factory(handler),
     )
 
-    assert len(seen) == 1
-    request = seen[0]
-    assert request.method == "GET"
-    assert str(request.url) == (
-        "http://proxy.example:8317/v0/management/usage-queue?count=37"
-    )
-    assert request.headers["authorization"] == "Bearer secret"
+    assert [(r.method, str(r.url)) for r in seen] == [
+        ("GET", "http://proxy.example:8317/v0/management/usage-statistics-enabled"),
+        ("GET", "http://proxy.example:8317/v0/management/usage-queue?count=37"),
+    ]
+    assert all(r.headers["authorization"] == "Bearer secret" for r in seen)
     assert records == [{"timestamp": "2026-01-01T00:00:00Z"}]
 
 
@@ -99,7 +99,7 @@ def test_base_url_normalization(base_url: str, expected: str):
     )
 
     assert records == []
-    assert str(seen[0].url) == expected
+    assert str(seen[-1].url) == expected
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -161,3 +161,68 @@ def test_non_object_items_map_to_transient_error():
 
     with pytest.raises(TransientError):
         pop_usage_records(_cfg(), http_client_factory=_client_factory(handler))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("8.0.72", (8, 0, 72)),
+        ("v8.0.72", (8, 0, 72)),
+        ("v8.0.72-3-gabc1234-dirty", (8, 0, 72)),
+        ("v6.5.29-0", (6, 5, 29)),
+        ("7.2.100", (7, 2, 100)),
+        ("abc1234", None),
+        ("dev", None),
+        ("", None),
+    ],
+)
+def test_parse_version(value: str, expected: tuple[int, int, int] | None):
+    assert parse_version(value) == expected
+
+
+def _versioned_handler(
+    version: str | None, seen: list[str]
+) -> Callable[[httpx.Request], httpx.Response]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        headers = {} if version is None else {"X-CPA-VERSION": version}
+        return httpx.Response(200, json=[], headers=headers)
+
+    return handler
+
+
+@pytest.mark.parametrize("version", ["v7.2.96", "7.1.30", "v6.5.29-0"])
+def test_old_proxy_raises_before_popping_the_queue(version: str):
+    seen: list[str] = []
+
+    with pytest.raises(UnsupportedVersionError, match=version):
+        pop_usage_records(
+            _cfg(),
+            http_client_factory=_client_factory(_versioned_handler(version, seen)),
+        )
+
+    assert seen == ["/v0/management/usage-statistics-enabled"]
+
+
+@pytest.mark.parametrize("version", ["7.2.97", "v8.0.72-3-gabc1234-dirty"])
+def test_supported_proxy_pops_without_warning(version: str, capsys):
+    seen: list[str] = []
+
+    pop_usage_records(
+        _cfg(), http_client_factory=_client_factory(_versioned_handler(version, seen))
+    )
+
+    assert seen[-1] == "/v0/management/usage-queue"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("version", [None, "", "dev", "abc1234"])
+def test_unreadable_version_warns_and_pops(version: str | None, capsys):
+    seen: list[str] = []
+
+    pop_usage_records(
+        _cfg(), http_client_factory=_client_factory(_versioned_handler(version, seen))
+    )
+
+    assert seen[-1] == "/v0/management/usage-queue"
+    assert capsys.readouterr().err.startswith("Warning: cannot read")
