@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - The server keeps usage sums in memory, so usage pages load in well under a second instead of re-reading all of history (an all-time page on about 1.5 million requests went from about 13 s to about 80 ms). It takes about 30 MiB for those 1.5 million requests. `USAGE_CELL_CACHE=0` turns it off.
 
